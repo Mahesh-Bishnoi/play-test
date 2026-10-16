@@ -6,11 +6,10 @@ import type { Browser, BrowserContext, Page } from "playwright";
 
 import type {
   RunnerCancelPayload,
-  RunnerRerunFailedPayload,
   RunnerResumePayload,
   RunnerRunSinglePayload,
-  RunnerRunSuitePayload,
 } from "../shared/ipc-contract.js";
+import { tryWriteSuiteHtmlReport } from "./reports.js";
 import {
   RunFinishedEvent,
   RunLogEvent,
@@ -83,6 +82,12 @@ export interface RunnerDeps {
   artifactsRoot: string;
   generateId?: () => string;
   now?: () => number;
+  /**
+   * Wired by main.ts to the SuiteRunner's active flag so a single-case run
+   * refuses to start while a parallel suite owns the browsers (and vice
+   * versa). Absent in unit tests, where each runner is exercised alone.
+   */
+  isSuiteActive?: () => boolean;
 }
 
 /** Thrown when a second run starts while one session is still open. */
@@ -98,14 +103,6 @@ export class ContextClosedError extends Error {
   constructor() {
     super("context closed — full re-run required");
     this.name = "ContextClosedError";
-  }
-}
-
-/** Suite runs (parallel, video/report aggregation) land in M6 — explicit, not silent. */
-export class SuiteRunsPendingM6Error extends Error {
-  constructor() {
-    super("suite runs land in M6 — single-case runs only in M5");
-    this.name = "SuiteRunsPendingM6Error";
   }
 }
 
@@ -272,6 +269,7 @@ export class SingleCaseRunner {
   private readonly artifactsRoot: string;
   private readonly generateId: () => string;
   private readonly now: () => number;
+  private readonly isSuiteActive: () => boolean;
   private session: LiveSession | null = null;
 
   constructor(db: AppDatabase, deps: RunnerDeps) {
@@ -281,12 +279,18 @@ export class SingleCaseRunner {
     this.artifactsRoot = deps.artifactsRoot;
     this.generateId = deps.generateId ?? randomUUID;
     this.now = deps.now ?? Date.now;
+    this.isSuiteActive = deps.isSuiteActive ?? (() => false);
+  }
+
+  /** True while a single-case session (live or paused) holds its context. */
+  hasActiveSession(): boolean {
+    return this.session !== null;
   }
 
   /** Start a supervised (headed, pausable) or unsupervised (headless) single-case run. */
   runSingle(input: RunnerRunSinglePayload): StartedRun {
     const parsed = RunnerRunSingleSchema.parse(input);
-    if (this.session !== null) {
+    if (this.session !== null || this.isSuiteActive()) {
       throw new RunAlreadyActiveError();
     }
     const testCase = getCase(this.db, parsed.caseId);
@@ -414,14 +418,6 @@ export class SingleCaseRunner {
       await this.settleCancel(session);
     }
     return null;
-  }
-
-  runSuite(_input: RunnerRunSuitePayload): never {
-    throw new SuiteRunsPendingM6Error();
-  }
-
-  rerunFailed(_input: RunnerRerunFailedPayload): never {
-    throw new SuiteRunsPendingM6Error();
   }
 
   // --- Execution loop ---------------------------------------------------------
@@ -691,6 +687,11 @@ export class SingleCaseRunner {
     suiteRunId: string,
     summary: { total: number; passed: number; failed: number; skipped: number },
   ): void {
+    // Report write is evidence, not verdict: best-effort before the finished
+    // event so the report page can link it immediately; a write failure warns.
+    tryWriteSuiteHtmlReport(this.db, this.artifactsRoot, suiteRunId, (msg) => {
+      this.log("warn", msg);
+    });
     this.emit("run:finished", RunFinishedEvent.parse({ suiteRunId, summary }));
   }
 

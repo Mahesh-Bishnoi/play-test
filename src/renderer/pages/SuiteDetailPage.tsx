@@ -26,6 +26,8 @@ interface Props {
   projectId: string;
   /** WS3 hook: open a case in the workflow editor (CaseDetailPage). */
   onOpenCase?: (caseId: string) => void;
+  /** WS6 hook: open a suite-run report (RunReportPage). */
+  onViewReport?: (suiteRunId: string) => void;
 }
 
 /**
@@ -33,7 +35,11 @@ interface Props {
  * checkboxes with search + select-all/none + save, and an unsupervised-only
  * pre-run confirm dialog. Actual execution lands in WS5 (M5/M6).
  */
-export default function SuiteDetailPage({ projectId, onOpenCase }: Props): React.JSX.Element {
+export default function SuiteDetailPage({
+  projectId,
+  onOpenCase,
+  onViewReport,
+}: Props): React.JSX.Element {
   const [suites, setSuites] = useState<Suite[]>([]);
   const [suiteId, setSuiteId] = useState<string | null>(null);
   const [cases, setCases] = useState<TestCase[]>([]);
@@ -46,6 +52,8 @@ export default function SuiteDetailPage({ projectId, onOpenCase }: Props): React
   const [newSuiteName, setNewSuiteName] = useState("");
   const [newCaseName, setNewCaseName] = useState("");
   const [runDialogOpen, setRunDialogOpen] = useState(false);
+  const [runBusy, setRunBusy] = useState(false);
+  const [lastSuiteRunId, setLastSuiteRunId] = useState<string | null>(null);
 
   useEffect(() => {
     setError(null);
@@ -222,6 +230,27 @@ export default function SuiteDetailPage({ projectId, onOpenCase }: Props): React
 
   const selectedSuite = suites.find((s) => s.id === suiteId) ?? null;
   const selectedCases = cases.filter((c) => checked.has(c.id));
+
+  const confirmRunSuite = (): void => {
+    if (selectedSuite === null || checked.size === 0) {
+      return;
+    }
+    setRunBusy(true);
+    setNotice(null);
+    api
+      .runSuite(selectedSuite.id, [...checked])
+      .then(({ suiteRunId: runId }) => {
+        setLastSuiteRunId(runId);
+        setRunDialogOpen(false);
+        setNotice(`Suite run started (${selectedCases.length} case(s)). Report: ${runId}`);
+      })
+      .catch((err: unknown) => {
+        setError(errorMessage(err));
+      })
+      .finally(() => {
+        setRunBusy(false);
+      });
+  };
 
   return (
     <section aria-label="Suites and cases" style={{ display: "grid", gap: 16 }}>
@@ -472,32 +501,42 @@ export default function SuiteDetailPage({ projectId, onOpenCase }: Props): React
                 ))}
               </ul>
               <p style={{ color: "#555" }}>
-                Headless, never pauses. Execution lands with the WS5 runner (M5/M6) — this dialog
-                confirms the M2 selection set.
+                Headless and parallel, never pauses. Each case runs independently; a failure skips
+                only that case&apos;s remaining steps.
               </p>
               <div style={{ display: "flex", gap: 8 }}>
                 <button
                   type="button"
-                  onClick={() => {
-                    setRunDialogOpen(false);
-                    setNotice(
-                      `Pre-run confirmed for ${selectedCases.length} case(s). Runner lands in M5/M6.`,
-                    );
-                  }}
-                  style={buttonStyle()}
+                  onClick={confirmRunSuite}
+                  disabled={runBusy}
+                  style={buttonStyle(runBusy)}
                 >
-                  Confirm ({selectedCases.length})
+                  {runBusy ? "Starting…" : `Confirm (${selectedCases.length})`}
                 </button>
                 <button
                   type="button"
                   onClick={() => {
                     setRunDialogOpen(false);
                   }}
-                  style={buttonStyle()}
+                  disabled={runBusy}
+                  style={buttonStyle(runBusy)}
                 >
                   Cancel
                 </button>
               </div>
+            </div>
+          )}
+          {lastSuiteRunId !== null && onViewReport !== undefined && (
+            <div style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  onViewReport(lastSuiteRunId);
+                }}
+                style={buttonStyle()}
+              >
+                View last report
+              </button>
             </div>
           )}
         </div>

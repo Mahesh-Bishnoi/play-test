@@ -136,6 +136,26 @@ export const api = {
   cancelRun(suiteRunId: string): Promise<void> {
     return invoke("runner:cancel", { suiteRunId }, () => undefined);
   },
+
+  // Parallel suites (WS6/M6; unsupervised only, payloads frozen in v1).
+  runSuite(suiteId: string, caseIds: string[]): Promise<{ suiteRunId: string }> {
+    return invoke("runner:runSuite", { suiteId, caseIds, mode: "unsupervised" }, (raw) =>
+      z.object({ suiteRunId: z.string() }).parse(raw),
+    );
+  },
+  rerunFailed(suiteRunId: string): Promise<{ suiteRunId: string }> {
+    return invoke("runner:rerunFailed", { suiteRunId }, (raw) =>
+      z.object({ suiteRunId: z.string() }).parse(raw),
+    );
+  },
+
+  // Reports (WS6/M6; per suite run, payloads frozen in v1).
+  getReportHtml(suiteRunId: string): Promise<string> {
+    return invoke("report:getHtml", { suiteRunId }, (raw) => z.string().parse(raw));
+  },
+  exportReportPdf(suiteRunId: string): Promise<string> {
+    return invoke("report:exportPdf", { suiteRunId }, (raw) => z.string().parse(raw));
+  },
   onRunStepUpdate(listener: (event: RunStepUpdate) => void): () => void {
     return window.playtest.on("run:step-update", (raw) => {
       listener(RunStepUpdateEvent.parse(raw));

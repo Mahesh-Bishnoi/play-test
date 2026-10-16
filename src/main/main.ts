@@ -7,9 +7,11 @@ import { createDatabase, defaultDbPath } from "./db.js";
 import {
   registerCrudHandlers,
   registerRecorderHandlers,
+  registerReportHandlers,
   registerRunnerHandlers,
 } from "./ipc-register.js";
 import { SingleCaseRunner, playwrightLauncher } from "./runner.js";
+import { SuiteRunner } from "./suite-runner.js";
 import { defaultArtifactsRoot } from "./artifacts.js";
 
 // Forge's vite plugin injects these globals at build/dev time.
@@ -52,6 +54,8 @@ void app.whenReady().then(() => {
   registerRecorderHandlers((channel, listener) => {
     ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
   });
+  const artifactsRoot = defaultArtifactsRoot();
+  let suiteRunner: SuiteRunner;
   const runner = new SingleCaseRunner(handle.db, {
     launchBrowser: playwrightLauncher(),
     emit: (channel, payload) => {
@@ -59,11 +63,33 @@ void app.whenReady().then(() => {
         win.webContents.send(channel, payload);
       }
     },
-    artifactsRoot: defaultArtifactsRoot(),
+    artifactsRoot,
+    isSuiteActive: () => suiteRunner.hasActiveRun(),
   });
-  registerRunnerHandlers((channel, listener) => {
-    ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
-  }, runner);
+  suiteRunner = new SuiteRunner(handle.db, {
+    launchBrowser: playwrightLauncher(),
+    emit: (channel, payload) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send(channel, payload);
+      }
+    },
+    artifactsRoot,
+    isSingleActive: () => runner.hasActiveSession(),
+  });
+  registerRunnerHandlers(
+    (channel, listener) => {
+      ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
+    },
+    runner,
+    suiteRunner,
+  );
+  registerReportHandlers(
+    (channel, listener) => {
+      ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
+    },
+    handle.db,
+    { artifactsRoot, renderPdf: renderPdfWithElectron },
+  );
   createWindow();
 
   app.on("activate", () => {
@@ -83,3 +109,21 @@ app.on("quit", () => {
   closeDb?.();
   closeDb = null;
 });
+
+/**
+ * Render an HTML report file to PDF bytes via a hidden window (WS6,
+ * PLAN §9). A4, prefers the report's CSS page size; the window is destroyed
+ * before resolving so batch exports cannot leak windows.
+ */
+async function renderPdfWithElectron(htmlPath: string): Promise<Uint8Array> {
+  const win = new BrowserWindow({
+    show: false,
+    webPreferences: { sandbox: true },
+  });
+  try {
+    await win.loadFile(htmlPath);
+    return await win.webContents.printToPDF({ preferCSSPageSize: true });
+  } finally {
+    win.destroy();
+  }
+}

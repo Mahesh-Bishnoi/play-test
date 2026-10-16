@@ -11,10 +11,10 @@ import {
   RunAlreadyActiveError,
   SingleCaseRunner,
   StepExecutionError,
-  SuiteRunsPendingM6Error,
   executeStep,
   substituteStepValue,
 } from "../src/main/runner.js";
+import { SuiteRunner } from "../src/main/suite-runner.js";
 import { caseVideoPath, stepScreenshotPath } from "../src/main/artifacts.js";
 import { createDatabase } from "../src/main/db.js";
 import type { DatabaseHandle } from "../src/main/db.js";
@@ -585,25 +585,24 @@ describe("supervised pause + resume (M5)", () => {
   });
 });
 
-// --- Suite stubs + IPC wiring -----------------------------------------------------
+// --- Suite delegation + IPC wiring -------------------------------------------------
 
-describe("suite channels (M6 stubs)", () => {
-  it("runSuite and rerunFailed name M6 explicitly", () => {
-    const fx = track(makeFixture());
-    expect(() =>
-      fx.runner.runSuite({ suiteId: "s", caseIds: ["c"], mode: "unsupervised" }),
-    ).toThrow(SuiteRunsPendingM6Error);
-    expect(() => fx.runner.rerunFailed({ suiteRunId: "r" })).toThrow(SuiteRunsPendingM6Error);
-  });
-
-  it("registers all five runner channels with payload validation", async () => {
+describe("suite delegation (M6)", () => {
+  it("routes suite channels to the SuiteRunner and fans cancel out to both", async () => {
     const fx = makeFixture([{ action: "click", selector: "#a" }]);
     openHandles.push(fx.dbHandle);
+    const suite = new SuiteRunner(fx.dbHandle.db, {
+      launchBrowser: fx.launcher,
+      emit: (channel, payload) => {
+        fx.events.push({ channel, payload });
+      },
+      artifactsRoot: fx.root,
+    });
     const listeners = new Map<string, (payload: unknown) => unknown>();
     const handle: IpcHandleFn = (channel, listener) => {
       listeners.set(channel, listener);
     };
-    registerRunnerHandlers(handle, fx.runner);
+    registerRunnerHandlers(handle, fx.runner, suite);
     for (const channel of [
       "runner:runSingle",
       "runner:runSuite",
@@ -614,9 +613,11 @@ describe("suite channels (M6 stubs)", () => {
       expect(listeners.has(channel)).toBe(true);
     }
     expect(() => listeners.get("runner:runSingle")?.({ caseId: fx.caseId })).toThrow();
+    // No suite with id "s" exists — the call reaches the SuiteRunner (not a stub).
     expect(() =>
       listeners.get("runner:runSuite")?.({ suiteId: "s", caseIds: ["c"], mode: "unsupervised" }),
-    ).toThrow(SuiteRunsPendingM6Error);
+    ).toThrow(/suite not found/);
+    expect(() => listeners.get("runner:rerunFailed")?.({ suiteRunId: "ghost" })).toThrow();
 
     const ids = listeners.get("runner:runSingle")?.({
       caseId: fx.caseId,

@@ -2,7 +2,12 @@ import { z } from "zod";
 
 import type { AppDatabase } from "./db.js";
 import { IPC_PAYLOADS } from "../shared/ipc-contract.js";
-import { RecorderStartPayload, RecorderStopPayload } from "../shared/ipc-contract.js";
+import {
+  RecorderStartPayload,
+  RecorderStopPayload,
+  ReportExportPdfPayload,
+  ReportGetHtmlPayload,
+} from "../shared/ipc-contract.js";
 import type { RecorderStartPayload as RecorderStart } from "../shared/ipc-contract.js";
 import {
   RunnerCancelPayload,
@@ -14,7 +19,10 @@ import {
 import { TestStepSchema } from "../shared/step-types.js";
 import { sharedRecorder } from "./recorder.js";
 import type { CodegenRecorder } from "./recorder.js";
+import { readSuiteHtmlReport, writeSuitePdfReport } from "./reports.js";
+import { ensureSuiteHtmlPath } from "./reports.js";
 import type { SingleCaseRunner } from "./runner.js";
+import type { SuiteRunner } from "./suite-runner.js";
 import { createCase, deleteCase, getCase, listCases, updateCase } from "./ipc-cases.js";
 import {
   createProject,
@@ -216,44 +224,74 @@ export function registerCrudHandlers(handle: IpcHandleFn, db: AppDatabase): void
 }
 
 /**
- * Runner channels (WS5, PLAN §5 + §8). `runSingle` returns `{ suiteRunId,
- * caseRunId }` immediately and streams progress over `run:*` events; the
- * background `done` promise never rejects (failures settle into the db +
- * a `run:finished` event), so the handler drops it. Suite channels throw
- * `SuiteRunsPendingM6Error` until M6 replaces them.
+ * Runner channels (WS5/WS6, PLAN §5 + §8). `runSingle` returns `{ suiteRunId,
+ * caseRunId }` and streams progress over `run:*` events; the background `done`
+ * promises never reject (failures settle into the db + a `run:finished`
+ * event), so handlers drop them. Suite channels delegate to the parallel
+ * `SuiteRunner` (M6); `cancel` fans out to both (each no-ops on unknown ids).
  */
-export function registerRunnerHandlers(handle: IpcHandleFn, runner: SingleCaseRunner): void {
+export function registerRunnerHandlers(
+  handle: IpcHandleFn,
+  single: SingleCaseRunner,
+  suite: SuiteRunner,
+): void {
   for (const channel of RUNNER_CHANNELS) {
     handle(channel, (rawPayload: unknown) => {
       switch (channel) {
         case "runner:runSingle": {
           const payload = RunnerRunSinglePayload.parse(rawPayload);
-          const started = runner.runSingle(payload);
+          const started = single.runSingle(payload);
           return { suiteRunId: started.suiteRunId, caseRunId: started.caseRunId };
         }
         case "runner:runSuite": {
           const payload = RunnerRunSuitePayload.parse(rawPayload);
-          runner.runSuite(payload);
-          return null;
+          const started = suite.runSuite(payload);
+          return { suiteRunId: started.suiteRunId };
         }
         case "runner:resumeFromStep": {
           const payload = RunnerResumePayload.parse(rawPayload);
-          const resumed = runner.resumeFromStep(payload);
+          const resumed = single.resumeFromStep(payload);
           return { suiteRunId: resumed.suiteRunId, caseRunId: resumed.caseRunId };
         }
         case "runner:rerunFailed": {
           const payload = RunnerRerunFailedPayload.parse(rawPayload);
-          runner.rerunFailed(payload);
-          return null;
+          const started = suite.rerunFailed(payload);
+          return { suiteRunId: started.suiteRunId };
         }
         case "runner:cancel": {
           const payload = RunnerCancelPayload.parse(rawPayload);
-          return runner.cancelRun(payload);
+          return Promise.all([single.cancelRun(payload), suite.cancelRun(payload)]).then(
+            () => null,
+          );
         }
       }
     });
   }
 }
+/**
+ * Report channels (WS6, PLAN §5 + §9). `renderPdf` is Electron's printToPDF
+ * in prod and a fake in tests — this module stays Electron-free. Both
+ * handlers return immediately useful values: the html string and the pdf path.
+ */
+export function registerReportHandlers(
+  handle: IpcHandleFn,
+  db: AppDatabase,
+  opts: { artifactsRoot: string; renderPdf: (htmlPath: string) => Promise<Uint8Array> },
+): void {
+  handle("report:getHtml", (rawPayload: unknown) => {
+    const payload = ReportGetHtmlPayload.parse(rawPayload);
+    return readSuiteHtmlReport(db, opts.artifactsRoot, payload.suiteRunId);
+  });
+  handle("report:exportPdf", (rawPayload: unknown) => {
+    const payload = ReportExportPdfPayload.parse(rawPayload);
+    return (async (): Promise<string> => {
+      const htmlPath = ensureSuiteHtmlPath(db, opts.artifactsRoot, payload.suiteRunId);
+      const pdfBytes = await opts.renderPdf(htmlPath);
+      return writeSuitePdfReport(db, opts.artifactsRoot, payload.suiteRunId, pdfBytes);
+    })();
+  });
+}
+
 /**
  * Recorder channels (WS4, PLAN §7). The recorder is process-wide (one codegen
  * window per app), so handlers take it as a param — default the shared
