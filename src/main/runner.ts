@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { eq } from "drizzle-orm";
 import { chromium } from "playwright";
-import type { Browser, BrowserContext, Page } from "playwright";
+import type { Browser, BrowserContext, Locator, Page } from "playwright";
 
 import type {
   RunnerCancelPayload,
@@ -733,6 +733,725 @@ function firstMissingKey(
   return null;
 }
 
+// --- Selector resolution (recorder getBy* chains) -------------------------------
+
+/**
+ * Resolve a stored step selector to a Playwright Locator.
+ *
+ * The recorder keeps codegen chains verbatim (`getByRole('link', …)`,
+ * `getByText(…)`, `locator('…')`), which `page.locator(string)` cannot parse —
+ * it expects CSS/XPath and throws `Unsupported token "{" …`. Plain CSS (or
+ * Playwright engine syntax like `text=…`) falls through to `page.locator`.
+ *
+ * Never `eval`s the selector: the chain name allowlist below plus the strict
+ * literal parser (strings/numbers/booleans/regex/objects/arrays only — no
+ * calls, no identifiers) keep recorder content from becoming code execution
+ * in the main process.
+ */
+export function resolveLocator(page: Page, selector: string): Locator {
+  const segments = splitLocatorChain(selector);
+  if (segments === null) {
+    return page.locator(selector);
+  }
+  const [first, ...rest] = segments;
+  if (first === undefined) {
+    throw new StepExecutionError(
+      `unsupported selector "${selector}": empty — edit the step to a CSS selector or a getByRole/getByText/locator chain`,
+    );
+  }
+  let current = applyFactory(page, first, selector);
+  for (const segment of rest) {
+    current = applyChainStep(current, segment, selector);
+  }
+  return current;
+}
+
+/** Factory methods codegen emits directly on `page.` (plus bare `locator(`). */
+const PAGE_FACTORY_METHODS = new Set([
+  "getByRole",
+  "getByText",
+  "getByLabel",
+  "getByPlaceholder",
+  "getByAltText",
+  "getByTitle",
+  "getByTestId",
+  "locator",
+]);
+
+/** Chainable methods supported after the factory call. */
+const CHAIN_METHODS = new Set([...PAGE_FACTORY_METHODS, "filter", "first", "last", "nth"]);
+
+function unsupportedSelector(full: string, detail: string): StepExecutionError {
+  return new StepExecutionError(
+    `unsupported selector "${full}": ${detail} — edit the step to a CSS selector or a getByRole/getByText/locator chain`,
+  );
+}
+
+/**
+ * Split `getByRole(…).filter(…).first()` on top-level dots, or return null
+ * when the selector is plain CSS/engine syntax (no codegen-chain head).
+ * Throws StepExecutionError for chains starting with a non-locator call
+ * (`page.evaluate(…)`, `frameLocator(…)`, …) so the step fails with guidance
+ * instead of a CSS parse error.
+ */
+function splitLocatorChain(selector: string): string[] | null {
+  let text = selector.trim();
+  if (text.startsWith("page.")) {
+    text = text.slice("page.".length).trim();
+  }
+  if (text === "") {
+    throw new StepExecutionError("step needs a selector");
+  }
+  const head = /^([A-Za-z_$][\w$]*)/.exec(text)?.[1];
+  if (head === undefined) {
+    return null;
+  }
+  if (!PAGE_FACTORY_METHODS.has(head)) {
+    if (/^[A-Za-z_$][\w$]*\(/.test(text)) {
+      throw unsupportedSelector(selector, `"${head}(…)" is not a locator`);
+    }
+    return null;
+  }
+  const segments = splitTopLevel(text, ".");
+  for (const segment of segments) {
+    if (segment === "") {
+      throw unsupportedSelector(selector, "empty chain segment");
+    }
+    const name = /^([A-Za-z_$][\w$]*)/.exec(segment)?.[1];
+    if (name === undefined || !CHAIN_METHODS.has(name)) {
+      throw unsupportedSelector(selector, `"${segment}" is not a supported locator step`);
+    }
+  }
+  return segments;
+}
+
+/** Split on a separator at nesting depth 0, ignoring strings/regex/parens. */
+function splitTopLevel(text: string, separator: "." | ","): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  let quote: string | null = null;
+  let inRegex = false;
+  let inRegexClass = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i] as string;
+    if (quote !== null) {
+      current += ch;
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (inRegex) {
+      current += ch;
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === "[") {
+        inRegexClass = true;
+      } else if (ch === "]") {
+        inRegexClass = false;
+      } else if (ch === "/" && !inRegexClass) {
+        while (i + 1 < text.length && /[a-z]/i.test(text[i + 1] as string)) {
+          current += text[i + 1];
+          i++;
+        }
+        inRegex = false;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === "`") {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === "/" && isRegexStart(text, i)) {
+      inRegex = true;
+      current += ch;
+      continue;
+    }
+    if (ch === "(" || ch === "[" || ch === "{") {
+      depth++;
+    } else if (ch === ")" || ch === "]" || ch === "}") {
+      depth--;
+    }
+    if (ch === separator && depth === 0) {
+      parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current.trim());
+  return parts;
+}
+
+/** A `/` starts a regex literal when the previous token cannot end an expression. */
+function isRegexStart(text: string, index: number): boolean {
+  // Division never appears in selectors; `//xpath` never reaches here (not a
+  // factory head), so treat a second `/` as a non-regex char.
+  if (text[index + 1] === "/" || text[index + 1] === "*") {
+    return false;
+  }
+  let j = index - 1;
+  while (j >= 0 && /\s/.test(text[j] as string)) {
+    j--;
+  }
+  if (j < 0) {
+    return true;
+  }
+  return "([,{=:!&|?;".includes(text[j] as string);
+}
+
+interface ParsedCall {
+  name: string;
+  args: unknown[];
+}
+
+function parseCall(segment: string, full: string): ParsedCall {
+  const bare = /^([A-Za-z_$][\w$]*)$/.exec(segment)?.[1];
+  if (bare !== undefined) {
+    return { name: bare, args: [] };
+  }
+  const call = /^([A-Za-z_$][\w$]*)\((.*)\)$/s.exec(segment);
+  if (call?.[1] === undefined || call[2] === undefined) {
+    throw unsupportedSelector(full, `cannot parse "${segment}"`);
+  }
+  return { name: call[1], args: parseArgList(call[2], full) };
+}
+
+function parseArgList(argsText: string, full: string): unknown[] {
+  if (argsText.trim() === "") {
+    return [];
+  }
+  if (argsText.length > 10000) {
+    throw unsupportedSelector(full, "argument list too long");
+  }
+  return splitTopLevel(argsText, ",").map((arg) => parseJsLiteral(arg, full));
+}
+
+/**
+ * Strict JS-literal parser: strings, numbers, booleans, null/undefined,
+ * RegExp, arrays, and plain objects. Anything else (calls, identifiers,
+ * templates with interpolation) throws — selectors must stay data.
+ */
+function parseJsLiteral(text: string, full: string): unknown {
+  return new LiteralParser(text, full).parse();
+}
+
+class LiteralParser {
+  private pos = 0;
+  private nesting = 0;
+
+  constructor(
+    private readonly text: string,
+    private readonly full: string,
+  ) {}
+
+  parse(): unknown {
+    const value = this.parseValue();
+    this.skipWs();
+    if (this.pos !== this.text.length) {
+      throw unsupportedSelector(this.full, `unexpected trailing text in "${this.text.trim()}"`);
+    }
+    return value;
+  }
+
+  private parseValue(): unknown {
+    this.skipWs();
+    const ch = this.text[this.pos];
+    if (ch === "'" || ch === '"' || ch === "`") {
+      return this.parseString();
+    }
+    if (ch === "/") {
+      return this.parseRegex();
+    }
+    if (ch === "[") {
+      return this.parseArray();
+    }
+    if (ch === "{") {
+      return this.parseObject();
+    }
+    if (ch === "-" || (ch !== undefined && /[0-9]/.test(ch))) {
+      return this.parseNumber();
+    }
+    return this.parseKeyword();
+  }
+
+  private parseString(): string {
+    const quote = this.text[this.pos] as string;
+    this.pos++;
+    let out = "";
+    for (;;) {
+      const ch = this.text[this.pos];
+      if (ch === undefined) {
+        throw unsupportedSelector(this.full, "unterminated string");
+      }
+      if (ch === quote) {
+        this.pos++;
+        return out;
+      }
+      if (ch === "\\") {
+        out += this.parseEscape(quote);
+        continue;
+      }
+      if (quote === "`" && ch === "$" && this.text[this.pos + 1] === "{") {
+        throw unsupportedSelector(this.full, "template interpolation is not supported");
+      }
+      out += ch;
+      this.pos++;
+    }
+  }
+
+  private parseEscape(quote: string): string {
+    // this.text[this.pos] is the backslash here.
+    this.pos++;
+    const ch = this.text[this.pos];
+    if (ch === undefined) {
+      throw unsupportedSelector(this.full, "unterminated escape");
+    }
+    this.pos++;
+    switch (ch) {
+      case "n":
+        return "\n";
+      case "t":
+        return "\t";
+      case "r":
+        return "\r";
+      case "b":
+        return "\b";
+      case "f":
+        return "\f";
+      case "v":
+        return "\v";
+      case "0":
+        return "\0";
+      case "\\":
+        return "\\";
+      case "'":
+        return "'";
+      case '"':
+        return '"';
+      case "`":
+        return "`";
+      case "$":
+        return "$";
+      case "/":
+        return "/";
+      case "u": {
+        const hex = this.text.slice(this.pos, this.pos + 4);
+        if (!/^[0-9a-fA-F]{4}$/.test(hex)) {
+          throw unsupportedSelector(this.full, "bad unicode escape");
+        }
+        this.pos += 4;
+        return String.fromCharCode(Number.parseInt(hex, 16));
+      }
+      default:
+        if (ch === quote) {
+          return quote;
+        }
+        throw unsupportedSelector(this.full, `unsupported escape "\\${ch}"`);
+    }
+  }
+
+  private parseRegex(): RegExp {
+    this.pos++;
+    let pattern = "";
+    let inClass = false;
+    let escaped = false;
+    for (;;) {
+      const ch = this.text[this.pos];
+      if (ch === undefined || ch === "\n") {
+        throw unsupportedSelector(this.full, "unterminated regex");
+      }
+      if (escaped) {
+        pattern += `\\${ch}`;
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === "[") {
+        inClass = true;
+        pattern += ch;
+      } else if (ch === "]") {
+        inClass = false;
+        pattern += ch;
+      } else if (ch === "/" && !inClass) {
+        break;
+      } else {
+        pattern += ch;
+      }
+      this.pos++;
+    }
+    this.pos++;
+    let flags = "";
+    while (this.pos < this.text.length && /[a-z]/i.test(this.text[this.pos] as string)) {
+      flags += this.text[this.pos];
+      this.pos++;
+    }
+    if (/[^dgimsuvy]/.test(flags) || new Set(flags).size !== flags.length) {
+      throw unsupportedSelector(this.full, `bad regex flags "/${flags}"`);
+    }
+    try {
+      return new RegExp(pattern, flags);
+    } catch {
+      throw unsupportedSelector(this.full, "invalid regex");
+    }
+  }
+
+  private parseArray(): unknown[] {
+    this.pos++;
+    this.enterNested();
+    try {
+      const items: unknown[] = [];
+      for (;;) {
+        this.skipWs();
+        if (this.text[this.pos] === "]") {
+          this.pos++;
+          return items;
+        }
+        if (this.text[this.pos] === undefined) {
+          throw unsupportedSelector(this.full, "unterminated array");
+        }
+        items.push(this.parseValue());
+        this.skipWs();
+        const ch = this.text[this.pos];
+        if (ch === ",") {
+          this.pos++;
+          continue;
+        }
+        if (ch === "]") {
+          this.pos++;
+          return items;
+        }
+        throw unsupportedSelector(this.full, 'expected "," or "]"');
+      }
+    } finally {
+      this.nesting--;
+    }
+  }
+
+  private parseObject(): Record<string, unknown> {
+    this.pos++;
+    this.enterNested();
+    try {
+      const obj: Record<string, unknown> = {};
+      for (;;) {
+        this.skipWs();
+        if (this.text[this.pos] === "}") {
+          this.pos++;
+          return obj;
+        }
+        if (this.text[this.pos] === undefined) {
+          throw unsupportedSelector(this.full, "unterminated object");
+        }
+        const key = this.parseKey();
+        this.skipWs();
+        if (this.text[this.pos] !== ":") {
+          throw unsupportedSelector(this.full, `expected ":" after key "${key}"`);
+        }
+        this.pos++;
+        obj[key] = this.parseValue();
+        this.skipWs();
+        const ch = this.text[this.pos];
+        if (ch === ",") {
+          this.pos++;
+          continue;
+        }
+        if (ch === "}") {
+          this.pos++;
+          return obj;
+        }
+        throw unsupportedSelector(this.full, 'expected "," or "}"');
+      }
+    } finally {
+      this.nesting--;
+    }
+  }
+
+  private enterNested(): void {
+    this.nesting++;
+    if (this.nesting > 20) {
+      throw unsupportedSelector(this.full, "nesting too deep");
+    }
+  }
+
+  private parseKey(): string {
+    this.skipWs();
+    const ch = this.text[this.pos];
+    if (ch === "'" || ch === '"' || ch === "`") {
+      return this.parseString();
+    }
+    const match = /^[A-Za-z_$][\w$]*/.exec(this.text.slice(this.pos));
+    if (match === null) {
+      throw unsupportedSelector(this.full, "bad object key");
+    }
+    this.pos += match[0].length;
+    return match[0];
+  }
+
+  private parseNumber(): number {
+    const match =
+      /^-?(?:0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(
+        this.text.slice(this.pos),
+      );
+    if (match === null) {
+      throw unsupportedSelector(
+        this.full,
+        `bad number near "${this.text.slice(this.pos, this.pos + 10)}"`,
+      );
+    }
+    this.pos += match[0].length;
+    const value = Number(match[0]);
+    if (Number.isNaN(value)) {
+      throw unsupportedSelector(this.full, `bad number "${match[0]}"`);
+    }
+    return value;
+  }
+
+  private parseKeyword(): unknown {
+    const match = /^[A-Za-z_$][\w$]*/.exec(this.text.slice(this.pos));
+    if (match === null) {
+      throw unsupportedSelector(this.full, `unexpected character "${this.text[this.pos] ?? ""}"`);
+    }
+    const word = match[0];
+    this.pos += word.length;
+    switch (word) {
+      case "true":
+        return true;
+      case "false":
+        return false;
+      case "null":
+        return null;
+      case "undefined":
+        return undefined;
+      default:
+        throw unsupportedSelector(this.full, `"${word}" is not a supported literal`);
+    }
+  }
+
+  private skipWs(): void {
+    while (this.pos < this.text.length && /\s/.test(this.text[this.pos] as string)) {
+      this.pos++;
+    }
+  }
+}
+
+function applyFactory(page: Page, segment: string, full: string): Locator {
+  const { name, args } = parseCall(segment, full);
+  switch (name) {
+    case "getByRole": {
+      const [role, options] = args;
+      if (typeof role !== "string" || (options !== undefined && !isOptions(options))) {
+        throw unsupportedSelector(full, `getByRole needs (role, options?)`);
+      }
+      return page.getByRole(
+        role as Parameters<Page["getByRole"]>[0],
+        options as Parameters<Page["getByRole"]>[1],
+      );
+    }
+    case "getByText": {
+      const [text, options] = args;
+      if (
+        (typeof text !== "string" && !(text instanceof RegExp)) ||
+        (options !== undefined && !isOptions(options))
+      ) {
+        throw unsupportedSelector(full, `getByText needs (text, options?)`);
+      }
+      return page.getByText(text, options as Parameters<Page["getByText"]>[1]);
+    }
+    case "getByLabel": {
+      const [text, options] = args;
+      if (
+        (typeof text !== "string" && !(text instanceof RegExp)) ||
+        (options !== undefined && !isOptions(options))
+      ) {
+        throw unsupportedSelector(full, `getByLabel needs (text, options?)`);
+      }
+      return page.getByLabel(text, options as Parameters<Page["getByLabel"]>[1]);
+    }
+    case "getByPlaceholder": {
+      const [text, options] = args;
+      if (
+        (typeof text !== "string" && !(text instanceof RegExp)) ||
+        (options !== undefined && !isOptions(options))
+      ) {
+        throw unsupportedSelector(full, `getByPlaceholder needs (text, options?)`);
+      }
+      return page.getByPlaceholder(text, options as Parameters<Page["getByPlaceholder"]>[1]);
+    }
+    case "getByAltText": {
+      const [text, options] = args;
+      if (
+        (typeof text !== "string" && !(text instanceof RegExp)) ||
+        (options !== undefined && !isOptions(options))
+      ) {
+        throw unsupportedSelector(full, `getByAltText needs (text, options?)`);
+      }
+      return page.getByAltText(text, options as Parameters<Page["getByAltText"]>[1]);
+    }
+    case "getByTitle": {
+      const [text, options] = args;
+      if (
+        (typeof text !== "string" && !(text instanceof RegExp)) ||
+        (options !== undefined && !isOptions(options))
+      ) {
+        throw unsupportedSelector(full, `getByTitle needs (text, options?)`);
+      }
+      return page.getByTitle(text, options as Parameters<Page["getByTitle"]>[1]);
+    }
+    case "getByTestId": {
+      const [id] = args;
+      if (typeof id !== "string" && !(id instanceof RegExp)) {
+        throw unsupportedSelector(full, `getByTestId needs (testId)`);
+      }
+      return page.getByTestId(id);
+    }
+    case "locator": {
+      const [sel, options] = args;
+      if (typeof sel !== "string" || (options !== undefined && !isOptions(options))) {
+        throw unsupportedSelector(full, `locator needs (selector, options?)`);
+      }
+      rejectLocatorOptions(options, full);
+      return page.locator(sel, options as Parameters<Page["locator"]>[1]);
+    }
+    default:
+      throw unsupportedSelector(full, `"${name}(…)" is not a locator`);
+  }
+}
+
+function applyChainStep(current: Locator, segment: string, full: string): Locator {
+  const { name, args } = parseCall(segment, full);
+  switch (name) {
+    case "getByRole": {
+      const [role, options] = args;
+      if (typeof role !== "string" || (options !== undefined && !isOptions(options))) {
+        throw unsupportedSelector(full, `getByRole needs (role, options?)`);
+      }
+      return current.getByRole(
+        role as Parameters<Locator["getByRole"]>[0],
+        options as Parameters<Locator["getByRole"]>[1],
+      );
+    }
+    case "getByText": {
+      const [text, options] = args;
+      if (
+        (typeof text !== "string" && !(text instanceof RegExp)) ||
+        (options !== undefined && !isOptions(options))
+      ) {
+        throw unsupportedSelector(full, `getByText needs (text, options?)`);
+      }
+      return current.getByText(text, options as Parameters<Locator["getByText"]>[1]);
+    }
+    case "getByLabel": {
+      const [text, options] = args;
+      if (
+        (typeof text !== "string" && !(text instanceof RegExp)) ||
+        (options !== undefined && !isOptions(options))
+      ) {
+        throw unsupportedSelector(full, `getByLabel needs (text, options?)`);
+      }
+      return current.getByLabel(text, options as Parameters<Locator["getByLabel"]>[1]);
+    }
+    case "getByPlaceholder": {
+      const [text, options] = args;
+      if (
+        (typeof text !== "string" && !(text instanceof RegExp)) ||
+        (options !== undefined && !isOptions(options))
+      ) {
+        throw unsupportedSelector(full, `getByPlaceholder needs (text, options?)`);
+      }
+      return current.getByPlaceholder(text, options as Parameters<Locator["getByPlaceholder"]>[1]);
+    }
+    case "getByAltText": {
+      const [text, options] = args;
+      if (
+        (typeof text !== "string" && !(text instanceof RegExp)) ||
+        (options !== undefined && !isOptions(options))
+      ) {
+        throw unsupportedSelector(full, `getByAltText needs (text, options?)`);
+      }
+      return current.getByAltText(text, options as Parameters<Locator["getByAltText"]>[1]);
+    }
+    case "getByTitle": {
+      const [text, options] = args;
+      if (
+        (typeof text !== "string" && !(text instanceof RegExp)) ||
+        (options !== undefined && !isOptions(options))
+      ) {
+        throw unsupportedSelector(full, `getByTitle needs (text, options?)`);
+      }
+      return current.getByTitle(text, options as Parameters<Locator["getByTitle"]>[1]);
+    }
+    case "getByTestId": {
+      const [id] = args;
+      if (typeof id !== "string" && !(id instanceof RegExp)) {
+        throw unsupportedSelector(full, `getByTestId needs (testId)`);
+      }
+      return current.getByTestId(id);
+    }
+    case "locator": {
+      const [sel, options] = args;
+      if (typeof sel !== "string" || (options !== undefined && !isOptions(options))) {
+        throw unsupportedSelector(full, `locator needs (selector, options?)`);
+      }
+      rejectLocatorOptions(options, full);
+      return current.locator(sel, options as Parameters<Locator["locator"]>[1]);
+    }
+    case "filter": {
+      const [options] = args;
+      if (options !== undefined && !isOptions(options)) {
+        throw unsupportedSelector(full, `filter needs ({ hasText?, … })`);
+      }
+      rejectLocatorOptions(options, full);
+      return current.filter(options as Parameters<Locator["filter"]>[0]);
+    }
+    case "first": {
+      if (args.length !== 0) {
+        throw unsupportedSelector(full, `first takes no arguments`);
+      }
+      return current.first();
+    }
+    case "last": {
+      if (args.length !== 0) {
+        throw unsupportedSelector(full, `last takes no arguments`);
+      }
+      return current.last();
+    }
+    case "nth": {
+      const [index] = args;
+      if (typeof index !== "number" || !Number.isInteger(index) || index < 0) {
+        throw unsupportedSelector(full, `nth needs a non-negative integer`);
+      }
+      return current.nth(index);
+    }
+    default:
+      throw unsupportedSelector(full, `"${name}(…)" is not a supported locator step`);
+  }
+}
+
+function isOptions(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * `has`/`hasNot` take a Locator, which the literal parser cannot produce —
+ * reject them with guidance instead of passing garbage to Playwright.
+ */
+function rejectLocatorOptions(options: unknown, full: string): void {
+  if (isOptions(options) && ("has" in options || "hasNot" in options)) {
+    throw unsupportedSelector(
+      full,
+      `filter/locator "has" needs a locator — split into two steps or use hasText`,
+    );
+  }
+}
+
 // --- Production Playwright adapter -----------------------------------------------
 
 class PlaywrightRunPage implements RunPage {
@@ -742,41 +1461,46 @@ class PlaywrightRunPage implements RunPage {
     this.page = page;
   }
 
+  /** Recorder chains (`getByRole(…)`) need dispatch; plain CSS passes through. */
+  private loc(selector: string): Locator {
+    return resolveLocator(this.page, selector);
+  }
+
   async goto(url: string, timeoutMs?: number): Promise<void> {
     await this.page.goto(url, { timeout: timeoutMs });
   }
 
   async click(selector: string, timeoutMs?: number): Promise<void> {
-    await this.page.locator(selector).click({ timeout: timeoutMs });
+    await this.loc(selector).click({ timeout: timeoutMs });
   }
 
   async dblclick(selector: string, timeoutMs?: number): Promise<void> {
-    await this.page.locator(selector).dblclick({ timeout: timeoutMs });
+    await this.loc(selector).dblclick({ timeout: timeoutMs });
   }
 
   async fill(selector: string, value: string, timeoutMs?: number): Promise<void> {
-    await this.page.locator(selector).fill(value, { timeout: timeoutMs });
+    await this.loc(selector).fill(value, { timeout: timeoutMs });
   }
 
   async selectOption(selector: string, value: string, timeoutMs?: number): Promise<void> {
-    await this.page.locator(selector).selectOption(value, { timeout: timeoutMs });
+    await this.loc(selector).selectOption(value, { timeout: timeoutMs });
   }
 
   async check(selector: string, timeoutMs?: number): Promise<void> {
-    await this.page.locator(selector).check({ timeout: timeoutMs });
+    await this.loc(selector).check({ timeout: timeoutMs });
   }
 
   async press(selector: string | undefined, key: string, timeoutMs?: number): Promise<void> {
     if (selector === undefined || selector === "") {
       await this.page.keyboard.press(key);
     } else {
-      await this.page.locator(selector).press(key, { timeout: timeoutMs });
+      await this.loc(selector).press(key, { timeout: timeoutMs });
     }
   }
 
   async assertVisible(selector: string, timeoutMs?: number): Promise<void> {
     try {
-      await this.page.locator(selector).first().waitFor({ state: "visible", timeout: timeoutMs });
+      await this.loc(selector).first().waitFor({ state: "visible", timeout: timeoutMs });
     } catch (err) {
       throw new Error(`expected visible: ${selector} (${asMessage(err)})`);
     }
@@ -784,8 +1508,7 @@ class PlaywrightRunPage implements RunPage {
 
   async assertText(selector: string, value: string, timeoutMs?: number): Promise<void> {
     try {
-      await this.page
-        .locator(selector)
+      await this.loc(selector)
         .filter({ hasText: value })
         .first()
         .waitFor({ state: "visible", timeout: timeoutMs });
