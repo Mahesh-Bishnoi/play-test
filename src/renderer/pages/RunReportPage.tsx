@@ -14,11 +14,28 @@ interface Props {
 }
 
 /**
+ * True when the rendered report HTML shows any failure. The summary row
+ * (`<td class="fail">N</td>`) carries the failed-case count; the fallback
+ * substring check covers failed cases / steps if the template changes.
+ */
+export function reportHasFailures(html: string): boolean {
+  const summary = html.match(/<td class="fail">(\d+)<\/td>/);
+  if (summary !== null) {
+    const failed = Number.parseInt(summary[1] ?? "0", 10);
+    if (Number.isFinite(failed)) {
+      return failed > 0;
+    }
+  }
+  return html.includes(">fail</") || html.includes(">failed</");
+}
+
+/**
  * Suite run report (WS6 / M6, PLAN §6 + §9): renders the self-contained HTML
  * report, exports PDF, and re-runs failed cases.
  */
 export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): React.JSX.Element {
   const [html, setHtml] = useState<string | null>(null);
+  const [hasFailed, setHasFailed] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -29,6 +46,7 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
       .getReportHtml(suiteRunId)
       .then((loaded) => {
         setHtml(loaded);
+        setHasFailed(reportHasFailures(loaded));
       })
       .catch((err: unknown) => {
         setError(errorMessage(err));
@@ -37,11 +55,13 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
 
   useEffect(() => {
     setHtml(null);
+    setHasFailed(null);
     setNotice(null);
     setError(null);
     refresh();
     return api.onRunFinished((event) => {
       if (event.suiteRunId === suiteRunId) {
+        setHasFailed(event.summary.failed > 0);
         refresh();
       }
     });
@@ -109,14 +129,16 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
         <button type="button" className="pt-btn pt-btn-sm" onClick={exportPdf} disabled={busy}>
           Export PDF
         </button>
-        <button
-          type="button"
-          className="pt-btn pt-btn-primary pt-btn-sm"
-          onClick={rerunFailed}
-          disabled={busy}
-        >
-          Re-run failed
-        </button>
+        {hasFailed !== false && (
+          <button
+            type="button"
+            className="pt-btn pt-btn-primary pt-btn-sm"
+            onClick={rerunFailed}
+            disabled={busy}
+          >
+            Re-run failed
+          </button>
+        )}
       </div>
       {html === null ? (
         <p className="pt-empty">Loading report…</p>
