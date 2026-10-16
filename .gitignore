@@ -6,3 +6,7 @@ coverage/
 PLAYTEST_DATA/
 *.tsbuildinfo
 .DS_Store
+# Machine-local agent/skill installs (personal paths, per AGENTS.md)
+.agents/
+.opencode/
+skills-lock.json
