@@ -14,6 +14,14 @@ interface Props {
   onOpenCase?: (caseId: string) => void;
   /** WS6 hook: open a suite-run report (RunReportPage). */
   onViewReport?: (suiteRunId: string) => void;
+  /** IDE shell: suite focused in the Project explorer (controlled). */
+  focusedSuiteId?: string | null;
+  onSuiteFocus?: (suiteId: string | null) => void;
+  /** IDE shell: increment to reveal the matching create form. */
+  suiteCreateSignal?: number;
+  caseCreateSignal?: number;
+  /** IDE shell: notify the explorer to reload after CRUD. */
+  onChanged?: () => void;
 }
 
 /**
@@ -25,6 +33,11 @@ export default function SuiteDetailPage({
   projectId,
   onOpenCase,
   onViewReport,
+  focusedSuiteId,
+  onSuiteFocus,
+  suiteCreateSignal,
+  caseCreateSignal,
+  onChanged,
 }: Props): React.JSX.Element {
   const [suites, setSuites] = useState<Suite[]>([]);
   const [suiteId, setSuiteId] = useState<string | null>(null);
@@ -89,6 +102,9 @@ export default function SuiteDetailPage({
     setSuiteId(id);
     setNotice(null);
     setRunDialogOpen(false);
+    if (onSuiteFocus !== undefined) {
+      onSuiteFocus(id);
+    }
     if (id !== null) {
       loadMembership(id);
     } else {
@@ -97,6 +113,26 @@ export default function SuiteDetailPage({
       setDirty(false);
     }
   };
+
+  // IDE shell: explorer drives the focused suite; create buttons reveal forms.
+  useEffect(() => {
+    if (focusedSuiteId !== undefined && focusedSuiteId !== suiteId) {
+      selectSuite(focusedSuiteId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedSuiteId]);
+
+  useEffect(() => {
+    if (suiteCreateSignal !== undefined && suiteCreateSignal > 0) {
+      setShowSuiteCreate(true);
+    }
+  }, [suiteCreateSignal]);
+
+  useEffect(() => {
+    if (caseCreateSignal !== undefined && caseCreateSignal > 0) {
+      setShowCaseCreate(true);
+    }
+  }, [caseCreateSignal]);
 
   const createSuite = (): void => {
     const trimmed = newSuiteName.trim();
@@ -110,6 +146,7 @@ export default function SuiteDetailPage({
         setNewSuiteName("");
         setShowSuiteCreate(false);
         selectSuite(created.id);
+        onChanged?.();
       })
       .catch((err: unknown) => {
         setError(errorMessage(err));
@@ -130,6 +167,7 @@ export default function SuiteDetailPage({
           selectSuite(null);
         }
         setPendingDeleteSuite(null);
+        onChanged?.();
       })
       .catch((err: unknown) => {
         setError(errorMessage(err));
@@ -150,6 +188,7 @@ export default function SuiteDetailPage({
         setCases((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
         setNewCaseName("");
         setShowCaseCreate(false);
+        onChanged?.();
       })
       .catch((err: unknown) => {
         setError(errorMessage(err));
@@ -173,6 +212,7 @@ export default function SuiteDetailPage({
           return next;
         });
         setPendingDeleteCase(null);
+        onChanged?.();
       })
       .catch((err: unknown) => {
         setError(errorMessage(err));
@@ -233,6 +273,7 @@ export default function SuiteDetailPage({
         setChecked(new Set(saved));
         setDirty(false);
         setNotice(`Saved ${saved.length} case(s) in this suite.`);
+        onChanged?.();
       })
       .catch((err: unknown) => {
         setError(errorMessage(err));

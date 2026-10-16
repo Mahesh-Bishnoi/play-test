@@ -1,31 +1,36 @@
-/* PlayTest design system — dark dev-console theme (ui-ux-pro-max: OLED slate + run green).
- * Tokens only; every component references vars below. No external fonts so the
- * packaged app works offline: system sans + JetBrains Mono fallback. */
+/* PlayTest design system — IntelliJ IDEA New UI dark (Darcula) theme.
+ * Tokens mirror the IDE: editor #1E1F22, tool windows #2B2D30,
+ * borders #393B40, text #DFE1E5/#BCBEC4/#868A93, accent #3574F0.
+ * No external fonts so the packaged app works offline. */
 
 :root {
-  --pt-bg: #0f172a;
-  --pt-bg-raised: #16213a;
-  --pt-card: #1b2336;
-  --pt-card-2: #222d47;
-  --pt-muted: #272f42;
-  --pt-border: #3a4763;
-  --pt-border-soft: #2b3652;
-  --pt-fg: #f8fafc;
-  --pt-fg-dim: #cbd5e1;
-  --pt-muted-fg: #94a3b8;
-  --pt-accent: #22c55e;
-  --pt-accent-ink: #052e16;
-  --pt-info: #38bdf8;
-  --pt-warn: #f59e0b;
-  --pt-danger: #ef4444;
-  --pt-pass-bg: #052e1b;
-  --pt-fail-bg: #3b0f14;
-  --pt-run-bg: #0e2a52;
-  --pt-radius: 10px;
-  --pt-radius-sm: 7px;
-  --pt-font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --pt-bg: #1e1f22;
+  --pt-bg-raised: #242528;
+  --pt-sidebar: #2b2d30;
+  --pt-card: #2b2d30;
+  --pt-card-2: #313438;
+  --pt-muted: #393b40;
+  --pt-border: #393b40;
+  --pt-border-soft: #393b40;
+  --pt-fg: #dfe1e5;
+  --pt-fg-dim: #bcbec4;
+  --pt-muted-fg: #868a93;
+  --pt-accent: #3574f0;
+  --pt-accent-hover: #4682f2;
+  --pt-accent-ink: #ffffff;
+  --pt-selection: #43454a;
+  --pt-selection-accent: rgb(53 116 240 / 0.28);
+  --pt-info: #3592c4;
+  --pt-warn: #e8a33d;
+  --pt-danger: #e74856;
+  --pt-pass-bg: rgb(73 156 84 / 0.15);
+  --pt-fail-bg: rgb(231 72 86 / 0.13);
+  --pt-run-bg: rgb(53 146 196 / 0.15);
+  --pt-radius: 6px;
+  --pt-radius-sm: 4px;
+  --pt-font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --pt-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --pt-shadow: 0 8px 28px rgb(0 0 0 / 0.35);
+  --pt-shadow: 0 8px 28px rgb(0 0 0 / 0.45);
 }
 
 *,
@@ -69,7 +74,7 @@ body {
 
 .pt-sidebar {
   border-inline-end: 1px solid var(--pt-border-soft);
-  background: #0d1528;
+  background: var(--pt-sidebar);
   padding: 20px 16px;
   display: flex;
   flex-direction: column;
@@ -203,7 +208,7 @@ body {
 .pt-input,
 .pt-select,
 .pt-textarea {
-  background: #0c1427;
+  background: var(--pt-bg);
   border: 1px solid var(--pt-border);
   color: var(--pt-fg);
   border-radius: var(--pt-radius-sm);
@@ -215,7 +220,7 @@ body {
 
 .pt-input::placeholder,
 .pt-textarea::placeholder {
-  color: #64748b;
+  color: #868a93;
 }
 
 .pt-input:focus-visible,
@@ -364,7 +369,7 @@ body {
 
 .pt-list-item-active .pt-item-select {
   border-inline-start-color: var(--pt-accent);
-  background: rgb(34 197 94 / 0.08);
+  background: var(--pt-selection-accent);
 }
 
 .pt-item-actions {
@@ -377,7 +382,7 @@ body {
 /* Suite pills keep the same select/action split in a compact form. */
 .pt-suite-pill-active {
   border-color: var(--pt-accent);
-  background: rgb(34 197 94 / 0.08);
+  background: var(--pt-selection-accent);
 }
 
 /* Disclosure toggles hide rarely-used create forms until requested. */
@@ -442,20 +447,20 @@ body {
 
 .pt-badge-pass {
   background: var(--pt-pass-bg);
-  border-color: rgb(34 197 94 / 0.5);
-  color: #86efac;
+  border-color: rgb(73 156 84 / 0.55);
+  color: #6aab73;
 }
 
 .pt-badge-fail {
   background: var(--pt-fail-bg);
-  border-color: rgb(239 68 68 / 0.5);
-  color: #fca5a5;
+  border-color: rgb(231 72 86 / 0.55);
+  color: #f26b6f;
 }
 
 .pt-badge-run {
   background: var(--pt-run-bg);
-  border-color: rgb(56 189 248 / 0.5);
-  color: #7dd3fc;
+  border-color: rgb(53 146 196 / 0.55);
+  color: #4cb0e0;
 }
 
 .pt-badge-mute {
@@ -531,7 +536,7 @@ body {
 }
 
 .pt-list-item-active {
-  background: rgb(34 197 94 / 0.08);
+  background: var(--pt-selection);
 }
 
 /* Sidebar project rows: quiet list items, not cards. Doubled class for
@@ -604,12 +609,12 @@ body {
 
 @media (hover: hover) and (pointer: fine) {
   .pt-table tbody tr:hover {
-    background: rgb(56 189 248 / 0.05);
+    background: rgb(53 116 240 / 0.08);
   }
 }
 
 .pt-row-selected {
-  background: rgb(34 197 94 / 0.08);
+  background: var(--pt-selection-accent);
 }
 
 .pt-suite-pills {
@@ -625,8 +630,8 @@ body {
   border: 1px solid var(--pt-border-soft);
   border-radius: var(--pt-radius);
   background:
-    radial-gradient(rgb(148 163 184 / 0.14) 1px, transparent 1px) 0 0 / 22px 22px,
-    #0c1427;
+    radial-gradient(rgb(134 138 147 / 0.16) 1px, transparent 1px) 0 0 / 22px 22px,
+    var(--pt-bg);
   overflow: clip;
   max-inline-size: 100%;
 }
@@ -664,23 +669,23 @@ body {
 }
 
 .pt-status-pass {
-  border-color: #22c55e;
-  background: #0b2517;
+  border-color: #499c54;
+  background: #253127;
 }
 
 .pt-status-fail {
-  border-color: #ef4444;
-  background: #2f1115;
+  border-color: #e74856;
+  background: #3d2b2e;
 }
 
 .pt-status-running {
-  border-color: #38bdf8;
-  background: #0e2740;
+  border-color: #3592c4;
+  background: #25354c;
 }
 
 .pt-status-skipped {
-  border-color: #64748b;
-  background: #1e293b;
+  border-color: #868a93;
+  background: #2b2d30;
 }
 
 /* ---------- modal ---------- */
@@ -720,11 +725,11 @@ body {
   font-family: var(--pt-font-mono);
   font-size: 12.5px;
   white-space: pre-wrap;
-  background: #080f22;
+  background: var(--pt-bg);
   border: 1px solid var(--pt-border-soft);
   border-radius: var(--pt-radius-sm);
   padding: 12px;
-  color: #a5f3c0;
+  color: #a9b7c6;
   max-block-size: 220px;
   overflow: auto;
 }
@@ -896,5 +901,382 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .pt-btn {
     transition: none;
+  }
+}
+
+/* ---------- IntelliJ IDE shell: menubar + tool window + editor tabs ---------- */
+
+.pt-menubar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--pt-sidebar);
+  border-block-end: 1px solid var(--pt-border);
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 20;
+}
+
+.pt-menubar-app {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.pt-menubar-project {
+  color: var(--pt-muted-fg);
+  font-size: 13px;
+  overflow: clip;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pt-ide {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  min-block-size: calc(100vh - 45px);
+}
+
+.pt-ide .pt-sidebar {
+  block-size: calc(100vh - 45px);
+}
+
+.pt-editor-col {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  background: var(--pt-bg);
+}
+
+.pt-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 16px 0;
+  background: var(--pt-sidebar);
+  border-block-end: 1px solid var(--pt-border);
+  overflow-x: auto;
+}
+
+.pt-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  border-block-end: none;
+  background: transparent;
+  color: var(--pt-muted-fg);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 7px 12px;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.pt-tab-active {
+  background: var(--pt-bg);
+  color: var(--pt-fg);
+  border-color: var(--pt-border);
+}
+
+.pt-tab-x {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 18px;
+  block-size: 18px;
+  border-radius: 4px;
+  color: var(--pt-muted-fg);
+}
+
+.pt-tab-x:hover {
+  background: var(--pt-muted);
+  color: var(--pt-fg);
+}
+
+.pt-main {
+  padding: clamp(16px, 2.5vw, 28px);
+  max-inline-size: 1180px;
+  inline-size: 100%;
+  margin-inline: auto;
+}
+
+.pt-statusbar {
+  margin-block-start: 18px;
+  padding-block-start: 10px;
+  border-block-start: 1px solid var(--pt-border);
+}
+
+/* ---------- Project explorer tree ---------- */
+
+.pt-explorer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-block-size: 0;
+  block-size: 100%;
+}
+
+.pt-explorer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pt-explorer-search {
+  inline-size: 100%;
+}
+
+.pt-tree-scroll {
+  overflow: auto;
+  min-block-size: 0;
+  flex: 1 1 auto;
+  padding: 2px;
+}
+
+.pt-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.pt-tree-group {
+  display: grid;
+  gap: 2px;
+}
+
+.pt-tree-row-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  border-radius: var(--pt-radius-sm);
+}
+
+.pt-tree-caret {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--pt-muted-fg);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  inline-size: 22px;
+  border-radius: var(--pt-radius-sm);
+}
+
+.pt-tree-caret:hover {
+  background: var(--pt-muted);
+  color: var(--pt-fg);
+}
+
+.pt-tree-row {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--pt-fg);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: start;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px 8px;
+  border-radius: var(--pt-radius-sm);
+  min-inline-size: 0;
+  flex: 1 1 auto;
+}
+
+.pt-tree-row:hover {
+  background: var(--pt-muted);
+}
+
+.pt-tree-row:focus-visible,
+.pt-tree-caret:focus-visible {
+  outline: 2px solid var(--pt-accent);
+  outline-offset: 1px;
+}
+
+.pt-tree-row-wrap.pt-tree-row-active > .pt-tree-row,
+.pt-tree-row-nested.pt-tree-row-active {
+  background: var(--pt-selection);
+  color: #fff;
+}
+
+.pt-tree-row-wrap.pt-tree-row-active > .pt-tree-row .pt-item-meta,
+.pt-tree-row-nested.pt-tree-row-active .pt-item-meta {
+  color: rgb(255 255 255 / 0.75);
+}
+
+.pt-tree-icon {
+  color: var(--pt-muted-fg);
+  flex: none;
+  inline-size: 16px;
+  text-align: center;
+}
+
+.pt-tree-row-active .pt-tree-icon {
+  color: rgb(255 255 255 / 0.85);
+}
+
+.pt-tree-label {
+  min-inline-size: 0;
+  flex: 1 1 auto;
+}
+
+.pt-tree-children {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 22px;
+  display: grid;
+  gap: 2px;
+  border-inline-start: 1px solid var(--pt-border);
+  margin-inline-start: 11px;
+}
+
+.pt-tree-empty {
+  padding: 4px 8px;
+}
+
+.pt-explorer-foot {
+  display: grid;
+  gap: 8px;
+  border-block-start: 1px solid var(--pt-border);
+  padding-block-start: 10px;
+}
+
+/* ---------- Welcome screen ---------- */
+
+.pt-welcome-screen {
+  min-block-size: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px 16px;
+  background: var(--pt-bg);
+  background-image: radial-gradient(rgb(134 138 147 / 0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.pt-welcome-dialog {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 400px);
+  inline-size: min(760px, 100%);
+  background: var(--pt-sidebar);
+  border: 1px solid var(--pt-border);
+  border-radius: 12px;
+  overflow: clip;
+  box-shadow: var(--pt-shadow);
+}
+
+.pt-welcome-side {
+  background: #242528;
+  border-inline-end: 1px solid var(--pt-border);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-block-size: 480px;
+}
+
+.pt-welcome-brand {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.pt-welcome-brand strong {
+  display: block;
+  font-size: 15px;
+}
+
+.pt-welcome-brand span {
+  display: block;
+  color: var(--pt-muted-fg);
+  font-size: 12px;
+}
+
+.pt-welcome-list {
+  overflow: auto;
+  flex: 1 1 auto;
+  min-block-size: 0;
+}
+
+.pt-welcome-main {
+  padding: 24px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.pt-welcome-main h2 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+
+.pt-welcome-main h3 {
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+
+.pt-welcome-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pt-welcome-meta {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0;
+  padding: 12px;
+  background: var(--pt-bg);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-radius-sm);
+  font-size: 13px;
+}
+
+.pt-welcome-meta dt {
+  color: var(--pt-muted-fg);
+}
+
+.pt-welcome-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.pt-welcome-new {
+  display: grid;
+  gap: 8px;
+  border-block-start: 1px solid var(--pt-border);
+  padding-block-start: 12px;
+}
+
+@media (max-width: 960px) {
+  .pt-ide {
+    grid-template-columns: 1fr;
+  }
+
+  .pt-ide .pt-sidebar {
+    block-size: auto;
+    position: static;
+  }
+
+  .pt-tree-scroll {
+    max-block-size: 320px;
+  }
+}
+
+@media (max-width: 640px) {
+  .pt-welcome-dialog {
+    grid-template-columns: 1fr;
+  }
+
+  .pt-welcome-side {
+    min-block-size: 0;
+    border-inline-end: none;
+    border-block-end: 1px solid var(--pt-border);
   }
 }
