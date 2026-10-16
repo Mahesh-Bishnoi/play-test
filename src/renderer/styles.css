@@ -47,6 +47,7 @@ body {
   font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
 }
 
 #root {
@@ -187,6 +188,11 @@ body {
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
+}
+
+.pt-row > .pt-input,
+.pt-row > .pt-select {
+  flex: 1 1 160px;
 }
 
 .pt-grid-2 {
@@ -408,9 +414,12 @@ body {
 
 .pt-table-wrap {
   overflow: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
   border: 1px solid var(--pt-border-soft);
   border-radius: var(--pt-radius);
   background: rgb(255 255 255 / 0.015);
+  max-inline-size: 100%;
 }
 
 .pt-table {
@@ -435,6 +444,13 @@ body {
   padding: 10px 12px;
   border-block-end: 1px solid rgb(255 255 255 / 0.05);
   vertical-align: middle;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-inline-size: 0;
+}
+
+.pt-table td.pt-mono {
+  word-break: break-all;
 }
 
 .pt-table tbody tr:last-child td {
@@ -460,13 +476,14 @@ body {
 /* ---------- workflow graph ---------- */
 
 .pt-graph {
-  block-size: 420px;
+  block-size: clamp(280px, 45vh, 420px);
   border: 1px solid var(--pt-border-soft);
   border-radius: var(--pt-radius);
   background:
     radial-gradient(rgb(148 163 184 / 0.14) 1px, transparent 1px) 0 0 / 22px 22px,
     #0c1427;
   overflow: clip;
+  max-inline-size: 100%;
 }
 
 .pt-stepnode {
@@ -569,7 +586,9 @@ body {
 
 .pt-report-frame {
   inline-size: 100%;
-  min-block-size: 600px;
+  max-inline-size: 100%;
+  block-size: 65vh;
+  min-block-size: 400px;
   border: 1px solid var(--pt-border-soft);
   border-radius: var(--pt-radius);
   background: #fff;
@@ -611,7 +630,8 @@ body {
   border-radius: var(--pt-radius);
   padding: 14px;
   background: rgb(255 255 255 / 0.02);
-  min-inline-size: 300px;
+  min-inline-size: 0;
+  max-inline-size: 100%;
 }
 
 /* xyflow dark tweaks */
@@ -635,8 +655,96 @@ body {
     block-size: auto;
   }
 
+  .pt-sidebar .pt-list {
+    max-block-size: 320px;
+    overflow: auto;
+  }
+
   .pt-grid-2 {
     grid-template-columns: 1fr;
+  }
+
+  .pt-stepnode {
+    inline-size: min(232px, 64vw);
+  }
+}
+
+@media (max-width: 640px) {
+  body {
+    font-size: 14px;
+  }
+
+  .pt-main {
+    padding: 14px 12px 24px;
+  }
+
+  .pt-sidebar {
+    padding: 14px 12px;
+  }
+
+  .pt-card,
+  .pt-panel {
+    padding: 12px;
+  }
+
+  .pt-topbar {
+    gap: 8px;
+    margin-block-end: 12px;
+  }
+
+  .pt-table {
+    font-size: 13px;
+  }
+
+  .pt-table th,
+  .pt-table td {
+    padding: 8px;
+  }
+
+  /* Keep the case-step table usable: horizontal scroll instead of squeeze. */
+  .pt-table-wrap > .pt-table {
+    min-inline-size: 560px;
+  }
+
+  .pt-modal-backdrop {
+    padding: 12px;
+  }
+
+  .pt-modal {
+    padding: 16px;
+    max-block-size: 90dvh;
+  }
+
+  .pt-modal-actions {
+    justify-content: stretch;
+  }
+
+  .pt-modal-actions .pt-btn {
+    flex: 1 1 140px;
+  }
+
+  .pt-banner {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 420px) {
+  .pt-brand-mark {
+    inline-size: 32px;
+    block-size: 32px;
+    font-size: 17px;
+  }
+
+  .pt-btn {
+    padding: 8px 12px;
+  }
+
+  .pt-graph {
+    block-size: 280px;
+  }
+
+  .pt-report-frame {
+    min-block-size: 320px;
   }
 }
 
