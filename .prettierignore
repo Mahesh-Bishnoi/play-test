@@ -6,5 +6,6 @@ dist/
 .vite/
 coverage/
 PLAYTEST_DATA/
+drizzle/
 *.local
 *.md

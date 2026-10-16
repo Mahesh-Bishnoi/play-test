@@ -16,13 +16,20 @@
     "verify": "npm run typecheck && npm run lint && npm run format && npm test"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "26.6.5",
     "@types/react": "19.3.0",
+    "@vitest/coverage-v8": "5.0.5",
+    "drizzle-kit": "^0.31.11",
     "oxlint": "1.88.0",
     "oxlint-tsgolint": "7.0.2004",
     "prettier": "3.9.10",
     "typescript": "7.0.2",
-    "vitest": "5.0.5",
-    "@vitest/coverage-v8": "5.0.5"
+    "vitest": "5.0.5"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.4",
+    "zod": "^4.6.7"
   }
 }
