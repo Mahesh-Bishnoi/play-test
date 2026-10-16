@@ -21,10 +21,7 @@ interface Props {
 export function reportHasFailures(html: string): boolean {
   const summary = html.match(/<td class="fail">(\d+)<\/td>/);
   if (summary !== null) {
-    const failed = Number.parseInt(summary[1] ?? "0", 10);
-    if (Number.isFinite(failed)) {
-      return failed > 0;
-    }
+    return Number.parseInt(summary[1] ?? "0", 10) > 0;
   }
   return html.includes(">fail</") || html.includes(">failed</");
 }
@@ -61,7 +58,6 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
     refresh();
     return api.onRunFinished((event) => {
       if (event.suiteRunId === suiteRunId) {
-        setHasFailed(event.summary.failed > 0);
         refresh();
       }
     });
@@ -129,7 +125,7 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
         <button type="button" className="pt-btn pt-btn-sm" onClick={exportPdf} disabled={busy}>
           Export PDF
         </button>
-        {hasFailed !== false && (
+        {hasFailed === true && (
           <button
             type="button"
             className="pt-btn pt-btn-primary pt-btn-sm"
