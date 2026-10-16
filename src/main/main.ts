@@ -4,7 +4,13 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import started from "electron-squirrel-startup";
 
 import { createDatabase, defaultDbPath } from "./db.js";
-import { registerCrudHandlers, registerRecorderHandlers } from "./ipc-register.js";
+import {
+  registerCrudHandlers,
+  registerRecorderHandlers,
+  registerRunnerHandlers,
+} from "./ipc-register.js";
+import { SingleCaseRunner, playwrightLauncher } from "./runner.js";
+import { defaultArtifactsRoot } from "./artifacts.js";
 
 // Forge's vite plugin injects these globals at build/dev time.
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
@@ -46,6 +52,18 @@ void app.whenReady().then(() => {
   registerRecorderHandlers((channel, listener) => {
     ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
   });
+  const runner = new SingleCaseRunner(handle.db, {
+    launchBrowser: playwrightLauncher(),
+    emit: (channel, payload) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send(channel, payload);
+      }
+    },
+    artifactsRoot: defaultArtifactsRoot(),
+  });
+  registerRunnerHandlers((channel, listener) => {
+    ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
+  }, runner);
   createWindow();
 
   app.on("activate", () => {

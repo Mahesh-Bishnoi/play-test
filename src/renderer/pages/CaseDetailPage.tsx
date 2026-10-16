@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { StepAction } from "../../shared/step-types.js";
+import type { RunMode } from "../../shared/schema.js";
+import type { StepAction, StepStatus } from "../../shared/step-types.js";
 import type { TestStep } from "../../shared/step-types.js";
 import { STEP_ACTIONS } from "../../shared/step-types.js";
 import { api } from "../api.js";
@@ -31,10 +32,11 @@ interface Props {
 }
 
 /**
- * Workflow editor for one test case (WS3 / M3 + WS4 / M4, PLAN §6–§7): linear
- * step graph, click-to-edit panel with `{{key}}` hints, add/delete, up/down +
- * drag reorder, plus codegen recording with import preview. Runs land in WS5
- * (M5); the run buttons below stay disabled placeholders.
+ * Workflow editor for one test case (WS3 / M3 + WS4 / M4 + WS5 / M5, PLAN
+ * §6–§8): linear step graph, click-to-edit panel with `{{key}}` hints,
+ * add/delete, up/down + drag reorder, codegen recording with import preview,
+ * and single-case runs with live step status, supervised pause/resume, and
+ * cancel. Suite runs + reports land in M6.
  */
 export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Element {
   const [detail, setDetail] = useState<CaseDetail | null>(null);
@@ -48,6 +50,17 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
   const [recording, setRecording] = useState(false);
   const [recordUrl, setRecordUrl] = useState("");
   const [preview, setPreview] = useState<{ steps: TestStep[]; raw: string } | null>(null);
+  // Live run state (WS5): statuses arrive over run:step-update keyed by order.
+  const [activeRun, setActiveRun] = useState<{
+    suiteRunId: string;
+    caseRunId: string;
+    mode: RunMode;
+  } | null>(null);
+  const [statusByOrder, setStatusByOrder] = useState<Record<number, StepStatus>>({});
+  const [runLogs, setRunLogs] = useState<string[]>([]);
+  const [failedOrder, setFailedOrder] = useState<number | null>(null);
+  const [runFinished, setRunFinished] = useState<string | null>(null);
+  const [runBusy, setRunBusy] = useState(false);
 
   const refresh = useCallback(() => {
     setBusy(true);
@@ -83,6 +96,11 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
     setDetail(null);
     setSelectedId(null);
     setNotice(null);
+    setActiveRun(null);
+    setStatusByOrder({});
+    setRunLogs([]);
+    setFailedOrder(null);
+    setRunFinished(null);
     refresh();
   }, [caseId, refresh]);
 
@@ -102,6 +120,54 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
 
   const steps = detail?.steps ?? [];
   const selected = steps.find((s) => s.id === selectedId) ?? null;
+
+  // Live status keyed by order → by step id for the graph (WS5 fills this).
+  const statusByStepId = useMemo<Record<string, StepStatus>>(() => {
+    const map: Record<string, StepStatus> = {};
+    for (const step of steps) {
+      const status = statusByOrder[step.order];
+      if (status !== undefined) {
+        map[step.id] = status;
+      }
+    }
+    return map;
+  }, [steps, statusByOrder]);
+
+  // Subscribe to run:* streams for the active run; filters guard against
+  // stale events from a previous run (cancel-then-rerun races).
+  useEffect(() => {
+    if (activeRun === null) {
+      return;
+    }
+    const { caseRunId, suiteRunId } = activeRun;
+    const offStep = api.onRunStepUpdate((event) => {
+      if (event.caseRunId !== caseRunId) {
+        return;
+      }
+      setStatusByOrder((prev) => ({ ...prev, [event.order]: event.status }));
+      if (event.status === "fail") {
+        setFailedOrder(event.order);
+      }
+    });
+    const offLog = api.onRunLog((event) => {
+      setRunLogs((prev) => [...prev.slice(-29), `[${event.level}] ${event.msg}`]);
+    });
+    const offDone = api.onRunFinished((event) => {
+      if (event.suiteRunId !== suiteRunId) {
+        return;
+      }
+      const s = event.summary;
+      setRunFinished(
+        `Finished: ${s.passed} passed, ${s.failed} failed, ${s.skipped} skipped (of ${s.total}).`,
+      );
+      setActiveRun(null);
+    });
+    return () => {
+      offStep();
+      offLog();
+      offDone();
+    };
+  }, [activeRun]);
 
   const addStep = (): void => {
     mutate(api.upsertStep(caseId, { order: steps.length, action: newAction }), "Step added.");
@@ -201,6 +267,91 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
       });
   };
 
+  const startRun = (mode: RunMode): void => {
+    setRunBusy(true);
+    setError(null);
+    api
+      .runSingleCase(caseId, mode)
+      .then((ids) => {
+        setActiveRun({ ...ids, mode });
+        setStatusByOrder({});
+        setFailedOrder(null);
+        setRunFinished(null);
+        setRunLogs([]);
+        setNotice(`Run started (${mode}).`);
+      })
+      .catch((err: unknown) => {
+        setError(errorMessage(err));
+      })
+      .finally(() => {
+        setRunBusy(false);
+      });
+  };
+
+  const resumeRun = (): void => {
+    if (activeRun === null || failedOrder === null) {
+      return;
+    }
+    const { caseRunId } = activeRun;
+    const order = failedOrder;
+    setRunBusy(true);
+    setError(null);
+    api
+      .resumeFromStep(caseRunId, order)
+      .then(() => {
+        setFailedOrder(null);
+        setNotice(`Resumed from step ${order + 1} — edits made while paused apply.`);
+      })
+      .catch((err: unknown) => {
+        setError(errorMessage(err));
+      })
+      .finally(() => {
+        setRunBusy(false);
+      });
+  };
+
+  const cancelRun = (): void => {
+    if (activeRun === null) {
+      return;
+    }
+    const { suiteRunId } = activeRun;
+    setRunBusy(true);
+    api
+      .cancelRun(suiteRunId)
+      .then(() => {
+        setNotice("Cancel requested — remaining steps skip.");
+      })
+      .catch((err: unknown) => {
+        setError(errorMessage(err));
+      })
+      .finally(() => {
+        setRunBusy(false);
+      });
+  };
+
+  // A paused supervised session still holds the runner: cancel it first so
+  // the full re-run gets a fresh session instead of an "already active" error.
+  const fullRerun = (mode: RunMode): void => {
+    if (activeRun === null) {
+      startRun(mode);
+      return;
+    }
+    const { suiteRunId } = activeRun;
+    setRunBusy(true);
+    setError(null);
+    api
+      .cancelRun(suiteRunId)
+      .then(() => {
+        startRun(mode);
+      })
+      .catch((err: unknown) => {
+        setError(errorMessage(err));
+        setRunBusy(false);
+      });
+  };
+
+  const paused = activeRun !== null && activeRun.mode === "supervised" && failedOrder !== null;
+
   return (
     <section aria-label="Case workflow" style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -229,7 +380,12 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
         <>
           <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 420px", minWidth: 320 }}>
-              <StepGraph steps={steps} selectedId={selectedId} onSelect={setSelectedId} />
+              <StepGraph
+                steps={steps}
+                statusByStepId={statusByStepId}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+              />
             </div>
             {selected !== null ? (
               <StepEditorPanel
@@ -404,32 +560,89 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
               <button
                 type="button"
                 onClick={startRecording}
-                disabled={busy}
-                style={buttonStyle(busy)}
+                disabled={busy || activeRun !== null}
+                style={buttonStyle(busy || activeRun !== null)}
               >
                 Record…
               </button>
             )}
-            <button
-              type="button"
-              disabled
-              title="Supervised run lands with WS5 (M5)"
-              style={buttonStyle(true)}
-            >
-              Run supervised
-            </button>
-            <button
-              type="button"
-              disabled
-              title="Unsupervised run lands with WS5 (M5)"
-              style={buttonStyle(true)}
-            >
-              Run unsupervised
-            </button>
-            <span style={{ color: "#666", fontSize: 13, alignSelf: "center" }}>
-              Runs are disabled in M4 — recording above is fully functional.
-            </span>
+            {activeRun === null ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    startRun("supervised");
+                  }}
+                  disabled={busy || runBusy || recording || steps.length === 0}
+                  title="Headed, pauses on failure — resume from the failed step"
+                  style={buttonStyle(busy || runBusy || recording || steps.length === 0)}
+                >
+                  Run supervised
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    startRun("unsupervised");
+                  }}
+                  disabled={busy || runBusy || recording || steps.length === 0}
+                  title="Headless, never pauses"
+                  style={buttonStyle(busy || runBusy || recording || steps.length === 0)}
+                >
+                  Run unsupervised
+                </button>
+              </>
+            ) : (
+              <>
+                {paused && failedOrder !== null && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={resumeRun}
+                      disabled={runBusy}
+                      title="Edit the failed step above, then continue in the same browser"
+                      style={buttonStyle(runBusy)}
+                    >
+                      Resume from step {failedOrder + 1}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        fullRerun(activeRun.mode);
+                      }}
+                      disabled={runBusy}
+                      style={buttonStyle(runBusy)}
+                    >
+                      Full re-run
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={cancelRun}
+                  disabled={runBusy}
+                  style={buttonStyle(runBusy)}
+                >
+                  Cancel run
+                </button>
+                <span style={{ color: "#666", fontSize: 13, alignSelf: "center" }}>
+                  {paused
+                    ? `Paused at step ${(failedOrder ?? 0) + 1} — edit the step, then Resume.`
+                    : `Running (${activeRun.mode})… steps color live in the graph.`}
+                </span>
+              </>
+            )}
+            {runFinished !== null && (
+              <span role="status" style={{ color: "#333", fontSize: 13, alignSelf: "center" }}>
+                {runFinished}
+              </span>
+            )}
           </div>
+          {runLogs.length > 0 && (
+            <details>
+              <summary>Run log ({runLogs.length})</summary>
+              <pre style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{runLogs.join("\n")}</pre>
+            </details>
+          )}
           {preview !== null && (
             <RecorderImportPreview
               steps={preview.steps}

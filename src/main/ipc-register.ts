@@ -4,9 +4,17 @@ import type { AppDatabase } from "./db.js";
 import { IPC_PAYLOADS } from "../shared/ipc-contract.js";
 import { RecorderStartPayload, RecorderStopPayload } from "../shared/ipc-contract.js";
 import type { RecorderStartPayload as RecorderStart } from "../shared/ipc-contract.js";
+import {
+  RunnerCancelPayload,
+  RunnerResumePayload,
+  RunnerRerunFailedPayload,
+  RunnerRunSinglePayload,
+  RunnerRunSuitePayload,
+} from "../shared/ipc-contract.js";
 import { TestStepSchema } from "../shared/step-types.js";
 import { sharedRecorder } from "./recorder.js";
 import type { CodegenRecorder } from "./recorder.js";
+import type { SingleCaseRunner } from "./runner.js";
 import { createCase, deleteCase, getCase, listCases, updateCase } from "./ipc-cases.js";
 import {
   createProject,
@@ -76,6 +84,14 @@ const STEP_CHANNELS = ["step:upsert", "step:move", "step:delete", "step:reorder"
 const TESTDATA_CHANNELS = ["testdata:get", "testdata:set"] as const;
 
 const RECORDER_CHANNELS = ["recorder:start", "recorder:stop"] as const;
+
+const RUNNER_CHANNELS = [
+  "runner:runSingle",
+  "runner:runSuite",
+  "runner:resumeFromStep",
+  "runner:rerunFailed",
+  "runner:cancel",
+] as const;
 
 function payloadSchema(channel: string) {
   const schema = IPC_PAYLOADS[channel];
@@ -199,6 +215,45 @@ export function registerCrudHandlers(handle: IpcHandleFn, db: AppDatabase): void
   registerTestDataHandlers(handle, db);
 }
 
+/**
+ * Runner channels (WS5, PLAN §5 + §8). `runSingle` returns `{ suiteRunId,
+ * caseRunId }` immediately and streams progress over `run:*` events; the
+ * background `done` promise never rejects (failures settle into the db +
+ * a `run:finished` event), so the handler drops it. Suite channels throw
+ * `SuiteRunsPendingM6Error` until M6 replaces them.
+ */
+export function registerRunnerHandlers(handle: IpcHandleFn, runner: SingleCaseRunner): void {
+  for (const channel of RUNNER_CHANNELS) {
+    handle(channel, (rawPayload: unknown) => {
+      switch (channel) {
+        case "runner:runSingle": {
+          const payload = RunnerRunSinglePayload.parse(rawPayload);
+          const started = runner.runSingle(payload);
+          return { suiteRunId: started.suiteRunId, caseRunId: started.caseRunId };
+        }
+        case "runner:runSuite": {
+          const payload = RunnerRunSuitePayload.parse(rawPayload);
+          runner.runSuite(payload);
+          return null;
+        }
+        case "runner:resumeFromStep": {
+          const payload = RunnerResumePayload.parse(rawPayload);
+          const resumed = runner.resumeFromStep(payload);
+          return { suiteRunId: resumed.suiteRunId, caseRunId: resumed.caseRunId };
+        }
+        case "runner:rerunFailed": {
+          const payload = RunnerRerunFailedPayload.parse(rawPayload);
+          runner.rerunFailed(payload);
+          return null;
+        }
+        case "runner:cancel": {
+          const payload = RunnerCancelPayload.parse(rawPayload);
+          return runner.cancelRun(payload);
+        }
+      }
+    });
+  }
+}
 /**
  * Recorder channels (WS4, PLAN §7). The recorder is process-wide (one codegen
  * window per app), so handlers take it as a param — default the shared

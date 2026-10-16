@@ -1,9 +1,16 @@
 import { z } from "zod";
 
 import type { IpcChannel } from "../shared/ipc-contract.js";
+import { RunFinishedEvent, RunLogEvent, RunStepUpdateEvent } from "../shared/ipc-contract.js";
+import type {
+  RunFinishedEvent as RunFinished,
+  RunLogEvent as RunLog,
+  RunStepUpdateEvent as RunStepUpdate,
+} from "../shared/ipc-contract.js";
 import { StepRowSchema, SuiteSchema, TestCaseSchema } from "../shared/schema.js";
 import { ProjectSchema } from "../shared/schema.js";
 import type { Project, StepRow, Suite, TestCase } from "../shared/schema.js";
+import type { RunMode } from "../shared/schema.js";
 import { TestStepSchema } from "../shared/step-types.js";
 import type { TestStep } from "../shared/step-types.js";
 
@@ -110,5 +117,38 @@ export const api = {
     return invoke("recorder:stop", {}, (raw) =>
       z.object({ steps: z.array(TestStepSchema), raw: z.string() }).parse(raw),
     );
+  },
+
+  // Runner (WS5; streams progress over run:* events, payloads frozen in v1).
+  runSingleCase(caseId: string, mode: RunMode): Promise<{ suiteRunId: string; caseRunId: string }> {
+    return invoke("runner:runSingle", { caseId, mode }, (raw) =>
+      z.object({ suiteRunId: z.string(), caseRunId: z.string() }).parse(raw),
+    );
+  },
+  resumeFromStep(
+    caseRunId: string,
+    fromOrder: number,
+  ): Promise<{ suiteRunId: string; caseRunId: string }> {
+    return invoke("runner:resumeFromStep", { caseRunId, fromOrder }, (raw) =>
+      z.object({ suiteRunId: z.string(), caseRunId: z.string() }).parse(raw),
+    );
+  },
+  cancelRun(suiteRunId: string): Promise<void> {
+    return invoke("runner:cancel", { suiteRunId }, () => undefined);
+  },
+  onRunStepUpdate(listener: (event: RunStepUpdate) => void): () => void {
+    return window.playtest.on("run:step-update", (raw) => {
+      listener(RunStepUpdateEvent.parse(raw));
+    });
+  },
+  onRunLog(listener: (event: RunLog) => void): () => void {
+    return window.playtest.on("run:log", (raw) => {
+      listener(RunLogEvent.parse(raw));
+    });
+  },
+  onRunFinished(listener: (event: RunFinished) => void): () => void {
+    return window.playtest.on("run:finished", (raw) => {
+      listener(RunFinishedEvent.parse(raw));
+    });
   },
 };
