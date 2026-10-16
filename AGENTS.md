@@ -36,3 +36,11 @@ Read `PLAN.md` first. It is the source of truth for scope, decisions, and status
 
 ## 7. Quick commands (see repo README/AGENTS overrides if present)
 - `npm run typecheck`, `npm test`, `npm run package -- --dir`
+
+## 8. Commits (agent policy)
+- Never create unsigned commits (`--no-gpg-sign` is forbidden).
+- Before committing, verify signing works (it requires the user's SSH key passphrase, unavailable in agent sessions). If the commit fails with `ssh_askpass` / `incorrect passphrase` errors: stop, leave changes staged, and hand the user the exact `git commit -m "..."` command to run themselves.
+
+## 9. Skills in use (`/setup` record)
+- Library wired project-locally: `.opencode/opencode.jsonc` `skills` entry points at `/home/mahesh/code/skills/skills` (machine-local, never commit personal path).
+- Design taste (project-local, 2026-10-16): `@ui-ux-pro-max` at `.opencode/skills/ui-ux-pro-max` (via `uipro init --ai opencode`, target `opencode`) + `@design-taste-frontend` at `.agents/skills/design-taste-frontend` (variant `design-taste-frontend` v2). Scope: project-local. Scan: taste installer reported Safe / 0 alerts / Low Risk; `skillspector scan` timed out (no verdict recorded).

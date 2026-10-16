@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": [
+    ".agents/**",
+    ".opencode/**",
+    "node_modules/**",
+    "coverage/**",
+    "out/**",
+    "dist/**",
+    ".vite/**",
+    "PLAYTEST_DATA/**"
+  ],
+  "options": {
+    // Type-aware rules via tsgolint (TS 7 native). typeCheck stays off:
+    // `npm run typecheck` (tsc) owns compiler diagnostics; oxlint owns lint.
+    "typeAware": true
+  },
+  "rules": {
+    // PLAN §15: no `any` in shared contracts — enforced repo-wide.
+    "typescript/no-explicit-any": "error",
+    // Async IPC handlers must never leak un-awaited promises.
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/consistent-type-imports": "error"
+  }
+}

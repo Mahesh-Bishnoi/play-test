@@ -1,0 +1,8 @@
+node_modules/
+out/
+dist/
+.vite/
+coverage/
+PLAYTEST_DATA/
+*.tsbuildinfo
+.DS_Store

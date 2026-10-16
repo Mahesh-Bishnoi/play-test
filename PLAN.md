@@ -117,12 +117,15 @@ Rules: WS1 freezes `src/shared/*` first; others PR against it. No cross-WS file 
 | Date | WS | Done | Remaining | Notes |
 |------|----|------|-----------|-------|
 | 2026-10-16 | — | Plan approved | M1–M7 unstarted | Initial plan file created |
+| 2026-10-16 | setup | Toolchain: TS 7.0.2 + oxlint 1.88.0 + oxlint-tsgolint 7.0.2004 (type-aware) + vitest 5.0.5 + prettier 3.9.10; `verify` = typecheck+lint+format+test, all green | M1–M7 unstarted | typescript-eslint rejected: needs classic compiler API removed in TS7 (verified in typescript-7.0.2.tgz; upstream #12518 closed "not planned", support waits on TS 7.1). oxlint proven: no-explicit-any + type-aware no-floating-promises fire, exit 1 on violation. TS pinned 7.0.2 ↔ tsgolint 7.0.2004 must stay in sync. Files: package.json, tsconfig.json (strict+noUncheckedIndexedAccess), .oxlintrc.json, .prettierrc.json, vitest.config.ts, tests/toolchain.test.ts, .gitignore |
 
 ## 15. Conventions
 TypeScript strict, zod validate all IPC payloads, Drizzle migrations, no `any` in shared, unit-test parser + substitution (`vitest`), e2e smoke: create project → add step → run headed → report exists.
 
 ## 16. Risks
 Codegen parse fragility → keep raw fallback. Parallel disk I/O (video+screenshots) → cap workers. Resume state confusion → only same-context resume. Browser download size → progress UI + docs.
+- Toolchain lockstep (2026-10-16): `typescript@7.0.2` ↔ `oxlint-tsgolint@7.0.2004` are version-locked (tsgolint tracks an exact TS release). Upgrade both together or type-aware lint silently mismatches. Revisit typescript-eslint when TS 7.1 lands (upstream support waits on it, #12518).
+- Toolchain gaps (2026-10-16): Windows/macOS install behavior unverified; no React/import-ordering lint rules yet — add when WS2/WS3 land renderer code.
 
 ## 17. Verification per Milestone
 `npm run typecheck && npm test && npm run package -- --dir` + manual: record 3-step login, run supervised (pause/resume), run unsupervised suite of 2 (parallel), check HTML+PDF + failure video exist.

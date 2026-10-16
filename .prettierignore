@@ -1,0 +1,10 @@
+.agents/
+.opencode/
+node_modules/
+out/
+dist/
+.vite/
+coverage/
+PLAYTEST_DATA/
+*.local
+*.md
