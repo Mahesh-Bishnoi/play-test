@@ -46,7 +46,8 @@ function inputStyle(): React.CSSProperties {
 /**
  * Editor for the selected workflow step (WS3, PLAN §6). Local draft state is
  * reset by the parent via `key={step.id}`; save/delete go through step:upsert
- * / step:delete in CaseDetailPage. Full test-data editing lands in WS6 (M7).
+ * / step:delete in CaseDetailPage. Key editing lives in TestDataEditor (M7);
+ * this panel only hints at `availableKeys` referenced by the value.
  */
 export default function StepEditorPanel({
   step,

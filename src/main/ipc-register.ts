@@ -8,6 +8,7 @@ import {
   ReportExportPdfPayload,
   ReportGetHtmlPayload,
 } from "../shared/ipc-contract.js";
+import { SystemBrowserStatusPayload, SystemInstallBrowserPayload } from "../shared/ipc-contract.js";
 import type { RecorderStartPayload as RecorderStart } from "../shared/ipc-contract.js";
 import {
   RunnerCancelPayload,
@@ -19,6 +20,8 @@ import {
 import { TestStepSchema } from "../shared/step-types.js";
 import { sharedRecorder } from "./recorder.js";
 import type { CodegenRecorder } from "./recorder.js";
+import { defaultBrowserSetupDeps, getBrowserStatus, installChromium } from "./browser-setup.js";
+import type { BrowserSetupDeps } from "./browser-setup.js";
 import { readSuiteHtmlReport, writeSuitePdfReport } from "./reports.js";
 import { ensureSuiteHtmlPath } from "./reports.js";
 import type { SingleCaseRunner } from "./runner.js";
@@ -289,6 +292,25 @@ export function registerReportHandlers(
       const pdfBytes = await opts.renderPdf(htmlPath);
       return writeSuitePdfReport(db, opts.artifactsRoot, payload.suiteRunId, pdfBytes);
     })();
+  });
+}
+
+/**
+ * System channels (M7, PLAN §11). First-run Chromium check + install; the
+ * module stays Electron-free by taking `BrowserSetupDeps` (default prod, fake
+ * in tests — same pattern as the recorder handlers above).
+ */
+export function registerSystemHandlers(
+  handle: IpcHandleFn,
+  deps: BrowserSetupDeps = defaultBrowserSetupDeps(),
+): void {
+  handle("system:browserStatus", (rawPayload: unknown) => {
+    SystemBrowserStatusPayload.parse(rawPayload);
+    return getBrowserStatus(deps);
+  });
+  handle("system:installBrowser", (rawPayload: unknown) => {
+    SystemInstallBrowserPayload.parse(rawPayload);
+    return installChromium(deps);
   });
 }
 

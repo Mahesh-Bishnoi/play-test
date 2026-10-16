@@ -10,6 +10,7 @@ import RecorderImportPreview from "../components/RecorderImportPreview.js";
 import StepEditorPanel from "../components/StepEditorPanel.js";
 import type { StepPatch } from "../components/StepEditorPanel.js";
 import StepGraph from "../components/StepGraph.js";
+import TestDataEditor from "../components/TestDataEditor.js";
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -32,15 +33,16 @@ interface Props {
 }
 
 /**
- * Workflow editor for one test case (WS3 / M3 + WS4 / M4 + WS5 / M5, PLAN
- * §6–§8): linear step graph, click-to-edit panel with `{{key}}` hints,
- * add/delete, up/down + drag reorder, codegen recording with import preview,
- * and single-case runs with live step status, supervised pause/resume, and
- * cancel. Suite runs + reports land in M6.
+ * Workflow editor for one test case (WS3 / M3 + WS4 / M4 + WS5 / M5 + M6/M7,
+ * PLAN §6–§8 + §10): linear step graph, click-to-edit panel with `{{key}}`
+ * hints, add/delete, up/down + drag reorder, codegen recording with import
+ * preview, KV test-data editor, and single-case runs with live step status,
+ * supervised pause/resume, and cancel.
  */
 export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Element {
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const [testKeys, setTestKeys] = useState<string[]>([]);
+  const [testData, setTestData] = useState<Record<string, string>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -86,6 +88,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
       .getTestData(caseId)
       .then((data) => {
         setTestKeys(Object.keys(data));
+        setTestData(data);
       })
       .catch((err: unknown) => {
         setError(errorMessage(err));
@@ -525,6 +528,22 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                 </tbody>
               </table>
             )}
+          </div>
+
+          <div>
+            <h3>Test data</h3>
+            <p style={{ color: "#666", fontSize: 13, marginTop: 0 }}>
+              {"Values substitute {{key}} in step values at run time."}
+            </p>
+            <TestDataEditor
+              key={caseId}
+              caseId={caseId}
+              initial={testData}
+              onSaved={() => {
+                setNotice("Test data saved.");
+                refresh();
+              }}
+            />
           </div>
 
           <div

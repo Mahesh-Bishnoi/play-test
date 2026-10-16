@@ -7,6 +7,9 @@ import { TestStepSchema } from "./step-types.js";
 // Frozen IPC contract v1 (PLAN §5). Renderer ↔ main via ipcMain.handle;
 // streaming via webContents.send. WS4/WS5/WS6 code runner/recorder/report
 // payloads against these shapes — do not change without a ledger entry.
+//
+// M7 additive extension (PLAN §11 first-run browser install): the two
+// `system:*` channels below are new; every pre-M7 channel is untouched.
 
 export const IPC_CHANNELS = [
   "project:create",
@@ -40,6 +43,8 @@ export const IPC_CHANNELS = [
   "runner:cancel",
   "report:getHtml",
   "report:exportPdf",
+  "system:browserStatus",
+  "system:installBrowser",
   "run:step-update",
   "run:log",
   "run:finished",
@@ -183,6 +188,12 @@ export const ReportExportPdfPayload = z.object({
   suiteRunId: z.string().min(1).max(100),
 });
 
+// --- System (M7: first-run browser install, PLAN §11) -------------------------
+
+export const SystemBrowserStatusPayload = z.object({});
+
+export const SystemInstallBrowserPayload = z.object({});
+
 // --- Streamed events (main → renderer) -----------------------------------------
 
 export const RunStepUpdateEvent = z.object({
@@ -231,6 +242,8 @@ export type RunnerRerunFailedPayload = z.infer<typeof RunnerRerunFailedPayload>;
 export type RunnerCancelPayload = z.infer<typeof RunnerCancelPayload>;
 export type ReportGetHtmlPayload = z.infer<typeof ReportGetHtmlPayload>;
 export type ReportExportPdfPayload = z.infer<typeof ReportExportPdfPayload>;
+export type SystemBrowserStatusPayload = z.infer<typeof SystemBrowserStatusPayload>;
+export type SystemInstallBrowserPayload = z.infer<typeof SystemInstallBrowserPayload>;
 export type RunStepUpdateEvent = z.infer<typeof RunStepUpdateEvent>;
 export type RunLogEvent = z.infer<typeof RunLogEvent>;
 export type RunFinishedEvent = z.infer<typeof RunFinishedEvent>;
@@ -268,4 +281,6 @@ export const IPC_PAYLOADS: Record<string, z.ZodType> = {
   "runner:cancel": RunnerCancelPayload,
   "report:getHtml": ReportGetHtmlPayload,
   "report:exportPdf": ReportExportPdfPayload,
+  "system:browserStatus": SystemBrowserStatusPayload,
+  "system:installBrowser": SystemInstallBrowserPayload,
 };

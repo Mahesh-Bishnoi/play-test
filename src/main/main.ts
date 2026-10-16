@@ -9,6 +9,7 @@ import {
   registerRecorderHandlers,
   registerReportHandlers,
   registerRunnerHandlers,
+  registerSystemHandlers,
 } from "./ipc-register.js";
 import { SingleCaseRunner, playwrightLauncher } from "./runner.js";
 import { SuiteRunner } from "./suite-runner.js";
@@ -52,6 +53,9 @@ void app.whenReady().then(() => {
     ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
   }, handle.db);
   registerRecorderHandlers((channel, listener) => {
+    ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
+  });
+  registerSystemHandlers((channel, listener) => {
     ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
   });
   const artifactsRoot = defaultArtifactsRoot();

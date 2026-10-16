@@ -4,6 +4,7 @@ import CaseDetailPage from "./pages/CaseDetailPage.js";
 import ProjectsPage from "./pages/ProjectsPage.js";
 import RunReportPage from "./pages/RunReportPage.js";
 import SuiteDetailPage from "./pages/SuiteDetailPage.js";
+import BrowserBanner from "./components/BrowserBanner.js";
 
 /**
  * M6 shell: project picker + suite/case manager + workflow editor + run
@@ -25,6 +26,7 @@ export default function App(): React.JSX.Element {
   return (
     <main style={{ fontFamily: "system-ui, sans-serif", padding: 24, maxWidth: 960 }}>
       <h1>PlayTest</h1>
+      <BrowserBanner />
       <ProjectsPage selectedId={projectId} onSelect={selectProject} />
       {projectId !== null && reportRunId !== null && (
         <div style={{ marginTop: 24, borderTop: "1px solid #ddd", paddingTop: 16 }}>

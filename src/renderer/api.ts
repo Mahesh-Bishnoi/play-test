@@ -35,6 +35,8 @@ export interface CaseDetail {
   steps: StepRow[];
 }
 
+const BrowserStatusSchema = z.object({ installed: z.boolean(), executablePath: z.string() });
+
 export const api = {
   listProjects(): Promise<Project[]> {
     return invoke("project:list", {}, (raw) => z.array(ProjectSchema).parse(raw));
@@ -106,6 +108,11 @@ export const api = {
   getTestData(caseId: string): Promise<Record<string, string>> {
     return invoke("testdata:get", { caseId }, (raw) => z.record(z.string(), z.string()).parse(raw));
   },
+  setTestData(caseId: string, data: Record<string, string>): Promise<Record<string, string>> {
+    return invoke("testdata:set", { caseId, data }, (raw) =>
+      z.record(z.string(), z.string()).parse(raw),
+    );
+  },
 
   // Recorder (WS4; handlers registered in main.ts, payloads frozen in v1).
   startRecorder(baseUrl: string): Promise<{ pid: number }> {
@@ -155,6 +162,14 @@ export const api = {
   },
   exportReportPdf(suiteRunId: string): Promise<string> {
     return invoke("report:exportPdf", { suiteRunId }, (raw) => z.string().parse(raw));
+  },
+
+  // System (M7; first-run Chromium check + install, PLAN §11).
+  browserStatus(): Promise<{ installed: boolean; executablePath: string }> {
+    return invoke("system:browserStatus", {}, (raw) => BrowserStatusSchema.parse(raw));
+  },
+  installBrowser(): Promise<{ installed: boolean; executablePath: string }> {
+    return invoke("system:installBrowser", {}, (raw) => BrowserStatusSchema.parse(raw));
   },
   onRunStepUpdate(listener: (event: RunStepUpdate) => void): () => void {
     return window.playtest.on("run:step-update", (raw) => {
