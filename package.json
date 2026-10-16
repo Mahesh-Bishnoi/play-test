@@ -4,7 +4,11 @@
   "private": true,
   "description": "PlayTest — Electron + Playwright manual-tester studio",
   "type": "module",
+  "main": ".vite/build/main.cjs",
   "scripts": {
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --type-aware",
     "lint:fix": "oxlint --type-aware --fix",
@@ -16,20 +20,34 @@
     "verify": "npm run typecheck && npm run lint && npm run format && npm test"
   },
   "devDependencies": {
+    "@electron-forge/cli": "^8.0.1",
+    "@electron-forge/maker-deb": "^8.0.1",
+    "@electron-forge/maker-rpm": "^8.0.1",
+    "@electron-forge/maker-squirrel": "^8.0.1",
+    "@electron-forge/maker-zip": "^8.0.1",
+    "@electron-forge/plugin-vite": "^8.0.1",
     "@types/better-sqlite3": "^9.6.0",
+    "@types/electron-squirrel-startup": "^1.0.2",
     "@types/node": "26.6.5",
     "@types/react": "19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
     "@vitest/coverage-v8": "5.0.5",
     "drizzle-kit": "^0.31.11",
+    "electron": "^44.8.0",
     "oxlint": "1.88.0",
     "oxlint-tsgolint": "7.0.2004",
     "prettier": "3.9.10",
     "typescript": "7.0.2",
+    "vite": "^8.3.4",
     "vitest": "5.0.5"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.45.4",
+    "electron-squirrel-startup": "^1.0.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "zod": "^4.6.7"
   }
 }
