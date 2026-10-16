@@ -17,17 +17,16 @@ interface Props {
   /** IDE shell: suite focused in the Project explorer (controlled). */
   focusedSuiteId?: string | null;
   onSuiteFocus?: (suiteId: string | null) => void;
-  /** IDE shell: increment to reveal the matching create form. */
-  suiteCreateSignal?: number;
-  caseCreateSignal?: number;
+  /** IDE shell: bumped by sidebar CRUD so the main column reloads. */
+  refreshToken?: number;
   /** IDE shell: notify the explorer to reload after CRUD. */
   onChanged?: () => void;
 }
 
 /**
- * Suite detail (UI overhaul): select targets read as selection, deletes are
- * danger-ghosts behind confirms, create forms hide behind disclosures, and
- * the pre-run confirm is a real modal.
+ * Suite detail: membership + runs. Creation lives in the sidebar
+ * (ProjectExplorer) so there is exactly one place to add suites/cases;
+ * deletes stay here behind confirms, next to the membership they affect.
  */
 export default function SuiteDetailPage({
   projectId,
@@ -35,8 +34,7 @@ export default function SuiteDetailPage({
   onViewReport,
   focusedSuiteId,
   onSuiteFocus,
-  suiteCreateSignal,
-  caseCreateSignal,
+  refreshToken,
   onChanged,
 }: Props): React.JSX.Element {
   const [suites, setSuites] = useState<Suite[]>([]);
@@ -48,10 +46,6 @@ export default function SuiteDetailPage({
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [showSuiteCreate, setShowSuiteCreate] = useState(false);
-  const [showCaseCreate, setShowCaseCreate] = useState(false);
-  const [newSuiteName, setNewSuiteName] = useState("");
-  const [newCaseName, setNewCaseName] = useState("");
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [runBusy, setRunBusy] = useState(false);
   const [lastSuiteRunId, setLastSuiteRunId] = useState<string | null>(null);
@@ -83,6 +77,7 @@ export default function SuiteDetailPage({
       .catch((err: unknown) => {
         setError(errorMessage(err));
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   const loadMembership = (id: string): void => {
@@ -114,44 +109,43 @@ export default function SuiteDetailPage({
     }
   };
 
-  // IDE shell: explorer drives the focused suite; create buttons reveal forms.
+  useEffect(() => {
+    if (refreshToken !== undefined && refreshToken > 0) {
+      setError(null);
+      api
+        .listSuites(projectId)
+        .then((rows) => {
+          const sorted = [...rows].sort((a, b) => a.name.localeCompare(b.name));
+          setSuites(sorted);
+          if (suiteId !== null && !sorted.some((s) => s.id === suiteId)) {
+            selectSuite(null);
+          }
+        })
+        .catch((err: unknown) => {
+          setError(errorMessage(err));
+        });
+      api
+        .listCases(projectId)
+        .then((rows) => {
+          setCases([...rows].sort((a, b) => a.name.localeCompare(b.name)));
+        })
+        .catch((err: unknown) => {
+          setError(errorMessage(err));
+        });
+      if (suiteId !== null) {
+        loadMembership(suiteId);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshToken]);
+
+  // IDE shell: explorer drives the focused suite.
   useEffect(() => {
     if (focusedSuiteId !== undefined && focusedSuiteId !== suiteId) {
       selectSuite(focusedSuiteId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusedSuiteId]);
-
-  useEffect(() => {
-    if (suiteCreateSignal !== undefined && suiteCreateSignal > 0) {
-      setShowSuiteCreate(true);
-    }
-  }, [suiteCreateSignal]);
-
-  useEffect(() => {
-    if (caseCreateSignal !== undefined && caseCreateSignal > 0) {
-      setShowCaseCreate(true);
-    }
-  }, [caseCreateSignal]);
-
-  const createSuite = (): void => {
-    const trimmed = newSuiteName.trim();
-    if (trimmed === "") {
-      return;
-    }
-    api
-      .createSuite(projectId, trimmed)
-      .then((created) => {
-        setSuites((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
-        setNewSuiteName("");
-        setShowSuiteCreate(false);
-        selectSuite(created.id);
-        onChanged?.();
-      })
-      .catch((err: unknown) => {
-        setError(errorMessage(err));
-      });
-  };
 
   const confirmDeleteSuite = (): void => {
     if (pendingDeleteSuite === null) {
@@ -174,24 +168,6 @@ export default function SuiteDetailPage({
       })
       .finally(() => {
         setDeleteBusy(false);
-      });
-  };
-
-  const createCase = (): void => {
-    const trimmed = newCaseName.trim();
-    if (trimmed === "") {
-      return;
-    }
-    api
-      .createCase(projectId, trimmed)
-      .then((created) => {
-        setCases((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
-        setNewCaseName("");
-        setShowCaseCreate(false);
-        onChanged?.();
-      })
-      .catch((err: unknown) => {
-        setError(errorMessage(err));
       });
   };
 
@@ -332,121 +308,59 @@ export default function SuiteDetailPage({
       <div className="pt-card">
         <div className="pt-section-head">
           <h3 className="pt-toolbar-title">Suites</h3>
-          <span className="pt-spacer" />
-          <button
-            type="button"
-            className="pt-btn pt-btn-sm"
-            aria-expanded={showSuiteCreate}
-            onClick={() => {
-              setShowSuiteCreate((v) => !v);
-            }}
-          >
-            {showSuiteCreate ? "− Close" : "+ New suite"}
-          </button>
+          <span className="pt-count">{suites.length} in project</span>
         </div>
-        {showSuiteCreate && (
-          <div className="pt-row" style={{ marginBottom: 12 }}>
-            <input
-              aria-label="New suite name"
-              className="pt-input"
-              value={newSuiteName}
-              onChange={(e) => {
-                setNewSuiteName(e.target.value);
-              }}
-              placeholder="New suite name"
-              style={{ maxInlineSize: 280 }}
-            />
-            <button
-              type="button"
-              className="pt-btn pt-btn-primary pt-btn-sm"
-              onClick={createSuite}
-              disabled={newSuiteName.trim() === ""}
-            >
-              Create suite
-            </button>
+        {suites.length === 0 ? (
+          <p className="pt-empty">No suites yet — press + in the sidebar to create one.</p>
+        ) : (
+          <div className="pt-suite-pills">
+            {suites.map((s) => (
+              <span
+                key={s.id}
+                className={`pt-list-item${suiteId === s.id ? " pt-suite-pill-active" : ""}`}
+                style={{ padding: "4px 4px 4px 8px" }}
+              >
+                <button
+                  type="button"
+                  className="pt-btn pt-btn-ghost pt-btn-sm"
+                  onClick={() => {
+                    selectSuite(s.id);
+                  }}
+                  aria-pressed={suiteId === s.id}
+                >
+                  {s.name}
+                </button>
+                <button
+                  type="button"
+                  className="pt-btn pt-btn-danger-ghost pt-btn-sm"
+                  onClick={() => {
+                    setPendingDeleteSuite(s);
+                  }}
+                  title={`Delete suite ${s.name} (asks first)`}
+                  aria-label={`Delete suite ${s.name}`}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
           </div>
         )}
-        {suites.length === 0 && !showSuiteCreate ? (
-          <p className="pt-empty">No suites yet — press “+ New suite”.</p>
-        ) : (
-          suites.length > 0 && (
-            <div className="pt-suite-pills">
-              {suites.map((s) => (
-                <span
-                  key={s.id}
-                  className={`pt-list-item${suiteId === s.id ? " pt-suite-pill-active" : ""}`}
-                  style={{ padding: "4px 4px 4px 8px" }}
-                >
-                  <button
-                    type="button"
-                    className="pt-btn pt-btn-ghost pt-btn-sm"
-                    onClick={() => {
-                      selectSuite(s.id);
-                    }}
-                    aria-pressed={suiteId === s.id}
-                  >
-                    {s.name}
-                  </button>
-                  <button
-                    type="button"
-                    className="pt-btn pt-btn-danger-ghost pt-btn-sm"
-                    onClick={() => {
-                      setPendingDeleteSuite(s);
-                    }}
-                    title={`Delete suite ${s.name} (asks first)`}
-                    aria-label={`Delete suite ${s.name}`}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </div>
-          )
-        )}
+        <p className="pt-hint" style={{ marginTop: 8 }}>
+          New suites are created from the sidebar + — they appear here for membership and runs.
+        </p>
       </div>
 
-      <div>
-        <div className="pt-section-head">
-          <h3 className="pt-toolbar-title">Cases</h3>
-          <span className="pt-count">{cases.length} in project</span>
-          <span className="pt-spacer" />
-          <button
-            type="button"
-            className="pt-btn pt-btn-sm"
-            aria-expanded={showCaseCreate}
-            onClick={() => {
-              setShowCaseCreate((v) => !v);
-            }}
-          >
-            {showCaseCreate ? "− Close" : "+ New case"}
-          </button>
-        </div>
-        {showCaseCreate && (
-          <div className="pt-row" style={{ marginBottom: 12 }}>
-            <input
-              aria-label="New case name"
-              className="pt-input"
-              value={newCaseName}
-              onChange={(e) => {
-                setNewCaseName(e.target.value);
-              }}
-              placeholder="New case name"
-              style={{ maxInlineSize: 280 }}
-            />
-            <button
-              type="button"
-              className="pt-btn pt-btn-primary pt-btn-sm"
-              onClick={createCase}
-              disabled={newCaseName.trim() === ""}
-            >
-              Create case
-            </button>
-          </div>
-        )}
-        {cases.length === 0 && !showCaseCreate && (
-          <p className="pt-empty">No cases yet — press “+ New case”.</p>
-        )}
+      <div className="pt-section-head" style={{ marginBottom: 0 }}>
+        <h3 className="pt-toolbar-title">Cases</h3>
+        <span className="pt-count">{cases.length} in project</span>
+        <span className="pt-spacer" />
+        <span className="pt-hint">
+          New cases are added from the sidebar (per-suite “+ Add case”).
+        </span>
       </div>
+      {cases.length === 0 && (
+        <p className="pt-empty">No cases yet — use “+ Add case” under a suite in the sidebar.</p>
+      )}
 
       {cases.length > 0 && (
         <div className="pt-card">

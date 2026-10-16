@@ -1123,6 +1123,29 @@ body {
 .pt-tree-label {
   min-inline-size: 0;
   flex: 1 1 auto;
+  display: grid;
+  gap: 0;
+}
+
+/* Stack the suite name above its case count so "feature 1" + "2 cases"
+ * never reads as "feature 12 cases" on one line. */
+.pt-tree-label .pt-item-name {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  overflow: clip;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pt-tree-label .pt-item-meta {
+  display: block;
+  font-family: var(--pt-font-mono);
+  font-size: 12px;
+  color: var(--pt-muted-fg);
+  overflow: clip;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pt-tree-children {
@@ -1144,6 +1167,53 @@ body {
   gap: 8px;
   border-block-start: 1px solid var(--pt-border);
   padding-block-start: 10px;
+}
+
+/* Sidebar inline create forms: creation lives in the explorer so the
+ * main column never hosts duplicate create inputs. */
+.pt-inline-form {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-radius-sm);
+  background: var(--pt-bg);
+}
+
+.pt-input-sm {
+  padding: 6px 9px;
+  font-size: 13px;
+  inline-size: 100%;
+}
+
+.pt-inline-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pt-add-row {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--pt-muted-fg);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 5px 8px;
+  border-radius: var(--pt-radius-sm);
+  text-align: start;
+  inline-size: 100%;
+}
+
+.pt-add-row:hover {
+  background: var(--pt-muted);
+  color: var(--pt-fg);
+}
+
+.pt-add-row:focus-visible {
+  outline: 2px solid var(--pt-accent);
+  outline-offset: 1px;
 }
 
 /* ---------- Welcome screen ---------- */

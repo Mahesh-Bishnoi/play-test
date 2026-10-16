@@ -13,16 +13,18 @@ interface Props {
   activeCaseId: string | null;
   onSelectSuite: (suiteId: string | null) => void;
   onSelectCase: (caseId: string) => void;
-  onNewSuite: () => void;
-  onNewCase: () => void;
-  /** Bumped by the parent to force a reload (after suite/case CRUD). */
+  /** Bumped by the parent to force a reload (after suite/case CRUD in main). */
   refreshToken: number;
+  /** Notify the parent (main column) to reload after sidebar CRUD. */
+  onChanged?: () => void;
 }
 
 /**
  * IntelliJ "Project" tool window: Test Suites with nested Test Cases.
- * Navigation only — CRUD stays in the editor pages; the +/- buttons there
- * just focus the matching create form via the editor tabs.
+ * Creation lives here: inline suite form in the header, per-suite
+ * "Add case" rows (create + auto-assign in one step), and a project-level
+ * "+ New test case" fallback in the footer. The main column stays focused
+ * on membership, runs, and editing — it never hosts create forms.
  */
 export default function ProjectExplorer({
   projectId,
@@ -30,9 +32,8 @@ export default function ProjectExplorer({
   activeCaseId,
   onSelectSuite,
   onSelectCase,
-  onNewSuite,
-  onNewCase,
   refreshToken,
+  onChanged,
 }: Props): React.JSX.Element {
   const [suites, setSuites] = useState<Suite[]>([]);
   const [cases, setCases] = useState<TestCase[]>([]);
@@ -40,6 +41,13 @@ export default function ProjectExplorer({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [showSuiteCreate, setShowSuiteCreate] = useState(false);
+  const [newSuiteName, setNewSuiteName] = useState("");
+  const [suiteBusy, setSuiteBusy] = useState(false);
+  const [addingCaseSuiteId, setAddingCaseSuiteId] = useState<string | null>(null);
+  const [newCaseName, setNewCaseName] = useState("");
+  const [caseBusy, setCaseBusy] = useState(false);
+  const [showGlobalCaseCreate, setShowGlobalCaseCreate] = useState(false);
 
   const reload = useCallback(() => {
     setError(null);
@@ -110,21 +118,181 @@ export default function ProjectExplorer({
     });
   };
 
+  const submitSuite = (): void => {
+    const trimmed = newSuiteName.trim();
+    if (trimmed === "" || suiteBusy) {
+      return;
+    }
+    setSuiteBusy(true);
+    setError(null);
+    api
+      .createSuite(projectId, trimmed)
+      .then((created) => {
+        setNewSuiteName("");
+        setShowSuiteCreate(false);
+        setExpanded((prev) => new Set(prev).add(created.id));
+        reload();
+        onSelectSuite(created.id);
+        onChanged?.();
+      })
+      .catch((err: unknown) => {
+        setError(errorMessage(err));
+      })
+      .finally(() => {
+        setSuiteBusy(false);
+      });
+  };
+
+  const submitCase = (suiteId: string | null): void => {
+    const trimmed = newCaseName.trim();
+    if (trimmed === "" || caseBusy) {
+      return;
+    }
+    setCaseBusy(true);
+    setError(null);
+    api
+      .createCase(projectId, trimmed)
+      .then((created) => {
+        const assign =
+          suiteId === null
+            ? Promise.resolve()
+            : api
+                .getSuiteDetail(suiteId)
+                .then((detail) => api.setSuiteCases(suiteId, [...detail.caseIds, created.id]))
+                .then(() => undefined);
+        return assign.then(() => created);
+      })
+      .then((created) => {
+        setNewCaseName("");
+        setAddingCaseSuiteId(null);
+        setShowGlobalCaseCreate(false);
+        if (suiteId !== null) {
+          setExpanded((prev) => new Set(prev).add(suiteId));
+        }
+        reload();
+        onSelectCase(created.id);
+        onChanged?.();
+      })
+      .catch((err: unknown) => {
+        setError(errorMessage(err));
+      })
+      .finally(() => {
+        setCaseBusy(false);
+      });
+  };
+
+  const cancelForms = (): void => {
+    setShowSuiteCreate(false);
+    setNewSuiteName("");
+    setAddingCaseSuiteId(null);
+    setNewCaseName("");
+    setShowGlobalCaseCreate(false);
+  };
+
+  const caseForm = (suiteId: string | null, label: string): React.JSX.Element => (
+    <div className="pt-inline-form">
+      <input
+        // oxlint-disable-next-line jsx-a11y/no-autofocus -- intentional: inline create flow focuses the new input
+        autoFocus
+        aria-label={label}
+        className="pt-input pt-input-sm"
+        placeholder="New case name"
+        value={newCaseName}
+        disabled={caseBusy}
+        onChange={(e) => {
+          setNewCaseName(e.target.value);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            submitCase(suiteId);
+          } else if (e.key === "Escape") {
+            cancelForms();
+          }
+        }}
+      />
+      <div className="pt-inline-actions">
+        <button
+          type="button"
+          className="pt-btn pt-btn-primary pt-btn-sm"
+          onClick={() => {
+            submitCase(suiteId);
+          }}
+          disabled={caseBusy || newCaseName.trim() === ""}
+        >
+          {caseBusy ? "Adding…" : suiteId === null ? "Create case" : "Add to suite"}
+        </button>
+        <button
+          type="button"
+          className="pt-btn pt-btn-ghost pt-btn-sm"
+          onClick={cancelForms}
+          disabled={caseBusy}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="pt-explorer">
       <div className="pt-explorer-head">
-        <span className="pt-side-label">Project</span>
+        <span className="pt-side-label">Test suites</span>
         <span className="pt-spacer" />
         <button
           type="button"
           className="pt-btn pt-btn-ghost pt-btn-sm"
-          title="New test suite"
-          aria-label="New test suite"
-          onClick={onNewSuite}
+          title={showSuiteCreate ? "Close new suite form" : "New test suite"}
+          aria-label={showSuiteCreate ? "Close new suite form" : "New test suite"}
+          aria-expanded={showSuiteCreate}
+          onClick={() => {
+            cancelForms();
+            setShowSuiteCreate((v) => !v);
+          }}
         >
-          +
+          {showSuiteCreate ? "−" : "+"}
         </button>
       </div>
+      {showSuiteCreate && (
+        <div className="pt-inline-form">
+          <input
+            // oxlint-disable-next-line jsx-a11y/no-autofocus -- intentional: inline create flow focuses the new input
+            autoFocus
+            aria-label="New suite name"
+            className="pt-input pt-input-sm"
+            placeholder="New suite name"
+            value={newSuiteName}
+            disabled={suiteBusy}
+            onChange={(e) => {
+              setNewSuiteName(e.target.value);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                submitSuite();
+              } else if (e.key === "Escape") {
+                cancelForms();
+              }
+            }}
+          />
+          <div className="pt-inline-actions">
+            <button
+              type="button"
+              className="pt-btn pt-btn-primary pt-btn-sm"
+              onClick={submitSuite}
+              disabled={suiteBusy || newSuiteName.trim() === ""}
+            >
+              {suiteBusy ? "Creating…" : "Create suite"}
+            </button>
+            <button
+              type="button"
+              className="pt-btn pt-btn-ghost pt-btn-sm"
+              onClick={cancelForms}
+              disabled={suiteBusy}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       <input
         aria-label="Search suites and cases"
         className="pt-input pt-explorer-search"
@@ -140,7 +308,11 @@ export default function ProjectExplorer({
         </p>
       )}
       <div className="pt-tree-scroll" role="tree" aria-label="Test suites and cases">
-        {visibleSuites.length === 0 && <p className="pt-hint">No suites match.</p>}
+        {visibleSuites.length === 0 && (
+          <p className="pt-hint">
+            {suites.length === 0 ? "No suites yet — press + above." : "No suites match."}
+          </p>
+        )}
         {visibleSuites.map((suite) => {
           const memberIds = membersBySuite[suite.id] ?? [];
           const members = memberIds
@@ -149,6 +321,7 @@ export default function ProjectExplorer({
             .filter((c) => matchingCaseIds === null || matchingCaseIds.has(c.id));
           const isOpen = expanded.has(suite.id);
           const isActive = activeSuiteId === suite.id && activeCaseId === null;
+          const isAddingHere = addingCaseSuiteId === suite.id;
           return (
             <div key={suite.id} className="pt-tree-group">
               <div className={`pt-tree-row-wrap${isActive ? " pt-tree-row-active" : ""}`}>
@@ -189,7 +362,7 @@ export default function ProjectExplorer({
               </div>
               {isOpen && (
                 <ul className="pt-tree-children">
-                  {members.length === 0 ? (
+                  {members.length === 0 && !isAddingHere ? (
                     <li className="pt-hint pt-tree-empty">No cases in this suite.</li>
                   ) : (
                     members.map((c) => (
@@ -214,6 +387,24 @@ export default function ProjectExplorer({
                       </li>
                     ))
                   )}
+                  <li>
+                    {isAddingHere ? (
+                      caseForm(suite.id, `New case name in ${suite.name}`)
+                    ) : (
+                      <button
+                        type="button"
+                        className="pt-add-row"
+                        aria-label={`Add test case to ${suite.name}`}
+                        onClick={() => {
+                          cancelForms();
+                          setAddingCaseSuiteId(suite.id);
+                          setNewCaseName("");
+                        }}
+                      >
+                        + Add case
+                      </button>
+                    )}
+                  </li>
                 </ul>
               )}
             </div>
@@ -221,9 +412,22 @@ export default function ProjectExplorer({
         })}
       </div>
       <div className="pt-explorer-foot">
-        <button type="button" className="pt-btn pt-btn-ghost pt-btn-sm" onClick={onNewCase}>
-          + New test case
-        </button>
+        {showGlobalCaseCreate ? (
+          caseForm(null, "New test case name")
+        ) : (
+          <button
+            type="button"
+            className="pt-btn pt-btn-ghost pt-btn-sm"
+            aria-expanded={false}
+            onClick={() => {
+              cancelForms();
+              setShowGlobalCaseCreate(true);
+              setNewCaseName("");
+            }}
+          >
+            + New test case
+          </button>
+        )}
         <span className="pt-hint">
           {suites.length} suite{suites.length === 1 ? "" : "s"} · {cases.length} case
           {cases.length === 1 ? "" : "s"}

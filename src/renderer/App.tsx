@@ -27,8 +27,7 @@ export default function App(): React.JSX.Element {
   const [reportRunId, setReportRunId] = useState<string | null>(null);
   const [tab, setTab] = useState<EditorTab>("suites");
   const [explorerToken, setExplorerToken] = useState(0);
-  const [suiteCreateSignal, setSuiteCreateSignal] = useState(0);
-  const [caseCreateSignal, setCaseCreateSignal] = useState(0);
+  const [mainToken, setMainToken] = useState(0);
 
   const openProject = (id: string): void => {
     setProjectId(id);
@@ -94,6 +93,10 @@ export default function App(): React.JSX.Element {
     setExplorerToken((v) => v + 1);
   };
 
+  const bumpMain = (): void => {
+    setMainToken((v) => v + 1);
+  };
+
   if (projectId === null) {
     return (
       <div className="pt-app">
@@ -154,14 +157,7 @@ export default function App(): React.JSX.Element {
             onSelectCase={(id) => {
               openCase(id);
             }}
-            onNewSuite={() => {
-              setTab("suites");
-              setSuiteCreateSignal((v) => v + 1);
-            }}
-            onNewCase={() => {
-              setTab("suites");
-              setCaseCreateSignal((v) => v + 1);
-            }}
+            onChanged={bumpMain}
           />
         </aside>
         <div className="pt-editor-col">
@@ -276,8 +272,7 @@ export default function App(): React.JSX.Element {
               <SuiteDetailPage
                 projectId={projectId}
                 focusedSuiteId={activeSuiteId}
-                suiteCreateSignal={suiteCreateSignal}
-                caseCreateSignal={caseCreateSignal}
+                refreshToken={mainToken}
                 onSuiteFocus={setActiveSuiteId}
                 onChanged={bumpExplorer}
                 onOpenCase={(id) => {
