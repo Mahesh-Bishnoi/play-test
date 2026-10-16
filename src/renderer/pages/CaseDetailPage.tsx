@@ -485,7 +485,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                             <button
                               type="button"
                               aria-label={`Move step ${index + 1} up`}
-                              className="pt-btn pt-btn-sm"
+                              className="pt-btn pt-btn-ghost pt-btn-sm"
                               disabled={busy || index === 0}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -497,7 +497,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                             <button
                               type="button"
                               aria-label={`Move step ${index + 1} down`}
-                              className="pt-btn pt-btn-sm"
+                              className="pt-btn pt-btn-ghost pt-btn-sm"
                               disabled={busy || index === steps.length - 1}
                               onClick={(e) => {
                                 e.stopPropagation();

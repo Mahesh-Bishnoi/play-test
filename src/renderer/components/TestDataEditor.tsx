@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { api } from "../api.js";
+import ConfirmDialog from "./ConfirmDialog.js";
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -30,6 +31,7 @@ export default function TestDataEditor({ caseId, initial, onSaved }: Props): Rea
   const [newValue, setNewValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDeleteIndex, setPendingDeleteIndex] = useState<number | null>(null);
 
   const dirty =
     JSON.stringify(canonical(rows)) !==
@@ -116,10 +118,11 @@ export default function TestDataEditor({ caseId, initial, onSaved }: Props): Rea
                     <button
                       type="button"
                       aria-label={`Delete key ${row.key}`}
-                      className="pt-btn pt-btn-sm"
+                      title={`Delete key ${row.key} (asks first)`}
+                      className="pt-btn pt-btn-danger-ghost pt-btn-sm"
                       disabled={saving}
                       onClick={() => {
-                        deleteRow(index);
+                        setPendingDeleteIndex(index);
                       }}
                     >
                       Delete
@@ -167,6 +170,22 @@ export default function TestDataEditor({ caseId, initial, onSaved }: Props): Rea
           {saving ? "Saving…" : "Save test data"}
         </button>
       </div>
+      {pendingDeleteIndex !== null && rows[pendingDeleteIndex] !== undefined && (
+        <ConfirmDialog
+          title={`Delete key “${rows[pendingDeleteIndex]?.key}”?`}
+          body="Steps referencing {{key}} will fail with a missing-key error until the reference is removed. Save afterwards to persist."
+          confirmLabel={`Delete ${rows[pendingDeleteIndex]?.key}`}
+          onConfirm={() => {
+            if (pendingDeleteIndex !== null) {
+              deleteRow(pendingDeleteIndex);
+            }
+            setPendingDeleteIndex(null);
+          }}
+          onCancel={() => {
+            setPendingDeleteIndex(null);
+          }}
+        />
+      )}
     </div>
   );
 }

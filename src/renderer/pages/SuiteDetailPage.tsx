@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { api } from "../api.js";
 import type { Suite, TestCase } from "../../shared/schema.js";
+import ConfirmDialog from "../components/ConfirmDialog.js";
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -16,9 +17,9 @@ interface Props {
 }
 
 /**
- * M2 suite detail (PLAN §6): suite CRUD, project case CRUD, membership
- * checkboxes with search + select-all/none + save, and an unsupervised-only
- * pre-run confirm dialog.
+ * Suite detail (UI overhaul): select targets read as selection, deletes are
+ * danger-ghosts behind confirms, create forms hide behind disclosures, and
+ * the pre-run confirm is a real modal.
  */
 export default function SuiteDetailPage({
   projectId,
@@ -34,11 +35,16 @@ export default function SuiteDetailPage({
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [showSuiteCreate, setShowSuiteCreate] = useState(false);
+  const [showCaseCreate, setShowCaseCreate] = useState(false);
   const [newSuiteName, setNewSuiteName] = useState("");
   const [newCaseName, setNewCaseName] = useState("");
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [runBusy, setRunBusy] = useState(false);
   const [lastSuiteRunId, setLastSuiteRunId] = useState<string | null>(null);
+  const [pendingDeleteSuite, setPendingDeleteSuite] = useState<Suite | null>(null);
+  const [pendingDeleteCase, setPendingDeleteCase] = useState<TestCase | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   useEffect(() => {
     setError(null);
@@ -102,6 +108,7 @@ export default function SuiteDetailPage({
       .then((created) => {
         setSuites((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
         setNewSuiteName("");
+        setShowSuiteCreate(false);
         selectSuite(created.id);
       })
       .catch((err: unknown) => {
@@ -109,7 +116,12 @@ export default function SuiteDetailPage({
       });
   };
 
-  const deleteSuite = (id: string): void => {
+  const confirmDeleteSuite = (): void => {
+    if (pendingDeleteSuite === null) {
+      return;
+    }
+    const id = pendingDeleteSuite.id;
+    setDeleteBusy(true);
     api
       .deleteSuite(id)
       .then(() => {
@@ -117,9 +129,13 @@ export default function SuiteDetailPage({
         if (suiteId === id) {
           selectSuite(null);
         }
+        setPendingDeleteSuite(null);
       })
       .catch((err: unknown) => {
         setError(errorMessage(err));
+      })
+      .finally(() => {
+        setDeleteBusy(false);
       });
   };
 
@@ -133,13 +149,19 @@ export default function SuiteDetailPage({
       .then((created) => {
         setCases((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
         setNewCaseName("");
+        setShowCaseCreate(false);
       })
       .catch((err: unknown) => {
         setError(errorMessage(err));
       });
   };
 
-  const deleteCase = (id: string): void => {
+  const confirmDeleteCase = (): void => {
+    if (pendingDeleteCase === null) {
+      return;
+    }
+    const id = pendingDeleteCase.id;
+    setDeleteBusy(true);
     api
       .deleteCase(id)
       .then(() => {
@@ -150,9 +172,13 @@ export default function SuiteDetailPage({
           next.delete(id);
           return next;
         });
+        setPendingDeleteCase(null);
       })
       .catch((err: unknown) => {
         setError(errorMessage(err));
+      })
+      .finally(() => {
+        setDeleteBusy(false);
       });
   };
 
@@ -264,89 +290,121 @@ export default function SuiteDetailPage({
 
       <div className="pt-card">
         <div className="pt-section-head">
-          <h3>Suites</h3>
-        </div>
-        <div className="pt-row" style={{ marginBottom: 12 }}>
-          <input
-            aria-label="New suite name"
-            className="pt-input"
-            value={newSuiteName}
-            onChange={(e) => {
-              setNewSuiteName(e.target.value);
-            }}
-            placeholder="New suite name"
-            style={{ maxInlineSize: 280 }}
-          />
+          <h3 className="pt-toolbar-title">Suites</h3>
+          <span className="pt-spacer" />
           <button
             type="button"
-            className="pt-btn pt-btn-primary pt-btn-sm"
-            onClick={createSuite}
-            disabled={newSuiteName.trim() === ""}
+            className="pt-btn pt-btn-sm"
+            aria-expanded={showSuiteCreate}
+            onClick={() => {
+              setShowSuiteCreate((v) => !v);
+            }}
           >
-            Create suite
+            {showSuiteCreate ? "− Close" : "+ New suite"}
           </button>
         </div>
-        {suites.length === 0 ? (
-          <p className="pt-empty">No suites yet — create one to start selecting cases.</p>
-        ) : (
-          <div className="pt-suite-pills">
-            {suites.map((s) => (
-              <span
-                key={s.id}
-                className={`pt-list-item${suiteId === s.id ? " pt-list-item-active" : ""}`}
-                style={{ padding: "4px 4px 4px 8px" }}
-              >
-                <button
-                  type="button"
-                  className="pt-btn pt-btn-ghost pt-btn-sm"
-                  onClick={() => {
-                    selectSuite(s.id);
-                  }}
-                  aria-pressed={suiteId === s.id}
-                >
-                  {s.name}
-                </button>
-                <button
-                  type="button"
-                  className="pt-btn pt-btn-sm"
-                  onClick={() => {
-                    deleteSuite(s.id);
-                  }}
-                  aria-label={`Delete suite ${s.name}`}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
+        {showSuiteCreate && (
+          <div className="pt-row" style={{ marginBottom: 12 }}>
+            <input
+              aria-label="New suite name"
+              className="pt-input"
+              value={newSuiteName}
+              onChange={(e) => {
+                setNewSuiteName(e.target.value);
+              }}
+              placeholder="New suite name"
+              style={{ maxInlineSize: 280 }}
+            />
+            <button
+              type="button"
+              className="pt-btn pt-btn-primary pt-btn-sm"
+              onClick={createSuite}
+              disabled={newSuiteName.trim() === ""}
+            >
+              Create suite
+            </button>
           </div>
+        )}
+        {suites.length === 0 && !showSuiteCreate ? (
+          <p className="pt-empty">No suites yet — press “+ New suite”.</p>
+        ) : (
+          suites.length > 0 && (
+            <div className="pt-suite-pills">
+              {suites.map((s) => (
+                <span
+                  key={s.id}
+                  className={`pt-list-item${suiteId === s.id ? " pt-suite-pill-active" : ""}`}
+                  style={{ padding: "4px 4px 4px 8px" }}
+                >
+                  <button
+                    type="button"
+                    className="pt-btn pt-btn-ghost pt-btn-sm"
+                    onClick={() => {
+                      selectSuite(s.id);
+                    }}
+                    aria-pressed={suiteId === s.id}
+                  >
+                    {s.name}
+                  </button>
+                  <button
+                    type="button"
+                    className="pt-btn pt-btn-danger-ghost pt-btn-sm"
+                    onClick={() => {
+                      setPendingDeleteSuite(s);
+                    }}
+                    title={`Delete suite ${s.name} (asks first)`}
+                    aria-label={`Delete suite ${s.name}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )
         )}
       </div>
 
       <div className="pt-card">
         <div className="pt-section-head">
-          <h3>Cases</h3>
+          <h3 className="pt-toolbar-title">Cases</h3>
           <span className="pt-count">{cases.length} in project</span>
-        </div>
-        <div className="pt-row" style={{ marginBottom: 4 }}>
-          <input
-            aria-label="New case name"
-            className="pt-input"
-            value={newCaseName}
-            onChange={(e) => {
-              setNewCaseName(e.target.value);
-            }}
-            placeholder="New case name"
-            style={{ maxInlineSize: 280 }}
-          />
+          <span className="pt-spacer" />
           <button
             type="button"
             className="pt-btn pt-btn-sm"
-            onClick={createCase}
-            disabled={newCaseName.trim() === ""}
+            aria-expanded={showCaseCreate}
+            onClick={() => {
+              setShowCaseCreate((v) => !v);
+            }}
           >
-            Create case
+            {showCaseCreate ? "− Close" : "+ New case"}
           </button>
         </div>
+        {showCaseCreate && (
+          <div className="pt-row" style={{ marginBottom: 4 }}>
+            <input
+              aria-label="New case name"
+              className="pt-input"
+              value={newCaseName}
+              onChange={(e) => {
+                setNewCaseName(e.target.value);
+              }}
+              placeholder="New case name"
+              style={{ maxInlineSize: 280 }}
+            />
+            <button
+              type="button"
+              className="pt-btn pt-btn-primary pt-btn-sm"
+              onClick={createCase}
+              disabled={newCaseName.trim() === ""}
+            >
+              Create case
+            </button>
+          </div>
+        )}
+        {cases.length === 0 && !showCaseCreate && (
+          <p className="pt-empty">No cases yet — press “+ New case”.</p>
+        )}
       </div>
 
       {selectedSuite === null ? (
@@ -354,7 +412,7 @@ export default function SuiteDetailPage({
       ) : (
         <div className="pt-card">
           <div className="pt-section-head">
-            <h3>{selectedSuite.name}</h3>
+            <h3 className="pt-toolbar-title">{selectedSuite.name}</h3>
             <span className="pt-count">{memberIds.length} in suite</span>
           </div>
           <div className="pt-row" style={{ marginBottom: 12 }}>
@@ -454,9 +512,11 @@ export default function SuiteDetailPage({
                           )}
                           <button
                             type="button"
-                            className="pt-btn pt-btn-danger pt-btn-sm"
+                            className="pt-btn pt-btn-danger-ghost pt-btn-sm"
+                            title={`Delete case ${c.name} (asks first)`}
+                            aria-label={`Delete case ${c.name}`}
                             onClick={() => {
-                              deleteCase(c.id);
+                              setPendingDeleteCase(c);
                             }}
                           >
                             Delete
@@ -470,51 +530,6 @@ export default function SuiteDetailPage({
             </div>
           )}
 
-          {runDialogOpen && (
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-label="Confirm suite run"
-              className="pt-panel"
-              style={{ marginTop: 12, borderColor: "var(--pt-accent)" }}
-            >
-              <div className="pt-section-head">
-                <h4 style={{ margin: 0 }}>Run suite (unsupervised only)</h4>
-              </div>
-              <p className="pt-sub">
-                Suite <strong>{selectedSuite.name}</strong> — {selectedCases.length} case(s)
-              </p>
-              <ul>
-                {selectedCases.map((c) => (
-                  <li key={c.id}>{c.name}</li>
-                ))}
-              </ul>
-              <p className="pt-hint">
-                Headless and parallel, never pauses. Each case runs independently; a failure skips
-                only that case&apos;s remaining steps.
-              </p>
-              <div className="pt-row">
-                <button
-                  type="button"
-                  className="pt-btn pt-btn-primary pt-btn-sm"
-                  onClick={confirmRunSuite}
-                  disabled={runBusy}
-                >
-                  {runBusy ? "Starting…" : `Confirm (${selectedCases.length})`}
-                </button>
-                <button
-                  type="button"
-                  className="pt-btn pt-btn-sm"
-                  onClick={() => {
-                    setRunDialogOpen(false);
-                  }}
-                  disabled={runBusy}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
           {lastSuiteRunId !== null && onViewReport !== undefined && (
             <div style={{ marginTop: 12 }}>
               <button
@@ -529,6 +544,92 @@ export default function SuiteDetailPage({
             </div>
           )}
         </div>
+      )}
+
+      {runDialogOpen && selectedSuite !== null && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirm suite run"
+          className="pt-modal-backdrop"
+          onClick={() => {
+            if (!runBusy) {
+              setRunDialogOpen(false);
+            }
+          }}
+        >
+          <div
+            className="pt-modal pt-confirm"
+            onClick={(e) => {
+              e.stopPropagation();
+            }}
+          >
+            <div className="pt-section-head">
+              <h3 style={{ margin: 0 }}>Run suite (unsupervised only)</h3>
+            </div>
+            <p className="pt-sub">
+              Suite <strong>{selectedSuite.name}</strong> — {selectedCases.length} case(s)
+            </p>
+            <ul>
+              {selectedCases.map((c) => (
+                <li key={c.id}>{c.name}</li>
+              ))}
+            </ul>
+            <p className="pt-hint">
+              Headless and parallel, never pauses. Each case runs independently; a failure skips
+              only that case&apos;s remaining steps.
+            </p>
+            <div className="pt-modal-actions">
+              <button
+                type="button"
+                className="pt-btn"
+                onClick={() => {
+                  setRunDialogOpen(false);
+                }}
+                disabled={runBusy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="pt-btn pt-btn-primary"
+                onClick={confirmRunSuite}
+                disabled={runBusy}
+              >
+                {runBusy ? "Starting…" : `Confirm (${selectedCases.length})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingDeleteSuite !== null && (
+        <ConfirmDialog
+          title={`Delete suite “${pendingDeleteSuite.name}”?`}
+          body="The suite is removed. Its cases stay in the project and can join other suites."
+          confirmLabel={`Delete ${pendingDeleteSuite.name}`}
+          busy={deleteBusy}
+          onConfirm={confirmDeleteSuite}
+          onCancel={() => {
+            if (!deleteBusy) {
+              setPendingDeleteSuite(null);
+            }
+          }}
+        />
+      )}
+      {pendingDeleteCase !== null && (
+        <ConfirmDialog
+          title={`Delete case “${pendingDeleteCase.name}”?`}
+          body="This permanently deletes the case, its steps and its test data. Suite memberships update automatically. This cannot be undone."
+          confirmLabel={`Delete ${pendingDeleteCase.name}`}
+          busy={deleteBusy}
+          onConfirm={confirmDeleteCase}
+          onCancel={() => {
+            if (!deleteBusy) {
+              setPendingDeleteCase(null);
+            }
+          }}
+        />
       )}
     </section>
   );

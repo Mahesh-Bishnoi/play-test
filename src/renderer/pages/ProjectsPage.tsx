@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { api } from "../api.js";
 import type { Project } from "../../shared/schema.js";
+import ConfirmDialog from "../components/ConfirmDialog.js";
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -13,16 +14,21 @@ interface Props {
 }
 
 /**
- * M2 projects CRUD (PLAN §6). Sidebar-compact: stacked create form + list.
+ * Projects sidebar (UI overhaul): the project name is the select target
+ * (full-row button), Rename is a neutral ghost, Delete is a danger-ghost
+ * behind a confirm. The create form hides behind a disclosure until needed.
  */
 export default function ProjectsPage({ selectedId, onSelect }: Props): React.JSX.Element {
   const [projects, setProjects] = useState<Project[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editBaseUrl, setEditBaseUrl] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<Project | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   useEffect(() => {
     api
@@ -50,13 +56,19 @@ export default function ProjectsPage({ selectedId, onSelect }: Props): React.JSX
         refresh([...projects, created]);
         setName("");
         setBaseUrl("");
+        setShowCreate(false);
       })
       .catch((err: unknown) => {
         setError(errorMessage(err));
       });
   };
 
-  const remove = (id: string): void => {
+  const confirmDelete = (): void => {
+    if (pendingDelete === null) {
+      return;
+    }
+    const id = pendingDelete.id;
+    setDeleteBusy(true);
     setError(null);
     api
       .deleteProject(id)
@@ -65,9 +77,13 @@ export default function ProjectsPage({ selectedId, onSelect }: Props): React.JSX
         if (selectedId === id) {
           onSelect(null);
         }
+        setPendingDelete(null);
       })
       .catch((err: unknown) => {
         setError(errorMessage(err));
+      })
+      .finally(() => {
+        setDeleteBusy(false);
       });
   };
 
@@ -105,36 +121,50 @@ export default function ProjectsPage({ selectedId, onSelect }: Props): React.JSX
           {error}
         </p>
       )}
-      <div className="pt-form-grid">
-        <input
-          aria-label="Project name"
-          className="pt-input"
-          value={name}
-          onChange={(e) => {
-            setName(e.target.value);
-          }}
-          placeholder="New project name"
-        />
-        <input
-          aria-label="Base URL"
-          className="pt-input"
-          value={baseUrl}
-          onChange={(e) => {
-            setBaseUrl(e.target.value);
-          }}
-          placeholder="Base URL (optional)"
-        />
+      <div className="pt-disclosure">
         <button
           type="button"
-          className="pt-btn pt-btn-primary"
-          onClick={create}
-          disabled={name.trim() === ""}
+          className="pt-btn pt-btn-sm"
+          aria-expanded={showCreate}
+          onClick={() => {
+            setShowCreate((v) => !v);
+          }}
         >
-          New project
+          {showCreate ? "− Close" : "+ New project"}
         </button>
       </div>
-      {projects.length === 0 ? (
-        <p className="pt-empty">No projects yet.</p>
+      {showCreate && (
+        <div className="pt-form-grid">
+          <input
+            aria-label="Project name"
+            className="pt-input"
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+            }}
+            placeholder="New project name"
+          />
+          <input
+            aria-label="Base URL"
+            className="pt-input"
+            value={baseUrl}
+            onChange={(e) => {
+              setBaseUrl(e.target.value);
+            }}
+            placeholder="Base URL (optional)"
+          />
+          <button
+            type="button"
+            className="pt-btn pt-btn-primary"
+            onClick={create}
+            disabled={name.trim() === ""}
+          >
+            Create project
+          </button>
+        </div>
+      )}
+      {projects.length === 0 && !showCreate ? (
+        <p className="pt-empty">No projects yet — press “+ New project”.</p>
       ) : (
         <ul className="pt-list">
           {projects.map((p) => (
@@ -143,7 +173,7 @@ export default function ProjectsPage({ selectedId, onSelect }: Props): React.JSX
               className={`pt-list-item${selectedId === p.id ? " pt-list-item-active" : ""}`}
             >
               {editingId === p.id ? (
-                <div className="pt-form-grid" style={{ inlineSize: "100%" }}>
+                <div className="pt-form-grid" style={{ inlineSize: "100%", padding: 8 }}>
                   <input
                     aria-label="Edit project name"
                     className="pt-input"
@@ -183,47 +213,61 @@ export default function ProjectsPage({ selectedId, onSelect }: Props): React.JSX
                 <>
                   <button
                     type="button"
-                    className="pt-btn pt-btn-ghost pt-btn-sm"
+                    className="pt-item-select"
                     onClick={() => {
                       onSelect(p.id);
                     }}
                     aria-pressed={selectedId === p.id}
-                    style={{ fontWeight: selectedId === p.id ? 800 : 600 }}
+                    title={p.baseUrl ?? p.name}
                   >
-                    {p.name}
+                    <span className="pt-item-name">{p.name}</span>
+                    {p.baseUrl !== undefined && p.baseUrl !== "" && (
+                      <span className="pt-item-meta">{p.baseUrl}</span>
+                    )}
                   </button>
-                  {p.baseUrl !== undefined && p.baseUrl !== "" && (
-                    <span
-                      className="pt-mono pt-hint"
-                      style={{ overflow: "clip", textOverflow: "ellipsis" }}
+                  <span className="pt-item-actions">
+                    <button
+                      type="button"
+                      className="pt-btn pt-btn-ghost pt-btn-sm"
+                      title={`Rename ${p.name}`}
+                      aria-label={`Rename project ${p.name}`}
+                      onClick={() => {
+                        startEdit(p);
+                      }}
                     >
-                      {p.baseUrl}
-                    </span>
-                  )}
-                  <span className="pt-spacer" />
-                  <button
-                    type="button"
-                    className="pt-btn pt-btn-sm"
-                    onClick={() => {
-                      startEdit(p);
-                    }}
-                  >
-                    Rename
-                  </button>
-                  <button
-                    type="button"
-                    className="pt-btn pt-btn-danger pt-btn-sm"
-                    onClick={() => {
-                      remove(p.id);
-                    }}
-                  >
-                    Delete
-                  </button>
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      className="pt-btn pt-btn-danger-ghost pt-btn-sm"
+                      title={`Delete ${p.name} (asks first)`}
+                      aria-label={`Delete project ${p.name}`}
+                      onClick={() => {
+                        setPendingDelete(p);
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </span>
                 </>
               )}
             </li>
           ))}
         </ul>
+      )}
+      {pendingDelete !== null && (
+        <ConfirmDialog
+          title={`Delete “${pendingDelete.name}”?`}
+          body="This permanently deletes the project and every suite, case, step and run inside it. This cannot be undone."
+          confirmLabel={`Delete ${pendingDelete.name}`}
+          busy={deleteBusy}
+          onConfirm={confirmDelete}
+          onCancel={() => {
+            if (!deleteBusy) {
+              setPendingDelete(null);
+            }
+          }}
+        />
       )}
     </section>
   );

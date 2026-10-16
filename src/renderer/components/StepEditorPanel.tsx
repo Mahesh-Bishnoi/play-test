@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { StepRow } from "../../shared/schema.js";
 import type { StepAction } from "../../shared/step-types.js";
 import { STEP_ACTIONS, listTestDataKeys } from "../../shared/step-types.js";
+import ConfirmDialog from "./ConfirmDialog.js";
 
 export interface StepPatch {
   action: StepAction;
@@ -49,6 +50,7 @@ export default function StepEditorPanel({
     step.timeoutMs === undefined ? "" : String(step.timeoutMs),
   );
   const [error, setError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const referenced = listTestDataKeys(value);
   const missing = referenced.filter((key) => !availableKeys.includes(key));
@@ -176,11 +178,10 @@ export default function StepEditorPanel({
           </button>
           <button
             type="button"
-            className="pt-btn pt-btn-danger"
+            className="pt-btn pt-btn-danger-ghost"
+            title={`Delete step #${step.order + 1} (asks first)`}
             onClick={() => {
-              if (window.confirm(`Delete step #${step.order + 1} (${step.action})?`)) {
-                onDelete(step.id);
-              }
+              setConfirmingDelete(true);
             }}
             disabled={busy}
           >
@@ -188,6 +189,20 @@ export default function StepEditorPanel({
           </button>
         </div>
       </div>
+      {confirmingDelete && (
+        <ConfirmDialog
+          title={`Delete step #${step.order + 1} (${step.action})?`}
+          body="The step is removed and the steps after it move up. This cannot be undone."
+          confirmLabel={`Delete step #${step.order + 1}`}
+          onConfirm={() => {
+            setConfirmingDelete(false);
+            onDelete(step.id);
+          }}
+          onCancel={() => {
+            setConfirmingDelete(false);
+          }}
+        />
+      )}
     </aside>
   );
 }
