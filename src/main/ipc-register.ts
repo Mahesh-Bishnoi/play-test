@@ -1,5 +1,12 @@
+import { z } from "zod";
+
 import type { AppDatabase } from "./db.js";
 import { IPC_PAYLOADS } from "../shared/ipc-contract.js";
+import { RecorderStartPayload, RecorderStopPayload } from "../shared/ipc-contract.js";
+import type { RecorderStartPayload as RecorderStart } from "../shared/ipc-contract.js";
+import { TestStepSchema } from "../shared/step-types.js";
+import { sharedRecorder } from "./recorder.js";
+import type { CodegenRecorder } from "./recorder.js";
 import { createCase, deleteCase, getCase, listCases, updateCase } from "./ipc-cases.js";
 import {
   createProject,
@@ -67,6 +74,8 @@ const CASE_CHANNELS = [
 const STEP_CHANNELS = ["step:upsert", "step:move", "step:delete", "step:reorder"] as const;
 
 const TESTDATA_CHANNELS = ["testdata:get", "testdata:set"] as const;
+
+const RECORDER_CHANNELS = ["recorder:start", "recorder:stop"] as const;
 
 function payloadSchema(channel: string) {
   const schema = IPC_PAYLOADS[channel];
@@ -188,4 +197,31 @@ export function registerCrudHandlers(handle: IpcHandleFn, db: AppDatabase): void
   registerCaseHandlers(handle, db);
   registerStepHandlers(handle, db);
   registerTestDataHandlers(handle, db);
+}
+
+/**
+ * Recorder channels (WS4, PLAN §7). The recorder is process-wide (one codegen
+ * window per app), so handlers take it as a param — default the shared
+ * instance in prod, inject a fake in tests.
+ */
+export function registerRecorderHandlers(
+  handle: IpcHandleFn,
+  recorder: CodegenRecorder = sharedRecorder,
+): void {
+  for (const channel of RECORDER_CHANNELS) {
+    handle(channel, (rawPayload: unknown) => {
+      switch (channel) {
+        case "recorder:start": {
+          const payload = RecorderStartPayload.parse(rawPayload) as RecorderStart;
+          return recorder.start(payload.baseUrl);
+        }
+        case "recorder:stop": {
+          RecorderStopPayload.parse(rawPayload);
+          const result = recorder.stop();
+          // Re-validate parsed steps at the trust boundary before sending out.
+          return { steps: z.array(TestStepSchema).parse(result.steps), raw: result.raw };
+        }
+      }
+    });
+  }
 }

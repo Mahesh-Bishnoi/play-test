@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { StepAction } from "../../shared/step-types.js";
+import type { TestStep } from "../../shared/step-types.js";
 import { STEP_ACTIONS } from "../../shared/step-types.js";
 import { api } from "../api.js";
 import type { CaseDetail } from "../api.js";
+import RecorderImportPreview from "../components/RecorderImportPreview.js";
 import StepEditorPanel from "../components/StepEditorPanel.js";
 import type { StepPatch } from "../components/StepEditorPanel.js";
 import StepGraph from "../components/StepGraph.js";
@@ -29,10 +31,10 @@ interface Props {
 }
 
 /**
- * Workflow editor for one test case (WS3 / M3, PLAN §6): linear step graph,
- * click-to-edit panel with `{{key}}` hints, add/delete, up/down + drag
- * reorder. No execution here — Record lands in WS4 (M4), runs in WS5 (M5);
- * the buttons below are disabled placeholders so the layout is final.
+ * Workflow editor for one test case (WS3 / M3 + WS4 / M4, PLAN §6–§7): linear
+ * step graph, click-to-edit panel with `{{key}}` hints, add/delete, up/down +
+ * drag reorder, plus codegen recording with import preview. Runs land in WS5
+ * (M5); the run buttons below stay disabled placeholders.
  */
 export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Element {
   const [detail, setDetail] = useState<CaseDetail | null>(null);
@@ -43,6 +45,9 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
   const [newAction, setNewAction] = useState<StepAction>("goto");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recordUrl, setRecordUrl] = useState("");
+  const [preview, setPreview] = useState<{ steps: TestStep[]; raw: string } | null>(null);
 
   const refresh = useCallback(() => {
     setBusy(true);
@@ -50,6 +55,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
       .getCaseDetail(caseId)
       .then((loaded) => {
         setDetail(loaded);
+        setRecordUrl((prev) => (prev === "" ? (loaded.case.url ?? "") : prev));
         setSelectedId((prev) =>
           prev !== null && loaded.steps.some((s) => s.id === prev)
             ? prev
@@ -134,6 +140,65 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
     ids.splice(targetIndex, 0, dragId);
     setDragId(null);
     mutate(api.reorderSteps(caseId, ids), "Steps reordered.");
+  };
+
+  const startRecording = (): void => {
+    const baseUrl = recordUrl.trim() === "" ? (detail?.case.url ?? "") : recordUrl.trim();
+    if (baseUrl === "") {
+      setError("Enter a URL to record from (or set the case URL first).");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    api
+      .startRecorder(baseUrl)
+      .then(() => {
+        setRecording(true);
+        setNotice("Recording… interact with the codegen browser window, then Stop + import.");
+      })
+      .catch((err: unknown) => {
+        setError(errorMessage(err));
+      })
+      .finally(() => {
+        setBusy(false);
+      });
+  };
+
+  const stopRecording = (): void => {
+    setBusy(true);
+    api
+      .stopRecorder()
+      .then((result) => {
+        setRecording(false);
+        setPreview(result);
+        setNotice(null);
+      })
+      .catch((err: unknown) => {
+        setError(errorMessage(err));
+        setRecording(false);
+      })
+      .finally(() => {
+        setBusy(false);
+      });
+  };
+
+  const importRecorded = (selected: TestStep[]): void => {
+    const base = steps.length;
+    setBusy(true);
+    (async () => {
+      for (const [index, step] of selected.entries()) {
+        await api.upsertStep(caseId, { ...step, order: base + index });
+      }
+    })()
+      .then(() => {
+        setPreview(null);
+        setNotice(`Imported ${selected.length} recorded step(s).`);
+        refresh();
+      })
+      .catch((err: unknown) => {
+        setError(errorMessage(err));
+        setBusy(false);
+      });
   };
 
   return (
@@ -313,16 +378,38 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
               flexWrap: "wrap",
               borderTop: "1px solid #ddd",
               paddingTop: 12,
+              alignItems: "center",
             }}
           >
-            <button
-              type="button"
-              disabled
-              title="Recording lands with WS4 (M4)"
-              style={buttonStyle(true)}
-            >
-              Record…
-            </button>
+            <input
+              aria-label="Record URL"
+              placeholder="https://…"
+              value={recordUrl}
+              disabled={busy || recording}
+              onChange={(e) => {
+                setRecordUrl(e.target.value);
+              }}
+              style={{ padding: "6px 8px", border: "1px solid #ccc", borderRadius: 4, width: 240 }}
+            />
+            {recording ? (
+              <button
+                type="button"
+                onClick={stopRecording}
+                disabled={busy}
+                style={buttonStyle(busy)}
+              >
+                Stop + import…
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={startRecording}
+                disabled={busy}
+                style={buttonStyle(busy)}
+              >
+                Record…
+              </button>
+            )}
             <button
               type="button"
               disabled
@@ -340,9 +427,20 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
               Run unsupervised
             </button>
             <span style={{ color: "#666", fontSize: 13, alignSelf: "center" }}>
-              Record + runs are disabled in M3 — the editor above is fully functional.
+              Runs are disabled in M4 — recording above is fully functional.
             </span>
           </div>
+          {preview !== null && (
+            <RecorderImportPreview
+              steps={preview.steps}
+              raw={preview.raw}
+              busy={busy}
+              onAccept={importRecorded}
+              onCancel={() => {
+                setPreview(null);
+              }}
+            />
+          )}
         </>
       )}
     </section>

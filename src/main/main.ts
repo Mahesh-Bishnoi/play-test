@@ -4,7 +4,7 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import started from "electron-squirrel-startup";
 
 import { createDatabase, defaultDbPath } from "./db.js";
-import { registerCrudHandlers } from "./ipc-register.js";
+import { registerCrudHandlers, registerRecorderHandlers } from "./ipc-register.js";
 
 // Forge's vite plugin injects these globals at build/dev time.
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
@@ -43,6 +43,9 @@ void app.whenReady().then(() => {
   registerCrudHandlers((channel, listener) => {
     ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
   }, handle.db);
+  registerRecorderHandlers((channel, listener) => {
+    ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
+  });
   createWindow();
 
   app.on("activate", () => {

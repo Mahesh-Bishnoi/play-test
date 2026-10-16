@@ -4,6 +4,7 @@ import type { IpcChannel } from "../shared/ipc-contract.js";
 import { StepRowSchema, SuiteSchema, TestCaseSchema } from "../shared/schema.js";
 import { ProjectSchema } from "../shared/schema.js";
 import type { Project, StepRow, Suite, TestCase } from "../shared/schema.js";
+import { TestStepSchema } from "../shared/step-types.js";
 import type { TestStep } from "../shared/step-types.js";
 
 async function invoke<T>(
@@ -97,5 +98,17 @@ export const api = {
   },
   getTestData(caseId: string): Promise<Record<string, string>> {
     return invoke("testdata:get", { caseId }, (raw) => z.record(z.string(), z.string()).parse(raw));
+  },
+
+  // Recorder (WS4; handlers registered in main.ts, payloads frozen in v1).
+  startRecorder(baseUrl: string): Promise<{ pid: number }> {
+    return invoke("recorder:start", { baseUrl }, (raw) =>
+      z.object({ pid: z.number().int() }).parse(raw),
+    );
+  },
+  stopRecorder(): Promise<{ steps: TestStep[]; raw: string }> {
+    return invoke("recorder:stop", {}, (raw) =>
+      z.object({ steps: z.array(TestStepSchema), raw: z.string() }).parse(raw),
+    );
   },
 };
