@@ -14,6 +14,7 @@ import {
   SuiteRunNotFoundError,
   ensureSuiteHtmlPath,
   escapeHtml,
+  formatStepDetail,
   getSuiteReport,
   readSuiteHtmlReport,
   renderSuiteHtml,
@@ -112,12 +113,25 @@ describe("getSuiteReport", () => {
     const failed = report.cases.find((c) => c.caseRunId === "cr-0");
     expect(failed?.caseName).toBe("Login <flow>");
     expect(failed?.steps.map((s) => s.action)).toEqual(["goto", "step"]);
+    expect(failed?.steps[0]).toMatchObject({ value: "https://x.test", selector: null });
     expect(failed?.videoPath).toBe("/v/failed.webm");
   });
 
   it("throws for unknown runs", () => {
     const { db } = seed();
     expect(() => getSuiteReport(db, "ghost")).toThrow(SuiteRunNotFoundError);
+  });
+});
+
+describe("formatStepDetail", () => {
+  it("describes what the step did instead of its id", () => {
+    expect(formatStepDetail("goto", null, "https://x.test")).toBe("https://x.test");
+    expect(formatStepDetail("click", "#go", null)).toBe("#go");
+    expect(formatStepDetail("click", "#go", "dblclick")).toBe("#go (double-click)");
+    expect(formatStepDetail("fill", "#name", "Ada")).toBe("#name → Ada");
+    expect(formatStepDetail("press", null, "Enter")).toBe("Enter");
+    expect(formatStepDetail("wait", null, "500")).toBe("500 ms");
+    expect(formatStepDetail("step", null, null)).toBe("");
   });
 });
 
@@ -135,7 +149,8 @@ describe("renderSuiteHtml", () => {
     expect(html).toContain("Login &lt;flow&gt;");
     expect(html).toContain("&lt;boom&gt; &amp; &quot;quoted&quot;");
     expect(html).toContain("data:image/png;base64,");
-    expect(html).toContain("missing-step");
+    expect(html).toContain("goto — https://x.test");
+    expect(html).not.toContain("missing-step");
   });
 
   it("links large screenshots instead of embedding them", () => {

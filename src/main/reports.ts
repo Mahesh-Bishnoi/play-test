@@ -19,6 +19,8 @@ export interface ReportStep {
   /** Test-step id (stable reference even when the step was deleted since). */
   stepId: string;
   action: string;
+  selector: string | null;
+  value: string | null;
   status: "pass" | "fail" | "skipped" | "running";
   error: string | null;
   screenshotPath: string | null;
@@ -74,12 +76,12 @@ export function getSuiteReport(db: AppDatabase, suiteRunId: string): SuiteReport
       null;
   }
   const caseRows = db.select().from(caseRuns).where(eq(caseRuns.suiteRunId, suiteRunId)).all();
-  const actionByStepId = new Map(
+  const stepById = new Map(
     db
       .select()
       .from(testSteps)
       .all()
-      .map((s) => [s.id, s.action]),
+      .map((s) => [s.id, s] as const),
   );
   const cases: ReportCase[] = caseRows.map((cr) => {
     const testCase = db.select().from(testCases).where(eq(testCases.id, cr.caseId)).all()[0];
@@ -96,15 +98,20 @@ export function getSuiteReport(db: AppDatabase, suiteRunId: string): SuiteReport
       status: cr.status,
       durationMs: cr.durationMs,
       videoPath: cr.videoPath,
-      steps: stepRows.map((s) => ({
-        order: s.order,
-        stepId: s.stepId,
-        action: actionByStepId.get(s.stepId) ?? "step",
-        status: s.status as ReportStep["status"],
-        error: s.error,
-        screenshotPath: s.screenshotPath,
-        durationMs: s.durationMs,
-      })),
+      steps: stepRows.map((s) => {
+        const step = stepById.get(s.stepId);
+        return {
+          order: s.order,
+          stepId: s.stepId,
+          action: step?.action ?? "step",
+          selector: step?.selector ?? null,
+          value: step?.value ?? null,
+          status: s.status as ReportStep["status"],
+          error: s.error,
+          screenshotPath: s.screenshotPath,
+          durationMs: s.durationMs,
+        };
+      }),
     };
   });
   const passed = cases.filter((c) => c.status === "passed").length;
@@ -146,6 +153,49 @@ const INLINE_CSS = [
 ].join("\n");
 
 /**
+ * Human-readable step detail for the report `step` column: what the step
+ * did (selector / value), not the internal step id. Mirrors the workflow
+ * subtitle convention (selector preferred, else value) but shows both when
+ * the action needs them (fill/select/assert-text/press).
+ */
+export function formatStepDetail(
+  action: string,
+  selector: string | null,
+  value: string | null,
+): string {
+  const sel = (selector ?? "").trim();
+  const val = (value ?? "").trim();
+  switch (action) {
+    case "goto":
+      return val;
+    case "click":
+      if (sel !== "" && val === "dblclick") {
+        return `${sel} (double-click)`;
+      }
+      return sel !== "" ? sel : val;
+    case "fill":
+    case "select":
+    case "assert-text":
+      if (sel !== "" && val !== "") {
+        return `${sel} → ${val}`;
+      }
+      return sel !== "" ? sel : val;
+    case "press":
+      if (sel !== "" && val !== "") {
+        return `${sel} + ${val}`;
+      }
+      return sel !== "" ? sel : val;
+    case "wait":
+      return val !== "" ? `${val} ms` : "";
+    default:
+      if (sel !== "" && val !== "") {
+        return `${sel} · ${val}`;
+      }
+      return sel !== "" ? sel : val;
+  }
+}
+
+/**
  * Render the self-contained HTML report. Screenshots embed as base64 thumbs
  * (when the file exists and fits) and always link by relative path so the
  * file stays useful even when moved alongside its artifacts dir.
@@ -166,7 +216,11 @@ export function renderSuiteHtml(
               ? `<div class="err">${escapeHtml(s.error)}</div>`
               : '<span class="muted">—</span>';
           const dur = s.durationMs !== null ? `${s.durationMs} ms` : "—";
-          const step = `${escapeHtml(s.action)} <span class="muted">${escapeHtml(s.stepId)}</span>`;
+          const detail = formatStepDetail(s.action, s.selector, s.value);
+          const step =
+            detail !== ""
+              ? `${escapeHtml(s.action)} — ${escapeHtml(detail)}`
+              : escapeHtml(s.action);
           return `<tr><td>${s.order}</td><td class="${s.status}">${s.status}</td><td>${step}</td><td>${dur}</td><td>${shot}</td><td>${err}</td></tr>`;
         })
         .join("\n");
