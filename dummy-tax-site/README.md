@@ -24,6 +24,26 @@ Reset all in-memory state between test runs:
 curl http://127.0.0.1:4137/__reset
 ```
 
+## Seed data for live validation
+
+```bash
+npm run seed:dummy-tax
+# → seeds ~/PlayTestData/playtest.db (override with --db <path>)
+# → project "DummyTax portal" + suite "Tax flows" + 3 cases, 33 steps, KV data
+```
+
+Idempotent: re-running deletes the old "DummyTax portal" project first and
+recreates it. Your other projects are left alone. Then:
+
+```bash
+npm run dummy:tax-site   # serves http://127.0.0.1:4137
+```
+
+open the packaged PlayTest app and run the "Tax flows" suite (or a single
+case supervised). Cases mirror the automated e2e coverage in
+`tests/e2e-dummy-tax-site.test.ts`: Login (5 steps), File ITR-1 return (16),
+Respond to notice (12).
+
 ## Automated e2e coverage
 
 `tests/e2e-dummy-tax-site.test.ts` drives the real product runners
