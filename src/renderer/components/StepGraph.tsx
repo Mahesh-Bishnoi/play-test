@@ -21,8 +21,7 @@ interface Props {
 
 /**
  * Linear workflow chain (WS3, PLAN §6). Nodes are draggable for inspection;
- * logical order changes go through the step table (up/down + drag reorder),
- * which calls step:move / step:reorder so `order` stays dense.
+ * logical order changes go through the step table.
  */
 export default function StepGraph({
   steps,
@@ -58,11 +57,11 @@ export default function StepGraph({
   );
 
   if (steps.length === 0) {
-    return <p>No steps yet — add one below to start the workflow.</p>;
+    return <p className="pt-empty">No steps yet — add one below to start the workflow.</p>;
   }
 
   return (
-    <div style={{ height: 420, border: "1px solid #ddd", borderRadius: 8 }} aria-label="Step graph">
+    <div className="pt-graph" aria-label="Step graph">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -71,6 +70,7 @@ export default function StepGraph({
           onSelect(node.id);
         }}
         fitView
+        colorMode="dark"
       />
     </div>
   );

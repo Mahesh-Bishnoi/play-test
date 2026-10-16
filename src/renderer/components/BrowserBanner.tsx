@@ -5,11 +5,7 @@ import { api } from "../api.js";
 type State = "checking" | "ready" | "missing" | "installing" | "error";
 
 /**
- * First-run Chromium banner (M7, PLAN §11). Checks `system:browserStatus` on
- * mount; when the browser is absent it offers a one-click
- * `system:installBrowser` with indeterminate progress. Renders nothing once
- * the browser is present — runs need it, CRUD does not, so this warns rather
- * than blocks.
+ * First-run Chromium banner (M7, PLAN §11). Warns rather than blocks.
  */
 export default function BrowserBanner(): React.JSX.Element | null {
   const [state, setState] = useState<State>("checking");
@@ -52,20 +48,7 @@ export default function BrowserBanner(): React.JSX.Element | null {
   }
 
   return (
-    <div
-      role="status"
-      style={{
-        marginTop: 16,
-        padding: "10px 12px",
-        border: "1px solid #d97706",
-        borderRadius: 6,
-        background: "#fffbeb",
-        display: "flex",
-        gap: 12,
-        alignItems: "center",
-        flexWrap: "wrap",
-      }}
-    >
+    <div role="status" className="pt-banner" style={{ marginBottom: 16 }}>
       <span>
         {state === "checking" && "Checking for Chromium…"}
         {state === "missing" &&
@@ -75,33 +58,11 @@ export default function BrowserBanner(): React.JSX.Element | null {
       </span>
       {(state === "missing" || state === "error") && (
         <>
-          <button
-            type="button"
-            onClick={install}
-            style={{
-              padding: "6px 12px",
-              border: "1px solid #888",
-              borderRadius: 4,
-              background: "#fff",
-              cursor: "pointer",
-              fontSize: 14,
-            }}
-          >
+          <button type="button" className="pt-btn pt-btn-sm" onClick={install}>
             Install Chromium
           </button>
           {state === "error" && (
-            <button
-              type="button"
-              onClick={check}
-              style={{
-                padding: "6px 12px",
-                border: "1px solid #888",
-                borderRadius: 4,
-                background: "#fff",
-                cursor: "pointer",
-                fontSize: 14,
-              }}
-            >
+            <button type="button" className="pt-btn pt-btn-sm" onClick={check}>
               Retry check
             </button>
           )}

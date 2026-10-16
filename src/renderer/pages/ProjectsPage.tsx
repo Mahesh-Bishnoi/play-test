@@ -7,29 +7,13 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function inputStyle(): React.CSSProperties {
-  return { padding: "6px 8px", border: "1px solid #ccc", borderRadius: 4, fontSize: 14 };
-}
-
-function buttonStyle(disabled?: boolean): React.CSSProperties {
-  return {
-    padding: "6px 12px",
-    border: "1px solid #888",
-    borderRadius: 4,
-    background: disabled === true ? "#eee" : "#fff",
-    cursor: disabled === true ? "not-allowed" : "pointer",
-    fontSize: 14,
-  };
-}
-
 interface Props {
   selectedId: string | null;
   onSelect: (projectId: string | null) => void;
 }
 
 /**
- * M2 projects CRUD (PLAN §6). Owns project list state; suite/case UI lives in
- * SuiteDetailPage once a project is selected.
+ * M2 projects CRUD (PLAN §6). Sidebar-compact: stacked create form + list.
  */
 export default function ProjectsPage({ selectedId, onSelect }: Props): React.JSX.Element {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -115,123 +99,123 @@ export default function ProjectsPage({ selectedId, onSelect }: Props): React.JSX
   };
 
   return (
-    <section aria-label="Projects">
-      <h2>Projects</h2>
+    <section aria-label="Projects" style={{ display: "grid", gap: 12 }}>
       {error !== null && (
-        <p role="alert" style={{ color: "red" }}>
+        <p role="alert" className="pt-alert pt-alert-error">
           {error}
         </p>
       )}
-      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+      <div className="pt-form-grid">
         <input
           aria-label="Project name"
+          className="pt-input"
           value={name}
           onChange={(e) => {
             setName(e.target.value);
           }}
           placeholder="New project name"
-          style={inputStyle()}
         />
         <input
           aria-label="Base URL"
+          className="pt-input"
           value={baseUrl}
           onChange={(e) => {
             setBaseUrl(e.target.value);
           }}
           placeholder="Base URL (optional)"
-          style={{ ...inputStyle(), minWidth: 240 }}
         />
         <button
           type="button"
+          className="pt-btn pt-btn-primary"
           onClick={create}
           disabled={name.trim() === ""}
-          style={buttonStyle(name.trim() === "")}
         >
-          Create
+          New project
         </button>
       </div>
       {projects.length === 0 ? (
-        <p>No projects yet.</p>
+        <p className="pt-empty">No projects yet.</p>
       ) : (
-        <ul style={{ listStyle: "none", padding: 0, display: "grid", gap: 8 }}>
+        <ul className="pt-list">
           {projects.map((p) => (
             <li
               key={p.id}
-              style={{
-                border: selectedId === p.id ? "2px solid #2563eb" : "1px solid #ccc",
-                borderRadius: 6,
-                padding: 8,
-                display: "flex",
-                gap: 8,
-                alignItems: "center",
-                flexWrap: "wrap",
-              }}
+              className={`pt-list-item${selectedId === p.id ? " pt-list-item-active" : ""}`}
             >
               {editingId === p.id ? (
-                <>
+                <div className="pt-form-grid" style={{ inlineSize: "100%" }}>
                   <input
                     aria-label="Edit project name"
+                    className="pt-input"
                     value={editName}
                     onChange={(e) => {
                       setEditName(e.target.value);
                     }}
-                    style={inputStyle()}
                   />
                   <input
                     aria-label="Edit base URL"
+                    className="pt-input"
                     value={editBaseUrl}
                     onChange={(e) => {
                       setEditBaseUrl(e.target.value);
                     }}
-                    style={{ ...inputStyle(), minWidth: 200 }}
                   />
-                  <button type="button" onClick={saveEdit} style={buttonStyle()}>
-                    Save
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingId(null);
-                    }}
-                    style={buttonStyle()}
-                  >
-                    Cancel
-                  </button>
-                </>
+                  <div className="pt-row">
+                    <button
+                      type="button"
+                      className="pt-btn pt-btn-primary pt-btn-sm"
+                      onClick={saveEdit}
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      className="pt-btn pt-btn-sm"
+                      onClick={() => {
+                        setEditingId(null);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <>
                   <button
                     type="button"
+                    className="pt-btn pt-btn-ghost pt-btn-sm"
                     onClick={() => {
                       onSelect(p.id);
                     }}
-                    style={{
-                      ...buttonStyle(),
-                      fontWeight: selectedId === p.id ? "bold" : "normal",
-                    }}
                     aria-pressed={selectedId === p.id}
+                    style={{ fontWeight: selectedId === p.id ? 800 : 600 }}
                   >
                     {p.name}
                   </button>
                   {p.baseUrl !== undefined && p.baseUrl !== "" && (
-                    <span style={{ color: "#555", fontSize: 13 }}>{p.baseUrl}</span>
+                    <span
+                      className="pt-mono pt-hint"
+                      style={{ overflow: "clip", textOverflow: "ellipsis" }}
+                    >
+                      {p.baseUrl}
+                    </span>
                   )}
-                  <span style={{ flex: 1 }} />
+                  <span className="pt-spacer" />
                   <button
                     type="button"
+                    className="pt-btn pt-btn-sm"
                     onClick={() => {
                       startEdit(p);
                     }}
-                    style={buttonStyle()}
                   >
                     Rename
                   </button>
                   <button
                     type="button"
+                    className="pt-btn pt-btn-danger pt-btn-sm"
                     onClick={() => {
                       remove(p.id);
                     }}
-                    style={buttonStyle()}
                   >
                     Delete
                   </button>

@@ -7,21 +7,6 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function inputStyle(): React.CSSProperties {
-  return { padding: "6px 8px", border: "1px solid #ccc", borderRadius: 4, fontSize: 14 };
-}
-
-function buttonStyle(disabled?: boolean): React.CSSProperties {
-  return {
-    padding: "6px 12px",
-    border: "1px solid #888",
-    borderRadius: 4,
-    background: disabled === true ? "#eee" : "#fff",
-    cursor: disabled === true ? "not-allowed" : "pointer",
-    fontSize: 14,
-  };
-}
-
 interface Props {
   projectId: string;
   /** WS3 hook: open a case in the workflow editor (CaseDetailPage). */
@@ -33,7 +18,7 @@ interface Props {
 /**
  * M2 suite detail (PLAN §6): suite CRUD, project case CRUD, membership
  * checkboxes with search + select-all/none + save, and an unsupervised-only
- * pre-run confirm dialog. Actual execution lands in WS5 (M5/M6).
+ * pre-run confirm dialog.
  */
 export default function SuiteDetailPage({
   projectId,
@@ -254,96 +239,110 @@ export default function SuiteDetailPage({
 
   return (
     <section aria-label="Suites and cases" style={{ display: "grid", gap: 16 }}>
-      <div>
-        <h2>Suites</h2>
-        {error !== null && (
-          <p role="alert" style={{ color: "red" }}>
-            {error}
-          </p>
+      <div className="pt-topbar">
+        <h2>Suites &amp; cases</h2>
+        <span className="pt-badge">
+          <span className="pt-badge-dot" aria-hidden="true" />
+          {suites.length} suites
+        </span>
+        <span className="pt-badge pt-badge-mute">{cases.length} cases</span>
+        {selectedSuite !== null && (
+          <span className="pt-badge pt-badge-run">{memberIds.length} selected</span>
         )}
-        {notice !== null && (
-          <p role="status" style={{ color: "green" }}>
-            {notice}
-          </p>
-        )}
-        <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+        {dirty && <span className="pt-badge pt-badge-fail">unsaved changes</span>}
+      </div>
+      {error !== null && (
+        <p role="alert" className="pt-alert pt-alert-error">
+          {error}
+        </p>
+      )}
+      {notice !== null && (
+        <p role="status" className="pt-alert pt-alert-ok">
+          {notice}
+        </p>
+      )}
+
+      <div className="pt-card">
+        <div className="pt-section-head">
+          <h3>Suites</h3>
+        </div>
+        <div className="pt-row" style={{ marginBottom: 12 }}>
           <input
             aria-label="New suite name"
+            className="pt-input"
             value={newSuiteName}
             onChange={(e) => {
               setNewSuiteName(e.target.value);
             }}
             placeholder="New suite name"
-            style={inputStyle()}
+            style={{ maxInlineSize: 280 }}
           />
           <button
             type="button"
+            className="pt-btn pt-btn-primary pt-btn-sm"
             onClick={createSuite}
             disabled={newSuiteName.trim() === ""}
-            style={buttonStyle(newSuiteName.trim() === "")}
           >
             Create suite
           </button>
         </div>
         {suites.length === 0 ? (
-          <p>No suites yet — create one to start selecting cases.</p>
+          <p className="pt-empty">No suites yet — create one to start selecting cases.</p>
         ) : (
-          <ul style={{ listStyle: "none", padding: 0, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div className="pt-suite-pills">
             {suites.map((s) => (
-              <li
+              <span
                 key={s.id}
-                style={{
-                  display: "flex",
-                  gap: 4,
-                  alignItems: "center",
-                  border: suiteId === s.id ? "2px solid #2563eb" : "1px solid #ccc",
-                  borderRadius: 6,
-                  padding: 4,
-                }}
+                className={`pt-list-item${suiteId === s.id ? " pt-list-item-active" : ""}`}
+                style={{ padding: "4px 4px 4px 8px" }}
               >
                 <button
                   type="button"
+                  className="pt-btn pt-btn-ghost pt-btn-sm"
                   onClick={() => {
                     selectSuite(s.id);
                   }}
                   aria-pressed={suiteId === s.id}
-                  style={buttonStyle()}
                 >
                   {s.name}
                 </button>
                 <button
                   type="button"
+                  className="pt-btn pt-btn-sm"
                   onClick={() => {
                     deleteSuite(s.id);
                   }}
                   aria-label={`Delete suite ${s.name}`}
-                  style={buttonStyle()}
                 >
                   ×
                 </button>
-              </li>
+              </span>
             ))}
-          </ul>
+          </div>
         )}
       </div>
 
-      <div>
-        <h2>Cases</h2>
-        <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+      <div className="pt-card">
+        <div className="pt-section-head">
+          <h3>Cases</h3>
+          <span className="pt-count">{cases.length} in project</span>
+        </div>
+        <div className="pt-row" style={{ marginBottom: 4 }}>
           <input
             aria-label="New case name"
+            className="pt-input"
             value={newCaseName}
             onChange={(e) => {
               setNewCaseName(e.target.value);
             }}
             placeholder="New case name"
-            style={inputStyle()}
+            style={{ maxInlineSize: 280 }}
           />
           <button
             type="button"
+            className="pt-btn pt-btn-sm"
             onClick={createCase}
             disabled={newCaseName.trim() === ""}
-            style={buttonStyle(newCaseName.trim() === "")}
           >
             Create case
           </button>
@@ -351,131 +350,124 @@ export default function SuiteDetailPage({
       </div>
 
       {selectedSuite === null ? (
-        <p>Select a suite to manage its cases.</p>
+        <p className="pt-empty">Select a suite to manage its cases.</p>
       ) : (
-        <div>
-          <h3>
-            {selectedSuite.name} — cases ({memberIds.length} selected)
-            {dirty && <span style={{ color: "#b45309" }}> — unsaved changes</span>}
-          </h3>
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              marginBottom: 8,
-              flexWrap: "wrap",
-              alignItems: "center",
-            }}
-          >
+        <div className="pt-card">
+          <div className="pt-section-head">
+            <h3>{selectedSuite.name}</h3>
+            <span className="pt-count">{memberIds.length} in suite</span>
+          </div>
+          <div className="pt-row" style={{ marginBottom: 12 }}>
             <input
               aria-label="Search cases"
+              className="pt-input"
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
               }}
               placeholder="Search cases"
-              style={inputStyle()}
+              style={{ maxInlineSize: 220 }}
             />
-            <button type="button" onClick={selectAll} style={buttonStyle()}>
+            <button type="button" className="pt-btn pt-btn-sm" onClick={selectAll}>
               Select all
             </button>
-            <button type="button" onClick={selectNone} style={buttonStyle()}>
+            <button type="button" className="pt-btn pt-btn-sm" onClick={selectNone}>
               Select none
             </button>
             <button
               type="button"
+              className="pt-btn pt-btn-primary pt-btn-sm"
               onClick={saveSelection}
               disabled={!dirty}
-              style={buttonStyle(!dirty)}
             >
               Save selection
             </button>
             <button
               type="button"
+              className="pt-btn pt-btn-sm"
               onClick={() => {
                 setRunDialogOpen(true);
               }}
               disabled={checked.size === 0}
-              style={buttonStyle(checked.size === 0)}
             >
               Run suite…
             </button>
           </div>
           {visibleCases.length === 0 ? (
-            <p>
+            <p className="pt-empty">
               {cases.length === 0 ? "No cases in this project yet." : "No cases match the search."}
             </p>
           ) : (
-            <table style={{ borderCollapse: "collapse", width: "100%" }}>
-              <thead>
-                <tr>
-                  <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: 4 }}>
-                    <input
-                      type="checkbox"
-                      aria-label={
-                        allVisibleChecked
-                          ? "Deselect all visible cases"
-                          : "Select all visible cases"
-                      }
-                      checked={allVisibleChecked}
-                      onChange={() => {
-                        if (allVisibleChecked) {
-                          selectNone();
-                        } else {
-                          selectAll();
-                        }
-                      }}
-                    />
-                  </th>
-                  <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: 4 }}>
-                    Name
-                  </th>
-                  <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: 4 }}>
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleCases.map((c) => (
-                  <tr key={c.id}>
-                    <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>
+            <div className="pt-table-wrap">
+              <table className="pt-table">
+                <thead>
+                  <tr>
+                    <th>
                       <input
                         type="checkbox"
-                        aria-label={`Include case ${c.name}`}
-                        checked={checked.has(c.id)}
+                        aria-label={
+                          allVisibleChecked
+                            ? "Deselect all visible cases"
+                            : "Select all visible cases"
+                        }
+                        checked={allVisibleChecked}
                         onChange={() => {
-                          toggle(c.id);
+                          if (allVisibleChecked) {
+                            selectNone();
+                          } else {
+                            selectAll();
+                          }
                         }}
                       />
-                    </td>
-                    <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>{c.name}</td>
-                    <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>
-                      {onOpenCase !== undefined && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onOpenCase(c.id);
-                          }}
-                          aria-label={`Open case ${c.name} in workflow editor`}
-                          style={buttonStyle()}
-                        >
-                          Open
-                        </button>
-                      )}{" "}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          deleteCase(c.id);
-                        }}
-                        style={buttonStyle()}
-                      >
-                        Delete
-                      </button>
-                    </td>
+                    </th>
+                    <th>Name</th>
+                    <th style={{ textAlign: "end" }}>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {visibleCases.map((c) => (
+                    <tr key={c.id} className={checked.has(c.id) ? "pt-row-selected" : undefined}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`Include case ${c.name}`}
+                          checked={checked.has(c.id)}
+                          onChange={() => {
+                            toggle(c.id);
+                          }}
+                        />
+                      </td>
+                      <td>{c.name}</td>
+                      <td style={{ textAlign: "end" }}>
+                        <span className="pt-row" style={{ justifyContent: "flex-end" }}>
+                          {onOpenCase !== undefined && (
+                            <button
+                              type="button"
+                              className="pt-btn pt-btn-sm"
+                              onClick={() => {
+                                onOpenCase(c.id);
+                              }}
+                              aria-label={`Open case ${c.name} in workflow editor`}
+                            >
+                              Open
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="pt-btn pt-btn-danger pt-btn-sm"
+                            onClick={() => {
+                              deleteCase(c.id);
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
 
           {runDialogOpen && (
@@ -483,43 +475,40 @@ export default function SuiteDetailPage({
               role="dialog"
               aria-modal="true"
               aria-label="Confirm suite run"
-              style={{
-                border: "2px solid #2563eb",
-                borderRadius: 8,
-                padding: 16,
-                marginTop: 12,
-                maxWidth: 560,
-              }}
+              className="pt-panel"
+              style={{ marginTop: 12, borderColor: "var(--pt-accent)" }}
             >
-              <h4>Run suite (unsupervised only)</h4>
-              <p>
-                Suite <strong>{selectedSuite.name}</strong> — {selectedCases.length} case(s):
+              <div className="pt-section-head">
+                <h4 style={{ margin: 0 }}>Run suite (unsupervised only)</h4>
+              </div>
+              <p className="pt-sub">
+                Suite <strong>{selectedSuite.name}</strong> — {selectedCases.length} case(s)
               </p>
               <ul>
                 {selectedCases.map((c) => (
                   <li key={c.id}>{c.name}</li>
                 ))}
               </ul>
-              <p style={{ color: "#555" }}>
+              <p className="pt-hint">
                 Headless and parallel, never pauses. Each case runs independently; a failure skips
                 only that case&apos;s remaining steps.
               </p>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div className="pt-row">
                 <button
                   type="button"
+                  className="pt-btn pt-btn-primary pt-btn-sm"
                   onClick={confirmRunSuite}
                   disabled={runBusy}
-                  style={buttonStyle(runBusy)}
                 >
                   {runBusy ? "Starting…" : `Confirm (${selectedCases.length})`}
                 </button>
                 <button
                   type="button"
+                  className="pt-btn pt-btn-sm"
                   onClick={() => {
                     setRunDialogOpen(false);
                   }}
                   disabled={runBusy}
-                  style={buttonStyle(runBusy)}
                 >
                   Cancel
                 </button>
@@ -530,10 +519,10 @@ export default function SuiteDetailPage({
             <div style={{ marginTop: 12 }}>
               <button
                 type="button"
+                className="pt-btn pt-btn-sm"
                 onClick={() => {
                   onViewReport(lastSuiteRunId);
                 }}
-                style={buttonStyle()}
               >
                 View last report
               </button>

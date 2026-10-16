@@ -6,17 +6,6 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function buttonStyle(disabled?: boolean): React.CSSProperties {
-  return {
-    padding: "6px 12px",
-    border: "1px solid #888",
-    borderRadius: 4,
-    background: disabled === true ? "#eee" : "#fff",
-    cursor: disabled === true ? "not-allowed" : "pointer",
-    fontSize: 14,
-  };
-}
-
 interface Props {
   suiteRunId: string;
   onBack: () => void;
@@ -26,8 +15,7 @@ interface Props {
 
 /**
  * Suite run report (WS6 / M6, PLAN §6 + §9): renders the self-contained HTML
- * report, exports PDF, and re-runs failed cases. Auto-refreshes when the
- * matching `run:finished` event lands (suite still running when opened).
+ * report, exports PDF, and re-runs failed cases.
  */
 export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): React.JSX.Element {
   const [html, setHtml] = useState<string | null>(null);
@@ -96,43 +84,48 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
   };
 
   return (
-    <section aria-label="Run report" style={{ display: "grid", gap: 12 }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <button type="button" onClick={onBack} style={buttonStyle()}>
+    <section aria-label="Run report" style={{ display: "grid", gap: 14 }}>
+      <div className="pt-topbar">
+        <button type="button" className="pt-btn pt-btn-sm" onClick={onBack}>
           ← Back
         </button>
-        <h2 style={{ margin: 0 }}>Run report</h2>
-        <span style={{ color: "#666", fontSize: 13, fontFamily: "monospace" }}>{suiteRunId}</span>
+        <h2>Run report</h2>
+        <span className="pt-mono pt-hint">{suiteRunId}</span>
       </div>
       {error !== null && (
-        <p role="alert" style={{ color: "red" }}>
+        <p role="alert" className="pt-alert pt-alert-error">
           {error}
         </p>
       )}
       {notice !== null && (
-        <p role="status" style={{ color: "green" }}>
+        <p role="status" className="pt-alert pt-alert-ok">
           {notice}
         </p>
       )}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button type="button" onClick={refresh} disabled={busy} style={buttonStyle(busy)}>
+      <div className="pt-row">
+        <button type="button" className="pt-btn pt-btn-sm" onClick={refresh} disabled={busy}>
           Refresh
         </button>
-        <button type="button" onClick={exportPdf} disabled={busy} style={buttonStyle(busy)}>
+        <button type="button" className="pt-btn pt-btn-sm" onClick={exportPdf} disabled={busy}>
           Export PDF
         </button>
-        <button type="button" onClick={rerunFailed} disabled={busy} style={buttonStyle(busy)}>
+        <button
+          type="button"
+          className="pt-btn pt-btn-primary pt-btn-sm"
+          onClick={rerunFailed}
+          disabled={busy}
+        >
           Re-run failed
         </button>
       </div>
       {html === null ? (
-        <p>Loading report…</p>
+        <p className="pt-empty">Loading report…</p>
       ) : (
         <iframe
           title={`Report for run ${suiteRunId}`}
           srcDoc={html}
           sandbox=""
-          style={{ width: "100%", minHeight: 600, border: "1px solid #ccc", borderRadius: 6 }}
+          className="pt-report-frame"
         />
       )}
     </section>

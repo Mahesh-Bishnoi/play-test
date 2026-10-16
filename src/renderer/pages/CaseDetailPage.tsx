@@ -16,17 +16,6 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function buttonStyle(disabled?: boolean): React.CSSProperties {
-  return {
-    padding: "6px 12px",
-    border: "1px solid #888",
-    borderRadius: 4,
-    background: disabled === true ? "#eee" : "#fff",
-    cursor: disabled === true ? "not-allowed" : "pointer",
-    fontSize: 14,
-  };
-}
-
 interface Props {
   caseId: string;
   onBack: () => void;
@@ -34,10 +23,9 @@ interface Props {
 
 /**
  * Workflow editor for one test case (WS3 / M3 + WS4 / M4 + WS5 / M5 + M6/M7,
- * PLAN §6–§8 + §10): linear step graph, click-to-edit panel with `{{key}}`
- * hints, add/delete, up/down + drag reorder, codegen recording with import
- * preview, KV test-data editor, and single-case runs with live step status,
- * supervised pause/resume, and cancel.
+ * PLAN §6–§8 + §10): linear step graph, click-to-edit panel, add/delete,
+ * reorder, codegen recording with import preview, KV test-data editor, and
+ * single-case runs with live step status, supervised pause/resume, cancel.
  */
 export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Element {
   const [detail, setDetail] = useState<CaseDetail | null>(null);
@@ -52,7 +40,6 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
   const [recording, setRecording] = useState(false);
   const [recordUrl, setRecordUrl] = useState("");
   const [preview, setPreview] = useState<{ steps: TestStep[]; raw: string } | null>(null);
-  // Live run state (WS5): statuses arrive over run:step-update keyed by order.
   const [activeRun, setActiveRun] = useState<{
     suiteRunId: string;
     caseRunId: string;
@@ -124,7 +111,6 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
   const steps = detail?.steps ?? [];
   const selected = steps.find((s) => s.id === selectedId) ?? null;
 
-  // Live status keyed by order → by step id for the graph (WS5 fills this).
   const statusByStepId = useMemo<Record<string, StepStatus>>(() => {
     const map: Record<string, StepStatus> = {};
     for (const step of steps) {
@@ -136,8 +122,6 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
     return map;
   }, [steps, statusByOrder]);
 
-  // Subscribe to run:* streams for the active run; filters guard against
-  // stale events from a previous run (cancel-then-rerun races).
   useEffect(() => {
     if (activeRun === null) {
       return;
@@ -332,8 +316,6 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
       });
   };
 
-  // A paused supervised session still holds the runner: cancel it first so
-  // the full re-run gets a fresh session instead of an "already active" error.
   const fullRerun = (mode: RunMode): void => {
     if (activeRun === null) {
       startRun(mode);
@@ -355,41 +337,52 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
 
   const paused = activeRun !== null && activeRun.mode === "supervised" && failedOrder !== null;
 
+  const runBadge =
+    activeRun !== null ? (
+      <span className="pt-badge pt-badge-run">
+        <span className="pt-badge-dot" aria-hidden="true" />
+        Running · {activeRun.mode}
+      </span>
+    ) : paused ? (
+      <span className="pt-badge pt-badge-fail">Paused</span>
+    ) : runFinished !== null ? (
+      <span className="pt-badge pt-badge-pass">{runFinished}</span>
+    ) : (
+      <span className="pt-badge pt-badge-mute">Idle</span>
+    );
+
   return (
     <section aria-label="Case workflow" style={{ display: "grid", gap: 16 }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <button type="button" onClick={onBack} style={buttonStyle()}>
+      <div className="pt-topbar">
+        <button type="button" className="pt-btn pt-btn-sm" onClick={onBack}>
           ← Back to suites
         </button>
-        <h2 style={{ margin: 0 }}>
-          {detail === null ? "Loading case…" : detail.case.name}
-          {detail !== null && steps.length > 0 && (
-            <span style={{ color: "#666", fontWeight: "normal" }}> — {steps.length} step(s)</span>
-          )}
-        </h2>
+        <h2>{detail === null ? "Loading case…" : detail.case.name}</h2>
+        {detail !== null && steps.length > 0 && (
+          <span className="pt-badge">{steps.length} steps</span>
+        )}
+        {runBadge}
       </div>
       {error !== null && (
-        <p role="alert" style={{ color: "red" }}>
+        <p role="alert" className="pt-alert pt-alert-error">
           {error}
         </p>
       )}
       {notice !== null && (
-        <p role="status" style={{ color: "green" }}>
+        <p role="status" className="pt-alert pt-alert-ok">
           {notice}
         </p>
       )}
 
       {detail !== null && (
         <>
-          <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
-            <div style={{ flex: "1 1 420px", minWidth: 320 }}>
-              <StepGraph
-                steps={steps}
-                statusByStepId={statusByStepId}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-              />
-            </div>
+          <div className="pt-grid-2">
+            <StepGraph
+              steps={steps}
+              statusByStepId={statusByStepId}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+            />
             {selected !== null ? (
               <StepEditorPanel
                 key={selected.id}
@@ -400,21 +393,24 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                 onDelete={deleteStep}
               />
             ) : (
-              <p style={{ color: "#666" }}>Select a step in the graph or table to edit it.</p>
+              <p className="pt-empty">Select a step in the graph or table to edit it.</p>
             )}
           </div>
 
-          <div>
-            <h3>Steps</h3>
-            <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+          <div className="pt-card">
+            <div className="pt-section-head">
+              <h3>Steps</h3>
+              <span className="pt-count">Drag rows to reorder, or use ↑ ↓</span>
+            </div>
+            <div className="pt-row" style={{ marginBottom: 12 }}>
               <select
                 aria-label="New step action"
+                className="pt-select"
                 value={newAction}
                 disabled={busy}
                 onChange={(e) => {
                   setNewAction(e.target.value as StepAction);
                 }}
-                style={{ padding: "6px 8px", border: "1px solid #ccc", borderRadius: 4 }}
               >
                 {STEP_ACTIONS.map((name) => (
                   <option key={name} value={name}>
@@ -422,117 +418,109 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                   </option>
                 ))}
               </select>
-              <button type="button" onClick={addStep} disabled={busy} style={buttonStyle(busy)}>
+              <button type="button" className="pt-btn pt-btn-sm" onClick={addStep} disabled={busy}>
                 Add step
               </button>
-              <span style={{ color: "#666", fontSize: 13, alignSelf: "center" }}>
-                Drag rows to reorder, or use ↑ ↓.
-              </span>
             </div>
             {steps.length === 0 ? (
-              <p>No steps yet — add the first one above.</p>
+              <p className="pt-empty">No steps yet — add the first one above.</p>
             ) : (
-              <table style={{ borderCollapse: "collapse", width: "100%" }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: 4 }}>
-                      #
-                    </th>
-                    <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: 4 }}>
-                      Action
-                    </th>
-                    <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: 4 }}>
-                      Selector
-                    </th>
-                    <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: 4 }}>
-                      Value
-                    </th>
-                    <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: 4 }}>
-                      Order
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {steps.map((step, index) => (
-                    <tr
-                      key={step.id}
-                      draggable
-                      onDragStart={() => {
-                        setDragId(step.id);
-                      }}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                      }}
-                      onDrop={() => {
-                        dropReorder(step.id);
-                      }}
-                      onClick={() => {
-                        setSelectedId(step.id);
-                      }}
-                      style={{
-                        background: step.id === selectedId ? "#eff6ff" : undefined,
-                        cursor: "pointer",
-                        opacity: dragId === step.id ? 0.5 : 1,
-                      }}
-                    >
-                      <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>{index + 1}</td>
-                      <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>{step.action}</td>
-                      <td
-                        style={{
-                          padding: 4,
-                          borderBottom: "1px solid #eee",
-                          fontFamily: "ui-monospace, monospace",
-                          fontSize: 13,
-                        }}
-                      >
-                        {step.selector ?? "—"}
-                      </td>
-                      <td
-                        style={{
-                          padding: 4,
-                          borderBottom: "1px solid #eee",
-                          fontFamily: "ui-monospace, monospace",
-                          fontSize: 13,
-                        }}
-                      >
-                        {step.value ?? "—"}
-                      </td>
-                      <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>
-                        <button
-                          type="button"
-                          aria-label={`Move step ${index + 1} up`}
-                          disabled={busy || index === 0}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            moveStep(step.id, index - 1);
-                          }}
-                          style={buttonStyle(busy || index === 0)}
-                        >
-                          ↑
-                        </button>{" "}
-                        <button
-                          type="button"
-                          aria-label={`Move step ${index + 1} down`}
-                          disabled={busy || index === steps.length - 1}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            moveStep(step.id, index + 1);
-                          }}
-                          style={buttonStyle(busy || index === steps.length - 1)}
-                        >
-                          ↓
-                        </button>
-                      </td>
+              <div className="pt-table-wrap">
+                <table className="pt-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Action</th>
+                      <th>Selector</th>
+                      <th>Value</th>
+                      <th>Status</th>
+                      <th style={{ textAlign: "end" }}>Order</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {steps.map((step, index) => {
+                      const live = statusByStepId[step.id];
+                      return (
+                        <tr
+                          key={step.id}
+                          draggable
+                          onDragStart={() => {
+                            setDragId(step.id);
+                          }}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                          }}
+                          onDrop={() => {
+                            dropReorder(step.id);
+                          }}
+                          onClick={() => {
+                            setSelectedId(step.id);
+                          }}
+                          className={step.id === selectedId ? "pt-row-selected" : undefined}
+                          style={{
+                            cursor: "pointer",
+                            opacity: dragId === step.id ? 0.5 : 1,
+                          }}
+                        >
+                          <td>{index + 1}</td>
+                          <td>
+                            <span className="pt-badge">{step.action}</span>
+                          </td>
+                          <td className="pt-mono">{step.selector ?? "—"}</td>
+                          <td className="pt-mono">{step.value ?? "—"}</td>
+                          <td>
+                            {live === undefined ? (
+                              <span className="pt-badge pt-badge-mute">—</span>
+                            ) : live === "pass" ? (
+                              <span className="pt-badge pt-badge-pass">pass</span>
+                            ) : live === "fail" ? (
+                              <span className="pt-badge pt-badge-fail">fail</span>
+                            ) : live === "running" ? (
+                              <span className="pt-badge pt-badge-run">running</span>
+                            ) : (
+                              <span className="pt-badge pt-badge-mute">skipped</span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: "end", whiteSpace: "nowrap" }}>
+                            <button
+                              type="button"
+                              aria-label={`Move step ${index + 1} up`}
+                              className="pt-btn pt-btn-sm"
+                              disabled={busy || index === 0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                moveStep(step.id, index - 1);
+                              }}
+                            >
+                              ↑
+                            </button>{" "}
+                            <button
+                              type="button"
+                              aria-label={`Move step ${index + 1} down`}
+                              className="pt-btn pt-btn-sm"
+                              disabled={busy || index === steps.length - 1}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                moveStep(step.id, index + 1);
+                              }}
+                            >
+                              ↓
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 
-          <div>
-            <h3>Test data</h3>
-            <p style={{ color: "#666", fontSize: 13, marginTop: 0 }}>
+          <div className="pt-card">
+            <div className="pt-section-head">
+              <h3>Test data</h3>
+            </div>
+            <p className="pt-hint" style={{ marginBottom: 10 }}>
               {"Values substitute {{key}} in step values at run time."}
             </p>
             <TestDataEditor
@@ -546,120 +534,118 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
             />
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              flexWrap: "wrap",
-              borderTop: "1px solid #ddd",
-              paddingTop: 12,
-              alignItems: "center",
-            }}
-          >
-            <input
-              aria-label="Record URL"
-              placeholder="https://…"
-              value={recordUrl}
-              disabled={busy || recording}
-              onChange={(e) => {
-                setRecordUrl(e.target.value);
-              }}
-              style={{ padding: "6px 8px", border: "1px solid #ccc", borderRadius: 4, width: 240 }}
-            />
-            {recording ? (
-              <button
-                type="button"
-                onClick={stopRecording}
-                disabled={busy}
-                style={buttonStyle(busy)}
-              >
-                Stop + import…
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={startRecording}
-                disabled={busy || activeRun !== null}
-                style={buttonStyle(busy || activeRun !== null)}
-              >
-                Record…
-              </button>
-            )}
-            {activeRun === null ? (
-              <>
+          <div className="pt-card">
+            <div className="pt-section-head">
+              <h3>Record &amp; run</h3>
+              {recording && <span className="pt-badge pt-badge-fail">recording</span>}
+            </div>
+            <div className="pt-row">
+              <input
+                aria-label="Record URL"
+                className="pt-input pt-mono"
+                placeholder="https://…"
+                value={recordUrl}
+                disabled={busy || recording}
+                onChange={(e) => {
+                  setRecordUrl(e.target.value);
+                }}
+                style={{ maxInlineSize: 280 }}
+              />
+              {recording ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    startRun("supervised");
-                  }}
-                  disabled={busy || runBusy || recording || steps.length === 0}
-                  title="Headed, pauses on failure — resume from the failed step"
-                  style={buttonStyle(busy || runBusy || recording || steps.length === 0)}
+                  className="pt-btn pt-btn-sm"
+                  onClick={stopRecording}
+                  disabled={busy}
                 >
-                  Run supervised
+                  Stop + import…
                 </button>
+              ) : (
                 <button
                   type="button"
-                  onClick={() => {
-                    startRun("unsupervised");
-                  }}
-                  disabled={busy || runBusy || recording || steps.length === 0}
-                  title="Headless, never pauses"
-                  style={buttonStyle(busy || runBusy || recording || steps.length === 0)}
+                  className="pt-btn pt-btn-sm"
+                  onClick={startRecording}
+                  disabled={busy || activeRun !== null}
                 >
-                  Run unsupervised
+                  Record…
                 </button>
-              </>
-            ) : (
-              <>
-                {paused && failedOrder !== null && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={resumeRun}
-                      disabled={runBusy}
-                      title="Edit the failed step above, then continue in the same browser"
-                      style={buttonStyle(runBusy)}
-                    >
-                      Resume from step {failedOrder + 1}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        fullRerun(activeRun.mode);
-                      }}
-                      disabled={runBusy}
-                      style={buttonStyle(runBusy)}
-                    >
-                      Full re-run
-                    </button>
-                  </>
-                )}
-                <button
-                  type="button"
-                  onClick={cancelRun}
-                  disabled={runBusy}
-                  style={buttonStyle(runBusy)}
-                >
-                  Cancel run
-                </button>
-                <span style={{ color: "#666", fontSize: 13, alignSelf: "center" }}>
-                  {paused
-                    ? `Paused at step ${(failedOrder ?? 0) + 1} — edit the step, then Resume.`
-                    : `Running (${activeRun.mode})… steps color live in the graph.`}
-                </span>
-              </>
-            )}
+              )}
+              {activeRun === null ? (
+                <>
+                  <button
+                    type="button"
+                    className="pt-btn pt-btn-primary pt-btn-sm"
+                    onClick={() => {
+                      startRun("supervised");
+                    }}
+                    disabled={busy || runBusy || recording || steps.length === 0}
+                    title="Headed, pauses on failure — resume from the failed step"
+                  >
+                    Run supervised
+                  </button>
+                  <button
+                    type="button"
+                    className="pt-btn pt-btn-sm"
+                    onClick={() => {
+                      startRun("unsupervised");
+                    }}
+                    disabled={busy || runBusy || recording || steps.length === 0}
+                    title="Headless, never pauses"
+                  >
+                    Run unsupervised
+                  </button>
+                </>
+              ) : (
+                <>
+                  {paused && failedOrder !== null && (
+                    <>
+                      <button
+                        type="button"
+                        className="pt-btn pt-btn-primary pt-btn-sm"
+                        onClick={resumeRun}
+                        disabled={runBusy}
+                        title="Edit the failed step above, then continue in the same browser"
+                      >
+                        Resume from step {failedOrder + 1}
+                      </button>
+                      <button
+                        type="button"
+                        className="pt-btn pt-btn-sm"
+                        onClick={() => {
+                          fullRerun(activeRun.mode);
+                        }}
+                        disabled={runBusy}
+                      >
+                        Full re-run
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    className="pt-btn pt-btn-danger pt-btn-sm"
+                    onClick={cancelRun}
+                    disabled={runBusy}
+                  >
+                    Cancel run
+                  </button>
+                  <span className="pt-hint">
+                    {paused
+                      ? `Paused at step ${(failedOrder ?? 0) + 1} — edit the step, then Resume.`
+                      : `Running (${activeRun.mode})… steps color live in the graph.`}
+                  </span>
+                </>
+              )}
+            </div>
             {runFinished !== null && (
-              <span role="status" style={{ color: "#333", fontSize: 13, alignSelf: "center" }}>
+              <p role="status" className="pt-alert pt-alert-info" style={{ marginTop: 12 }}>
                 {runFinished}
-              </span>
+              </p>
             )}
           </div>
           {runLogs.length > 0 && (
-            <details>
+            <details className="pt-panel">
               <summary>Run log ({runLogs.length})</summary>
-              <pre style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{runLogs.join("\n")}</pre>
+              <pre className="pt-runlog">{runLogs.join("\n")}</pre>
             </details>
           )}
           {preview !== null && (

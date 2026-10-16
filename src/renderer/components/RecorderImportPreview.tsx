@@ -16,9 +16,7 @@ interface Props {
 }
 
 /**
- * Import preview modal (WS4 / M4, PLAN §7): shows parsed codegen steps for
- * accept/edit-before-save. Checkboxes select which steps to import; the empty
- * state (codegen closed without acting) explains instead of failing.
+ * Import preview modal (WS4 / M4, PLAN §7): accept/edit-before-save.
  */
 export default function RecorderImportPreview({
   steps,
@@ -44,121 +42,70 @@ export default function RecorderImportPreview({
       role="dialog"
       aria-modal="true"
       aria-label="Recorded steps preview"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.4)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 50,
-      }}
+      className="pt-modal-backdrop"
     >
-      <div
-        style={{
-          background: "#fff",
-          borderRadius: 8,
-          padding: 20,
-          maxWidth: 640,
-          width: "90%",
-          maxHeight: "80vh",
-          overflow: "auto",
-        }}
-      >
-        <h3 style={{ marginTop: 0 }}>Import recorded steps ({steps.length})</h3>
+      <div className="pt-modal">
+        <div className="pt-section-head">
+          <h3>Import recorded steps ({steps.length})</h3>
+        </div>
         {steps.length === 0 ? (
-          <p>
+          <p className="pt-sub">
             Codegen produced no importable steps.
             {raw === "" ? " The window may have been closed without acting." : ""}
           </p>
         ) : (
           <>
-            <p style={{ color: "#666", fontSize: 13 }}>
+            <p className="pt-hint">
               Uncheck steps to skip them. Steps are appended after your existing steps in order.
             </p>
-            <table style={{ borderCollapse: "collapse", width: "100%" }}>
-              <thead>
-                <tr>
-                  <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: 4 }}>
-                    Import
-                  </th>
-                  <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: 4 }}>
-                    #
-                  </th>
-                  <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: 4 }}>
-                    Action
-                  </th>
-                  <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: 4 }}>
-                    Selector
-                  </th>
-                  <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: 4 }}>
-                    Value
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {steps.map((step, index) => (
-                  <tr key={`${step.order}-${index}`}>
-                    <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>
-                      <input
-                        type="checkbox"
-                        aria-label={`Import recorded step ${index + 1} (${step.action})`}
-                        checked={accepted[index] === true}
-                        disabled={busy}
-                        onChange={() => {
-                          toggle(index);
-                        }}
-                      />
-                    </td>
-                    <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>{index + 1}</td>
-                    <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>{step.action}</td>
-                    <td
-                      style={{
-                        padding: 4,
-                        borderBottom: "1px solid #eee",
-                        fontFamily: "ui-monospace, monospace",
-                        fontSize: 12,
-                      }}
-                    >
-                      {step.selector ?? "—"}
-                    </td>
-                    <td
-                      style={{
-                        padding: 4,
-                        borderBottom: "1px solid #eee",
-                        fontFamily: "ui-monospace, monospace",
-                        fontSize: 12,
-                      }}
-                    >
-                      {step.value ?? "—"}
-                    </td>
+            <div className="pt-table-wrap">
+              <table className="pt-table">
+                <thead>
+                  <tr>
+                    <th>Import</th>
+                    <th>#</th>
+                    <th>Action</th>
+                    <th>Selector</th>
+                    <th>Value</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {steps.map((step, index) => (
+                    <tr key={`${step.order}-${index}`}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`Import recorded step ${index + 1} (${step.action})`}
+                          checked={accepted[index] === true}
+                          disabled={busy}
+                          onChange={() => {
+                            toggle(index);
+                          }}
+                        />
+                      </td>
+                      <td>{index + 1}</td>
+                      <td>
+                        <span className="pt-badge">{step.action}</span>
+                      </td>
+                      <td className="pt-mono">{step.selector ?? "—"}</td>
+                      <td className="pt-mono">{step.value ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </>
         )}
-        <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={busy}
-            style={{ padding: "6px 12px", border: "1px solid #888", borderRadius: 4 }}
-          >
+        <div className="pt-modal-actions">
+          <button type="button" className="pt-btn" onClick={onCancel} disabled={busy}>
             Discard
           </button>
           {steps.length > 0 && (
             <button
               type="button"
+              className="pt-btn pt-btn-primary"
               onClick={accept}
               disabled={busy || selectedCount === 0}
-              style={{
-                padding: "6px 12px",
-                border: "1px solid #2563eb",
-                borderRadius: 4,
-                background: "#2563eb",
-                color: "#fff",
-              }}
             >
               {busy ? "Importing…" : `Import ${selectedCount} step(s)`}
             </button>
