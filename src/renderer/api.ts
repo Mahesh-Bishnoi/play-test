@@ -4,6 +4,7 @@ import type { IpcChannel } from "../shared/ipc-contract.js";
 import { StepRowSchema, SuiteSchema, TestCaseSchema } from "../shared/schema.js";
 import { ProjectSchema } from "../shared/schema.js";
 import type { Project, StepRow, Suite, TestCase } from "../shared/schema.js";
+import type { TestStep } from "../shared/step-types.js";
 
 async function invoke<T>(
   channel: IpcChannel,
@@ -77,5 +78,24 @@ export const api = {
   },
   getCaseDetail(id: string): Promise<CaseDetail> {
     return invoke("case:get", { id }, (raw) => CaseDetailSchema.parse(raw));
+  },
+
+  // Steps (WS3 editor; channels/handlers landed in WS2, payloads frozen in v1).
+  upsertStep(caseId: string, step: TestStep): Promise<StepRow> {
+    return invoke("step:upsert", { caseId, step }, (raw) => StepRowSchema.parse(raw));
+  },
+  moveStep(caseId: string, id: string, toOrder: number): Promise<StepRow> {
+    return invoke("step:move", { caseId, id, toOrder }, (raw) => StepRowSchema.parse(raw));
+  },
+  deleteStep(caseId: string, id: string): Promise<void> {
+    return invoke("step:delete", { caseId, id }, () => undefined);
+  },
+  reorderSteps(caseId: string, orderedIds: string[]): Promise<StepRow[]> {
+    return invoke("step:reorder", { caseId, orderedIds }, (raw) =>
+      z.array(StepRowSchema).parse(raw),
+    );
+  },
+  getTestData(caseId: string): Promise<Record<string, string>> {
+    return invoke("testdata:get", { caseId }, (raw) => z.record(z.string(), z.string()).parse(raw));
   },
 };

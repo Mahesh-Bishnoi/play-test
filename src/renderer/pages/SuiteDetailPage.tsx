@@ -24,6 +24,8 @@ function buttonStyle(disabled?: boolean): React.CSSProperties {
 
 interface Props {
   projectId: string;
+  /** WS3 hook: open a case in the workflow editor (CaseDetailPage). */
+  onOpenCase?: (caseId: string) => void;
 }
 
 /**
@@ -31,7 +33,7 @@ interface Props {
  * checkboxes with search + select-all/none + save, and an unsupervised-only
  * pre-run confirm dialog. Actual execution lands in WS5 (M5/M6).
  */
-export default function SuiteDetailPage({ projectId }: Props): React.JSX.Element {
+export default function SuiteDetailPage({ projectId, onOpenCase }: Props): React.JSX.Element {
   const [suites, setSuites] = useState<Suite[]>([]);
   const [suiteId, setSuiteId] = useState<string | null>(null);
   const [cases, setCases] = useState<TestCase[]>([]);
@@ -419,6 +421,18 @@ export default function SuiteDetailPage({ projectId }: Props): React.JSX.Element
                     </td>
                     <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>{c.name}</td>
                     <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>
+                      {onOpenCase !== undefined && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onOpenCase(c.id);
+                          }}
+                          aria-label={`Open case ${c.name} in workflow editor`}
+                          style={buttonStyle()}
+                        >
+                          Open
+                        </button>
+                      )}{" "}
                       <button
                         type="button"
                         onClick={() => {
