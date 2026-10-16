@@ -16,6 +16,14 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** Pre-run pacing presets for supervised runs (ms between steps). */
+const SUPERVISED_SPEEDS = [
+  { label: "Instant", ms: 0 },
+  { label: "Normal (0.6s)", ms: 600 },
+  { label: "Slow (1.5s)", ms: 1500 },
+  { label: "Very slow (3s)", ms: 3000 },
+] as const;
+
 interface Props {
   caseId: string;
   onBack: () => void;
@@ -50,6 +58,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
   const [failedOrder, setFailedOrder] = useState<number | null>(null);
   const [runFinished, setRunFinished] = useState<string | null>(null);
   const [runBusy, setRunBusy] = useState(false);
+  const [runSpeedMs, setRunSpeedMs] = useState<number>(0);
 
   const refresh = useCallback(() => {
     setBusy(true);
@@ -257,15 +266,22 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
   const startRun = (mode: RunMode): void => {
     setRunBusy(true);
     setError(null);
+    // Speed pacing applies to supervised runs; unsupervised stays instant so
+    // parallel suites keep full throughput.
+    const actionDelayMs = mode === "supervised" ? runSpeedMs : undefined;
     api
-      .runSingleCase(caseId, mode)
+      .runSingleCase(caseId, mode, actionDelayMs)
       .then((ids) => {
         setActiveRun({ ...ids, mode });
         setStatusByOrder({});
         setFailedOrder(null);
         setRunFinished(null);
         setRunLogs([]);
-        setNotice(`Run started (${mode}).`);
+        const speedNote =
+          mode === "supervised" && runSpeedMs > 0
+            ? ` at ${(runSpeedMs / 1000).toFixed(1)}s/step`
+            : "";
+        setNotice(`Run started (${mode}${speedNote}).`);
       })
       .catch((err: unknown) => {
         setError(errorMessage(err));
@@ -572,6 +588,28 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
               )}
               {activeRun === null ? (
                 <>
+                  <label
+                    className="pt-hint"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                  >
+                    Speed
+                    <select
+                      aria-label="Supervised run speed"
+                      className="pt-select"
+                      value={runSpeedMs}
+                      disabled={busy || runBusy || recording || steps.length === 0}
+                      onChange={(e) => {
+                        setRunSpeedMs(Number(e.target.value));
+                      }}
+                      title="Delay between steps in supervised runs"
+                    >
+                      {SUPERVISED_SPEEDS.map((s) => (
+                        <option key={s.label} value={s.ms}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <button
                     type="button"
                     className="pt-btn pt-btn-primary pt-btn-sm"

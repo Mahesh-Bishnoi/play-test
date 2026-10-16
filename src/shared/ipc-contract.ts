@@ -157,6 +157,9 @@ export const RecorderStopPayload = z.object({});
 export const RunnerRunSinglePayload = z.object({
   caseId: z.string().min(1).max(100),
   mode: RunModeSchema,
+  // Pre-run pacing for supervised runs (PLAN §8): ms to wait between steps so
+  // the headed browser can be followed. Omitted = 0 (previous behavior).
+  actionDelayMs: z.number().int().min(0).max(10000).optional(),
 });
 
 export const RunnerRunSuitePayload = z.object({

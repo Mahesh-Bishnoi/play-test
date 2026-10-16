@@ -82,6 +82,8 @@ export interface RunnerDeps {
   artifactsRoot: string;
   generateId?: () => string;
   now?: () => number;
+  /** Injectable inter-step pacing (tests record calls; prod sleeps). */
+  delay?: (ms: number) => Promise<void>;
   /**
    * Wired by main.ts to the SuiteRunner's active flag so a single-case run
    * refuses to start while a parallel suite owns the browsers (and vice
@@ -236,6 +238,7 @@ interface LiveSession {
   caseId: string;
   projectId: string;
   mode: RunMode;
+  actionDelayMs: number;
   context: RunContext | null;
   cancelled: boolean;
   busy: boolean;
@@ -269,6 +272,7 @@ export class SingleCaseRunner {
   private readonly artifactsRoot: string;
   private readonly generateId: () => string;
   private readonly now: () => number;
+  private readonly delay: (ms: number) => Promise<void>;
   private readonly isSuiteActive: () => boolean;
   private session: LiveSession | null = null;
 
@@ -279,6 +283,7 @@ export class SingleCaseRunner {
     this.artifactsRoot = deps.artifactsRoot;
     this.generateId = deps.generateId ?? randomUUID;
     this.now = deps.now ?? Date.now;
+    this.delay = deps.delay ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.isSuiteActive = deps.isSuiteActive ?? (() => false);
   }
 
@@ -353,6 +358,7 @@ export class SingleCaseRunner {
       caseId: parsed.caseId,
       projectId: testCase.projectId,
       mode: parsed.mode,
+      actionDelayMs: parsed.actionDelayMs ?? 0,
       context: null,
       cancelled: false,
       busy: true,
@@ -438,6 +444,16 @@ export class SingleCaseRunner {
       if (session.cancelled) {
         await this.settleCancel(session, steps, index);
         return;
+      }
+      // Pre-run speed control: pace supervised runs so each headed action can
+      // be followed. Skipped for the first step of each executeFrom batch so a
+      // resume continues immediately rather than idling first.
+      if (session.actionDelayMs > 0 && index > fromOrder) {
+        await this.delay(session.actionDelayMs);
+        if (session.cancelled) {
+          await this.settleCancel(session, steps, index);
+          return;
+        }
       }
       const context = session.context;
       if (context === null) {

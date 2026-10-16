@@ -127,9 +127,15 @@ export const api = {
   },
 
   // Runner (WS5; streams progress over run:* events, payloads frozen in v1).
-  runSingleCase(caseId: string, mode: RunMode): Promise<{ suiteRunId: string; caseRunId: string }> {
-    return invoke("runner:runSingle", { caseId, mode }, (raw) =>
-      z.object({ suiteRunId: z.string(), caseRunId: z.string() }).parse(raw),
+  runSingleCase(
+    caseId: string,
+    mode: RunMode,
+    actionDelayMs?: number,
+  ): Promise<{ suiteRunId: string; caseRunId: string }> {
+    return invoke(
+      "runner:runSingle",
+      actionDelayMs === undefined ? { caseId, mode } : { caseId, mode, actionDelayMs },
+      (raw) => z.object({ suiteRunId: z.string(), caseRunId: z.string() }).parse(raw),
     );
   },
   resumeFromStep(

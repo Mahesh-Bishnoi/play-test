@@ -639,6 +639,123 @@ describe("suite delegation (M6)", () => {
   });
 });
 
+// --- Supervised speed control (actionDelayMs) ------------------------------------
+
+describe("supervised speed control (actionDelayMs)", () => {
+  it("defaults omitted delay to 0 and rejects out-of-range values", async () => {
+    const { RunnerRunSinglePayload } = await import("../src/shared/ipc-contract.js");
+    expect(
+      RunnerRunSinglePayload.parse({ caseId: "c", mode: "supervised" }).actionDelayMs,
+    ).toBeUndefined();
+    expect(() =>
+      RunnerRunSinglePayload.parse({ caseId: "c", mode: "supervised", actionDelayMs: -1 }),
+    ).toThrow();
+    expect(() =>
+      RunnerRunSinglePayload.parse({ caseId: "c", mode: "supervised", actionDelayMs: 10001 }),
+    ).toThrow();
+    expect(() =>
+      RunnerRunSinglePayload.parse({ caseId: "c", mode: "supervised", actionDelayMs: 600 }),
+    ).not.toThrow();
+  });
+
+  it("waits the configured delay between steps (N steps → N-1 waits)", async () => {
+    const dbHandle = createDatabase(":memory:");
+    openHandles.push(dbHandle);
+    const root = join(
+      tmpdir(),
+      `playtest-speed-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    mkdirSync(root, { recursive: true });
+    const launcher = new FakeLauncher();
+    const delays: number[] = [];
+    const runner = new SingleCaseRunner(dbHandle.db, {
+      launchBrowser: launcher,
+      emit: () => undefined,
+      artifactsRoot: root,
+      delay: (ms) => {
+        delays.push(ms);
+        return Promise.resolve();
+      },
+    });
+    const { caseId } = seedCase(dbHandle.db, [
+      { action: "goto", value: "https://x.test" },
+      { action: "click", selector: "#a" },
+      { action: "click", selector: "#b" },
+    ]);
+    const started = runner.runSingle({ caseId, mode: "supervised", actionDelayMs: 600 });
+    await started.done;
+    expect(delays).toEqual([600, 600]);
+  });
+
+  it("skips delays when omitted (previous instant behavior)", async () => {
+    const dbHandle = createDatabase(":memory:");
+    openHandles.push(dbHandle);
+    const root = join(
+      tmpdir(),
+      `playtest-speed-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    mkdirSync(root, { recursive: true });
+    const launcher = new FakeLauncher();
+    let delayCalls = 0;
+    const runner = new SingleCaseRunner(dbHandle.db, {
+      launchBrowser: launcher,
+      emit: () => undefined,
+      artifactsRoot: root,
+      delay: () => {
+        delayCalls++;
+        return Promise.resolve();
+      },
+    });
+    const { caseId } = seedCase(dbHandle.db, [
+      { action: "goto", value: "https://x.test" },
+      { action: "click", selector: "#a" },
+    ]);
+    const started = runner.runSingle({ caseId, mode: "supervised" });
+    await started.done;
+    expect(delayCalls).toBe(0);
+  });
+
+  it("keeps pacing across supervised pause/resume", async () => {
+    const dbHandle = createDatabase(":memory:");
+    openHandles.push(dbHandle);
+    const root = join(
+      tmpdir(),
+      `playtest-speed-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    mkdirSync(root, { recursive: true });
+    const launcher = new FakeLauncher();
+    const delays: number[] = [];
+    const runner = new SingleCaseRunner(dbHandle.db, {
+      launchBrowser: launcher,
+      emit: () => undefined,
+      artifactsRoot: root,
+      delay: (ms) => {
+        delays.push(ms);
+        return Promise.resolve();
+      },
+    });
+    const { caseId } = seedCase(dbHandle.db, [
+      { action: "goto", value: "https://x.test" },
+      { action: "fill", selector: "#name", value: "ada" },
+      { action: "click", selector: "#go" },
+    ]);
+    const originalLaunch = launcher.launch.bind(launcher);
+    launcher.launch = async (headless, videoDir) => {
+      const context = (await originalLaunch(headless, videoDir)) as FakeContext;
+      context.page.failWhen = (method) => method === "fill";
+      return context;
+    };
+    const started = runner.runSingle({ caseId, mode: "supervised", actionDelayMs: 500 });
+    await started.done;
+    expect(delays).toEqual([500]);
+    launcher.contexts[0]!.page.failWhen = null;
+    delays.length = 0;
+    const resumed = runner.resumeFromStep({ caseRunId: started.caseRunId, fromOrder: 1 });
+    await resumed.done;
+    expect(delays).toEqual([500]);
+  });
+});
+
 // --- Artifacts --------------------------------------------------------------------
 
 describe("artifacts layout (PLAN §4)", () => {

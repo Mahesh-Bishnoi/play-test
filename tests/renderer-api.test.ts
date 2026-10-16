@@ -54,6 +54,27 @@ describe("renderer api test-data wrappers (M7, PLAN §10)", () => {
   });
 });
 
+describe("renderer api runner wrappers", () => {
+  it("sends actionDelayMs only for paced supervised runs", async () => {
+    const calls = stubPlaytest(() => Promise.resolve({ suiteRunId: "s", caseRunId: "c" }));
+    await expect(api.runSingleCase("c1", "supervised", 600)).resolves.toEqual({
+      suiteRunId: "s",
+      caseRunId: "c",
+    });
+    await expect(api.runSingleCase("c1", "unsupervised")).resolves.toEqual({
+      suiteRunId: "s",
+      caseRunId: "c",
+    });
+    expect(calls).toEqual([
+      {
+        channel: "runner:runSingle",
+        payload: { caseId: "c1", mode: "supervised", actionDelayMs: 600 },
+      },
+      { channel: "runner:runSingle", payload: { caseId: "c1", mode: "unsupervised" } },
+    ]);
+  });
+});
+
 describe("renderer api browser-setup wrappers (M7, PLAN §11)", () => {
   it("parses browser status for both system channels", async () => {
     const calls = stubPlaytest((channel) => {
