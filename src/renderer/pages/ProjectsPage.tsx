@@ -1,12 +1,8 @@
 import { useEffect, useState } from "react";
 
-import { api } from "../api.js";
+import { api, formatApiError } from "../api.js";
 import type { Project } from "../../shared/schema.js";
 import ConfirmDialog from "../components/ConfirmDialog.js";
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 interface Props {
   selectedId: string | null;
@@ -35,7 +31,7 @@ export default function ProjectsPage({ selectedId, onSelect }: Props): React.JSX
       .listProjects()
       .then(setProjects)
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       });
   }, []);
 
@@ -59,7 +55,7 @@ export default function ProjectsPage({ selectedId, onSelect }: Props): React.JSX
         setShowCreate(false);
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       });
   };
 
@@ -80,7 +76,7 @@ export default function ProjectsPage({ selectedId, onSelect }: Props): React.JSX
         setPendingDelete(null);
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       })
       .finally(() => {
         setDeleteBusy(false);
@@ -110,7 +106,7 @@ export default function ProjectsPage({ selectedId, onSelect }: Props): React.JSX
         setEditingId(null);
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       });
   };
 

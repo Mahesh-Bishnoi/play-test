@@ -95,7 +95,7 @@ export default function StepEditorPanel({
           {error}
         </p>
       )}
-      <div className="pt-form-grid" style={{ marginTop: 8 }}>
+      <div className="pt-form-grid">
         <label className="pt-label">
           Action
           <select
@@ -146,10 +146,7 @@ export default function StepEditorPanel({
           <p className="pt-hint">
             References {referenced.map((k) => `{{${k}}}`).join(", ")}
             {missing.length > 0 && (
-              <span style={{ color: "#fbbf24" }}>
-                {" "}
-                — missing test-data key: {missing.join(", ")}
-              </span>
+              <span className="pt-warn-text"> — missing test-data key: {missing.join(", ")}</span>
             )}
           </p>
         )}
@@ -173,12 +170,17 @@ export default function StepEditorPanel({
           />
         </label>
         <div className="pt-row">
-          <button type="button" className="pt-btn pt-btn-primary" onClick={save} disabled={busy}>
+          <button
+            type="button"
+            className="pt-btn pt-btn-primary pt-btn-sm"
+            onClick={save}
+            disabled={busy}
+          >
             Save step
           </button>
           <button
             type="button"
-            className="pt-btn pt-btn-danger-ghost"
+            className="pt-btn pt-btn-danger-ghost pt-btn-sm"
             title={`Delete step #${step.order + 1} (asks first)`}
             onClick={() => {
               setConfirmingDelete(true);

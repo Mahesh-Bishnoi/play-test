@@ -1,9 +1,17 @@
-/* PlayTest design system — IntelliJ IDEA New UI dark (Darcula) theme.
- * Tokens mirror the IDE: editor #1E1F22, tool windows #2B2D30,
- * borders #393B40, text #DFE1E5/#BCBEC4/#868A93, accent #3574F0.
+/* PlayTest design system — two themes, one class set.
+ * - intellij-dark (default): IntelliJ IDEA New UI dark (Darcula) —
+ *   editor #1E1F22, tool windows #2B2D30, borders #393B40,
+ *   text #DFE1E5/#BCBEC4/#868A93, accent #3574F0.
+ * - syntax-light (opt-in, [data-theme="syntax-light"]): syntax.fm energy on
+ *   warm off-white #FAF7F1, near-black #141210 text/borders, single orange
+ *   accent #FF5C00 (dark-on-orange, never white-on-orange).
+ * Tokens + a small override section at the end of this file; components below
+ * stay theme-agnostic via var(--pt-*). See docs/design-system/syntax-light.md
+ * and theme-demo.html (visual golden).
  * No external fonts so the packaged app works offline. */
 
-:root {
+:root,
+html[data-theme="intellij-dark"] {
   --pt-bg: #1e1f22;
   --pt-bg-raised: #242528;
   --pt-sidebar: #2b2d30;
@@ -23,6 +31,14 @@
   --pt-info: #3592c4;
   --pt-warn: #e8a33d;
   --pt-danger: #e74856;
+  --pt-danger-fg: #fca5a5;
+  --pt-danger-soft: #fecaca;
+  --pt-ok-fg: #bbf7d0;
+  --pt-info-fg: #bae6fd;
+  --pt-warn-fg: #fde68a;
+  --pt-badge-pass-fg: #6aab73;
+  --pt-badge-fail-fg: #f26b6f;
+  --pt-badge-run-fg: #4cb0e0;
   --pt-pass-bg: rgb(73 156 84 / 0.15);
   --pt-fail-bg: rgb(231 72 86 / 0.13);
   --pt-run-bg: rgb(53 146 196 / 0.15);
@@ -31,6 +47,44 @@
   --pt-font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --pt-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --pt-shadow: 0 8px 28px rgb(0 0 0 / 0.45);
+}
+
+/* Syntax-light tokens: same names, warm paper + near-black + orange.
+ * Applied when <html data-theme="syntax-light"> (see theme.ts). */
+html[data-theme="syntax-light"] {
+  --pt-bg: #faf7f1;
+  --pt-bg-raised: #ffffff;
+  --pt-sidebar: #ffffff;
+  --pt-card: #ffffff;
+  --pt-card-2: #fff4e8;
+  --pt-muted: #f1ece2;
+  --pt-border: #141210;
+  --pt-border-soft: #e7dfd2;
+  --pt-fg: #141210;
+  --pt-fg-dim: #2a2723;
+  --pt-muted-fg: #6f6860;
+  --pt-accent: #ff5c00;
+  --pt-accent-hover: #e04e00;
+  --pt-accent-ink: #141210;
+  --pt-selection: #141210;
+  --pt-selection-accent: rgb(255 92 0 / 0.16);
+  --pt-info: #0b6b94;
+  --pt-warn: #b54708;
+  --pt-danger: #b42318;
+  --pt-danger-fg: #b42318;
+  --pt-danger-soft: #fde7e5;
+  --pt-ok-fg: #166534;
+  --pt-info-fg: #0b6b94;
+  --pt-warn-fg: #b54708;
+  --pt-badge-pass-fg: #166534;
+  --pt-badge-fail-fg: #b42318;
+  --pt-badge-run-fg: #0b6b94;
+  --pt-pass-bg: #e5f6ea;
+  --pt-fail-bg: #fde7e5;
+  --pt-run-bg: #e2f2fa;
+  --pt-radius: 14px;
+  --pt-radius-sm: 9px;
+  --pt-shadow: 4px 4px 0 #141210;
 }
 
 *,
@@ -125,11 +179,14 @@ body {
 }
 
 .pt-main {
-  padding: clamp(16px, 2.5vw, 32px);
+  padding: clamp(16px, 2.5vw, 28px);
   max-inline-size: 1180px;
   inline-size: 100%;
   margin-inline: auto;
 }
+
+/* NOTE: an earlier duplicate .pt-main (clamp …32px) lived above and was
+ * merged here — single source for page padding. */
 
 .pt-topbar {
   display: flex;
@@ -198,6 +255,108 @@ body {
   flex: 1 1 160px;
 }
 
+/* ---------- shared page/utility classes (consistency round) ---------- */
+
+.pt-page {
+  display: grid;
+  gap: 16px;
+}
+
+.pt-text-end {
+  text-align: end;
+}
+
+.pt-nowrap {
+  white-space: nowrap;
+}
+
+.pt-mb-8 {
+  margin-bottom: 8px;
+}
+
+.pt-mb-10 {
+  margin-bottom: 10px;
+}
+
+.pt-mb-12 {
+  margin-bottom: 12px;
+}
+
+.pt-mb-16 {
+  margin-bottom: 16px;
+}
+
+.pt-mb-0 {
+  margin-bottom: 0;
+}
+
+.pt-mt-8 {
+  margin-top: 8px;
+}
+
+.pt-mt-12 {
+  margin-top: 12px;
+}
+
+.pt-w-full {
+  inline-size: 100%;
+}
+
+.pt-w-180 {
+  max-inline-size: 180px;
+}
+
+.pt-w-220 {
+  max-inline-size: 220px;
+}
+
+.pt-w-260 {
+  max-inline-size: 260px;
+}
+
+.pt-w-280 {
+  max-inline-size: 280px;
+}
+
+.pt-drag-row {
+  cursor: pointer;
+}
+
+.pt-drag-row[data-dragging="true"] {
+  opacity: 0.5;
+}
+
+.pt-label-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--pt-muted-fg);
+  margin: 0;
+}
+
+.pt-warn-text {
+  color: var(--pt-warn);
+}
+
+.pt-checkbox {
+  inline-size: 15px;
+  block-size: 15px;
+  accent-color: var(--pt-accent);
+}
+
+.pt-suite-pill {
+  padding: 4px 4px 4px 8px;
+}
+
+.pt-table-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .pt-grid-2 {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.9fr);
@@ -220,7 +379,7 @@ body {
 
 .pt-input::placeholder,
 .pt-textarea::placeholder {
-  color: #868a93;
+  color: var(--pt-muted-fg);
 }
 
 .pt-input:focus-visible,
@@ -282,7 +441,7 @@ body {
 .pt-btn-danger {
   background: transparent;
   border-color: rgb(239 68 68 / 0.55);
-  color: #fca5a5;
+  color: var(--pt-danger-fg);
 }
 
 .pt-btn-ghost {
@@ -300,33 +459,32 @@ body {
 .pt-btn-danger-solid {
   background: var(--pt-danger);
   border-color: var(--pt-danger);
-  color: #fff;
+  color: var(--pt-accent-ink);
 }
 
 .pt-btn-danger-ghost {
   background: transparent;
   border-color: transparent;
-  color: #fca5a5;
+  color: var(--pt-danger-fg);
 }
 
 @media (hover: hover) and (pointer: fine) {
   .pt-btn-danger-ghost:not(:disabled):hover {
     border-color: rgb(239 68 68 / 0.55);
-    color: #fca5a5;
+    color: var(--pt-danger-fg);
     background: rgb(239 68 68 / 0.08);
   }
 }
 
 .pt-btn-danger-ghost:focus-visible {
   border-color: var(--pt-danger);
-  color: #fca5a5;
+  color: var(--pt-danger-fg);
 }
 
 /* Selectable rows: the item name is the select target (full-width, left
- * aligned, plain), management actions sit apart in their own group. */
-.pt-list-item {
-  padding: 6px 6px 6px 0;
-}
+ * aligned, plain), management actions sit apart in their own group.
+ * NOTE: the bare .pt-list-item padding rule lived here and is now merged
+ * into the flex definition below (single source). */
 
 .pt-item-select {
   appearance: none;
@@ -448,19 +606,25 @@ body {
 .pt-badge-pass {
   background: var(--pt-pass-bg);
   border-color: rgb(73 156 84 / 0.55);
-  color: #6aab73;
+  color: var(--pt-badge-pass-fg);
 }
 
 .pt-badge-fail {
   background: var(--pt-fail-bg);
   border-color: rgb(231 72 86 / 0.55);
-  color: #f26b6f;
+  color: var(--pt-badge-fail-fg);
 }
 
 .pt-badge-run {
   background: var(--pt-run-bg);
   border-color: rgb(53 146 196 / 0.55);
-  color: #4cb0e0;
+  color: var(--pt-badge-run-fg);
+}
+
+.pt-badge-warn {
+  background: rgb(245 158 11 / 0.12);
+  border-color: rgb(245 158 11 / 0.5);
+  color: var(--pt-warn);
 }
 
 .pt-badge-mute {
@@ -484,25 +648,25 @@ body {
 .pt-alert-error {
   background: rgb(239 68 68 / 0.1);
   border-color: rgb(239 68 68 / 0.45);
-  color: #fecaca;
+  color: var(--pt-danger-soft);
 }
 
 .pt-alert-ok {
   background: rgb(34 197 94 / 0.1);
   border-color: rgb(34 197 94 / 0.4);
-  color: #bbf7d0;
+  color: var(--pt-ok-fg);
 }
 
 .pt-alert-info {
   background: rgb(56 189 248 / 0.08);
   border-color: rgb(56 189 248 / 0.35);
-  color: #bae6fd;
+  color: var(--pt-info-fg);
 }
 
 .pt-alert-warn {
   background: rgb(245 158 11 / 0.1);
   border-color: rgb(245 158 11 / 0.4);
-  color: #fde68a;
+  color: var(--pt-warn-fg);
 }
 
 .pt-empty {
@@ -989,16 +1153,26 @@ body {
   color: var(--pt-muted-fg);
 }
 
+button.pt-tab-x {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+button.pt-tab-x:focus-visible,
+.pt-tab:focus-visible {
+  outline: 2px solid var(--pt-accent);
+  outline-offset: 1px;
+}
+
 .pt-tab-x:hover {
   background: var(--pt-muted);
   color: var(--pt-fg);
-}
-
-.pt-main {
-  padding: clamp(16px, 2.5vw, 28px);
-  max-inline-size: 1180px;
-  inline-size: 100%;
-  margin-inline: auto;
 }
 
 .pt-statusbar {
@@ -1101,7 +1275,7 @@ body {
 .pt-tree-row-wrap.pt-tree-row-active > .pt-tree-row,
 .pt-tree-row-nested.pt-tree-row-active {
   background: var(--pt-selection);
-  color: #fff;
+  color: var(--pt-accent-ink);
 }
 
 .pt-tree-row-wrap.pt-tree-row-active > .pt-tree-row .pt-item-meta,
@@ -1240,7 +1414,7 @@ body {
 }
 
 .pt-welcome-side {
-  background: #242528;
+  background: var(--pt-bg-raised);
   border-inline-end: 1px solid var(--pt-border);
   padding: 16px;
   display: flex;
@@ -1349,4 +1523,144 @@ body {
     border-inline-end: none;
     border-block-end: 1px solid var(--pt-border);
   }
+}
+
+/* ---------- syntax-light theme overrides (neobrutalist sticker feel) ----------
+ * Tokens above do most of the work; these rules add the chunky borders, hard
+ * offset shadows, and sticker details that only make sense on the light theme.
+ * Dark theme rendering is untouched. */
+
+html[data-theme="syntax-light"] .pt-card,
+html[data-theme="syntax-light"] .pt-table-wrap {
+  border-width: 2px;
+  box-shadow: 4px 4px 0 #141210;
+}
+
+html[data-theme="syntax-light"] .pt-btn {
+  border-width: 2px;
+  background: #fff;
+  box-shadow: 3px 3px 0 #141210;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  html[data-theme="syntax-light"] .pt-btn:not(:disabled):hover {
+    transform: translate(-1px, -1px);
+    box-shadow: 4px 4px 0 #141210;
+    border-color: #141210;
+    background: #fff4e8;
+  }
+}
+
+html[data-theme="syntax-light"] .pt-btn:not(:disabled):active {
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 #141210;
+}
+
+html[data-theme="syntax-light"] .pt-btn-primary {
+  background: var(--pt-accent);
+  border-color: #141210;
+}
+
+html[data-theme="syntax-light"] .pt-input,
+html[data-theme="syntax-light"] .pt-select,
+html[data-theme="syntax-light"] .pt-textarea,
+html[data-theme="syntax-light"] .pt-inline-form {
+  border-width: 2px;
+  background: #fff;
+}
+
+html[data-theme="syntax-light"] .pt-input:focus-visible,
+html[data-theme="syntax-light"] .pt-select:focus-visible,
+html[data-theme="syntax-light"] .pt-textarea:focus-visible {
+  outline: 3px solid rgb(255 92 0 / 0.35);
+}
+
+html[data-theme="syntax-light"] .pt-badge {
+  border-width: 2px;
+  background: #fff;
+  color: #141210;
+}
+
+html[data-theme="syntax-light"] .pt-badge-pass {
+  background: #e5f6ea;
+  border-color: #141210;
+  color: #166534;
+}
+
+html[data-theme="syntax-light"] .pt-badge-fail {
+  background: #fde7e5;
+  border-color: #141210;
+  color: #b42318;
+}
+
+html[data-theme="syntax-light"] .pt-badge-run {
+  background: #e2f2fa;
+  border-color: #141210;
+  color: #0b6b94;
+}
+
+html[data-theme="syntax-light"] .pt-tab-active {
+  background: var(--pt-accent);
+  border-color: #141210;
+}
+
+html[data-theme="syntax-light"] .pt-side-label {
+  background: #141210;
+  color: #faf7f1;
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  width: fit-content;
+}
+
+html[data-theme="syntax-light"] .pt-table th {
+  background: #fbf3e7;
+  border-block-end: 2px solid #141210;
+}
+
+html[data-theme="syntax-light"] .pt-list-item-active,
+html[data-theme="syntax-light"] .pt-tree-row-wrap.pt-tree-row-active > .pt-tree-row,
+html[data-theme="syntax-light"] .pt-tree-row-nested.pt-tree-row-active {
+  background: #ffe9d6;
+}
+
+html[data-theme="syntax-light"] .pt-runlog {
+  background: #141210;
+  color: #ffe9d6;
+  border-color: #141210;
+}
+
+html[data-theme="syntax-light"] .pt-brand-mark {
+  border: 2px solid #141210;
+  box-shadow: 2px 2px 0 #141210;
+}
+
+html[data-theme="syntax-light"] .pt-alert-ok {
+  background: #e5f6ea;
+  border-color: #141210;
+  color: #166534;
+}
+
+html[data-theme="syntax-light"] .pt-alert-warn {
+  background: #fff1d6;
+  border-color: #141210;
+  color: #b54708;
+}
+
+html[data-theme="syntax-light"] .pt-alert-error {
+  background: #fde7e5;
+  border-color: #141210;
+  color: #b42318;
+}
+
+html[data-theme="syntax-light"] .pt-alert-info {
+  background: #e2f2fa;
+  border-color: #141210;
+  color: #0b6b94;
+}
+
+html[data-theme="syntax-light"] .pt-banner {
+  background: #fff1d6;
+  border-color: #141210;
+  color: #b54708;
 }

@@ -56,7 +56,7 @@ export default function ConfirmDialog({
         }}
       >
         <div className="pt-section-head">
-          <h3 style={{ margin: 0 }}>{title}</h3>
+          <h3>{title}</h3>
         </div>
         <p className="pt-sub">{body}</p>
         <div className="pt-modal-actions">

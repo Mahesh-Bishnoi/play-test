@@ -4,17 +4,13 @@ import type { RunMode } from "../../shared/schema.js";
 import type { StepAction, StepStatus } from "../../shared/step-types.js";
 import type { TestStep } from "../../shared/step-types.js";
 import { STEP_ACTIONS } from "../../shared/step-types.js";
-import { api } from "../api.js";
+import { api, formatApiError } from "../api.js";
 import type { CaseDetail } from "../api.js";
 import RecorderImportPreview from "../components/RecorderImportPreview.js";
 import StepEditorPanel from "../components/StepEditorPanel.js";
 import type { StepPatch } from "../components/StepEditorPanel.js";
 import StepGraph from "../components/StepGraph.js";
 import TestDataEditor from "../components/TestDataEditor.js";
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /** Pre-run pacing presets for supervised runs (ms between steps). */
 const SUPERVISED_SPEEDS = [
@@ -75,7 +71,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
         setError(null);
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       })
       .finally(() => {
         setBusy(false);
@@ -87,7 +83,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
         setTestData(data);
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       });
   }, [caseId]);
 
@@ -112,7 +108,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
         refresh();
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
         setBusy(false);
       });
   };
@@ -219,7 +215,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
         setNotice("Recording… interact with the codegen browser window, then Stop + import.");
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       })
       .finally(() => {
         setBusy(false);
@@ -236,7 +232,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
         setNotice(null);
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
         setRecording(false);
       })
       .finally(() => {
@@ -258,7 +254,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
         refresh();
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
         setBusy(false);
       });
   };
@@ -284,7 +280,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
         setNotice(`Run started (${mode}${speedNote}).`);
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       })
       .finally(() => {
         setRunBusy(false);
@@ -306,7 +302,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
         setNotice(`Resumed from step ${order + 1} — edits made while paused apply.`);
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       })
       .finally(() => {
         setRunBusy(false);
@@ -325,7 +321,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
         setNotice("Cancel requested — remaining steps skip.");
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       })
       .finally(() => {
         setRunBusy(false);
@@ -346,7 +342,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
         startRun(mode);
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
         setRunBusy(false);
       });
   };
@@ -360,7 +356,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
         Running · {activeRun.mode}
       </span>
     ) : paused ? (
-      <span className="pt-badge pt-badge-fail">Paused</span>
+      <span className="pt-badge pt-badge-warn">Paused</span>
     ) : runFinished !== null ? (
       <span className="pt-badge pt-badge-pass">{runFinished}</span>
     ) : (
@@ -368,7 +364,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
     );
 
   return (
-    <section aria-label="Case workflow" style={{ display: "grid", gap: 16 }}>
+    <section aria-label="Case workflow" className="pt-page">
       <div className="pt-topbar">
         <button type="button" className="pt-btn pt-btn-sm" onClick={onBack}>
           ← Back to suites
@@ -418,7 +414,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
               <h3>Steps</h3>
               <span className="pt-count">Drag rows to reorder, or use ↑ ↓</span>
             </div>
-            <div className="pt-row" style={{ marginBottom: 12 }}>
+            <div className="pt-row pt-mb-12">
               <select
                 aria-label="New step action"
                 className="pt-select"
@@ -450,7 +446,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                       <th>Selector</th>
                       <th>Value</th>
                       <th>Status</th>
-                      <th style={{ textAlign: "end" }}>Order</th>
+                      <th className="pt-text-end">Order</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -472,11 +468,10 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                           onClick={() => {
                             setSelectedId(step.id);
                           }}
-                          className={step.id === selectedId ? "pt-row-selected" : undefined}
-                          style={{
-                            cursor: "pointer",
-                            opacity: dragId === step.id ? 0.5 : 1,
-                          }}
+                          className={
+                            step.id === selectedId ? "pt-drag-row pt-row-selected" : "pt-drag-row"
+                          }
+                          data-dragging={dragId === step.id}
                         >
                           <td>{index + 1}</td>
                           <td>
@@ -497,7 +492,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                               <span className="pt-badge pt-badge-mute">skipped</span>
                             )}
                           </td>
-                          <td style={{ textAlign: "end", whiteSpace: "nowrap" }}>
+                          <td className="pt-text-end pt-nowrap">
                             <button
                               type="button"
                               aria-label={`Move step ${index + 1} up`}
@@ -536,7 +531,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
             <div className="pt-section-head">
               <h3>Test data</h3>
             </div>
-            <p className="pt-hint" style={{ marginBottom: 10 }}>
+            <p className="pt-hint pt-mb-10">
               {"Values substitute {{key}} in step values at run time."}
             </p>
             <TestDataEditor
@@ -553,19 +548,18 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
           <div className="pt-card">
             <div className="pt-section-head">
               <h3>Record &amp; run</h3>
-              {recording && <span className="pt-badge pt-badge-fail">recording</span>}
+              {recording && <span className="pt-badge pt-badge-run">recording</span>}
             </div>
             <div className="pt-row">
               <input
                 aria-label="Record URL"
-                className="pt-input pt-mono"
+                className="pt-input pt-mono pt-w-280"
                 placeholder="https://…"
                 value={recordUrl}
                 disabled={busy || recording}
                 onChange={(e) => {
                   setRecordUrl(e.target.value);
                 }}
-                style={{ maxInlineSize: 280 }}
               />
               {recording ? (
                 <button
@@ -588,10 +582,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
               )}
               {activeRun === null ? (
                 <>
-                  <label
-                    className="pt-hint"
-                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                  >
+                  <label className="pt-label-inline">
                     Speed
                     <select
                       aria-label="Supervised run speed"
@@ -675,7 +666,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
               )}
             </div>
             {runFinished !== null && (
-              <p role="status" className="pt-alert pt-alert-info" style={{ marginTop: 12 }}>
+              <p role="status" className="pt-alert pt-alert-info pt-mt-12">
                 {runFinished}
               </p>
             )}

@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api } from "../api.js";
+import { api, formatApiError } from "../api.js";
 import type { Suite, TestCase } from "../../shared/schema.js";
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 interface Props {
   projectId: string;
@@ -79,7 +75,7 @@ export default function ProjectExplorer({
         setMembersBySuite(map);
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       });
     api
       .listCases(projectId)
@@ -87,7 +83,7 @@ export default function ProjectExplorer({
         setCases([...rows].sort((a, b) => a.name.localeCompare(b.name)));
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       });
   }, [projectId]);
 
@@ -136,7 +132,7 @@ export default function ProjectExplorer({
         onChanged?.();
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       })
       .finally(() => {
         setSuiteBusy(false);
@@ -174,7 +170,7 @@ export default function ProjectExplorer({
         onChanged?.();
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       })
       .finally(() => {
         setCaseBusy(false);
@@ -295,7 +291,7 @@ export default function ProjectExplorer({
       )}
       <input
         aria-label="Search suites and cases"
-        className="pt-input pt-explorer-search"
+        className="pt-input pt-input-sm pt-explorer-search"
         placeholder="Search"
         value={search}
         onChange={(e) => {

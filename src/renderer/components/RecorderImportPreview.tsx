@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { TestStep } from "../../shared/step-types.js";
 
@@ -26,6 +26,20 @@ export default function RecorderImportPreview({
   onCancel,
 }: Props): React.JSX.Element {
   const [accepted, setAccepted] = useState<boolean[]>(() => steps.map(() => true));
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    cancelRef.current?.focus();
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape" && !busy) {
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [busy, onCancel]);
 
   const toggle = (index: number): void => {
     setAccepted((prev) => prev.map((value, i) => (i === index ? !value : value)));
@@ -43,13 +57,23 @@ export default function RecorderImportPreview({
       aria-modal="true"
       aria-label="Recorded steps preview"
       className="pt-modal-backdrop"
+      onClick={() => {
+        if (!busy) {
+          onCancel();
+        }
+      }}
     >
-      <div className="pt-modal">
+      <div
+        className="pt-modal"
+        onClick={(e) => {
+          e.stopPropagation();
+        }}
+      >
         <div className="pt-section-head">
           <h3>Import recorded steps ({steps.length})</h3>
         </div>
         {steps.length === 0 ? (
-          <p className="pt-sub">
+          <p className="pt-empty">
             Codegen produced no importable steps.
             {raw === "" ? " The window may have been closed without acting." : ""}
           </p>
@@ -75,6 +99,7 @@ export default function RecorderImportPreview({
                       <td>
                         <input
                           type="checkbox"
+                          className="pt-checkbox"
                           aria-label={`Import recorded step ${index + 1} (${step.action})`}
                           checked={accepted[index] === true}
                           disabled={busy}
@@ -97,7 +122,13 @@ export default function RecorderImportPreview({
           </>
         )}
         <div className="pt-modal-actions">
-          <button type="button" className="pt-btn" onClick={onCancel} disabled={busy}>
+          <button
+            ref={cancelRef}
+            type="button"
+            className="pt-btn"
+            onClick={onCancel}
+            disabled={busy}
+          >
             Discard
           </button>
           {steps.length > 0 && (

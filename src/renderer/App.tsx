@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api } from "./api.js";
+import { applyTheme, getInitialTheme, type AppTheme } from "./theme.js";
 import type { Project } from "../shared/schema.js";
 import BrowserBanner from "./components/BrowserBanner.js";
 import ProjectExplorer from "./components/ProjectExplorer.js";
@@ -35,6 +36,15 @@ export default function App(): React.JSX.Element {
   const [active, setActive] = useState<ActiveTab>({ kind: "suites" });
   const [explorerToken, setExplorerToken] = useState(0);
   const [mainToken, setMainToken] = useState(0);
+  const [theme, setTheme] = useState<AppTheme>(() => getInitialTheme());
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
+  const toggleTheme = (): void => {
+    setTheme((t) => (t === "intellij-dark" ? "syntax-light" : "intellij-dark"));
+  };
 
   const openProject = (id: string): void => {
     setProjectId(id);
@@ -106,6 +116,17 @@ export default function App(): React.JSX.Element {
     return (
       <div className="pt-app">
         <BrowserBanner />
+        <div className="pt-row" style={{ justifyContent: "flex-end", padding: "10px 16px 0" }}>
+          <button
+            type="button"
+            className="pt-btn pt-btn-ghost pt-btn-sm"
+            onClick={toggleTheme}
+            aria-pressed={theme === "syntax-light"}
+            title="Switch between IntelliJ dark and Syntax light"
+          >
+            {theme === "intellij-dark" ? "☀ Syntax light" : "◐ IntelliJ dark"}
+          </button>
+        </div>
         <WelcomeScreen onOpen={openProject} />
       </div>
     );
@@ -202,6 +223,15 @@ export default function App(): React.JSX.Element {
           {project?.name ?? "Loading project…"}
         </span>
         <span className="pt-spacer" />
+        <button
+          type="button"
+          className="pt-btn pt-btn-ghost pt-btn-sm"
+          onClick={toggleTheme}
+          aria-pressed={theme === "syntax-light"}
+          title="Switch between IntelliJ dark and Syntax light"
+        >
+          {theme === "intellij-dark" ? "☀ Syntax light" : "◐ IntelliJ dark"}
+        </button>
         <button type="button" className="pt-btn pt-btn-ghost pt-btn-sm" onClick={closeProject}>
           Close Project
         </button>
@@ -238,22 +268,27 @@ export default function App(): React.JSX.Element {
               Suites
             </button>
             {openCases.map((tab) => (
-              <button
+              <div
                 key={tab.id}
-                type="button"
                 role="tab"
                 aria-selected={active.kind === "case" && active.caseId === tab.id}
+                tabIndex={0}
                 className={`pt-tab${active.kind === "case" && active.caseId === tab.id ? " pt-tab-active" : ""}`}
                 onClick={() => {
                   setActive({ kind: "case", caseId: tab.id });
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setActive({ kind: "case", caseId: tab.id });
+                  }
+                }}
                 title={tab.name ?? tab.id}
               >
                 {tab.name ?? "Test case"}
-                <span
-                  role="button"
+                <button
+                  type="button"
                   aria-label={`Close ${tab.name ?? "case"} tab`}
-                  tabIndex={0}
                   className="pt-tab-x"
                   onClick={(e) => {
                     closeCaseTab(tab.id, e);
@@ -263,25 +298,30 @@ export default function App(): React.JSX.Element {
                   }}
                 >
                   ×
-                </span>
-              </button>
+                </button>
+              </div>
             ))}
             {reportRunId !== null && (
-              <button
-                type="button"
+              <div
                 role="tab"
                 aria-selected={active.kind === "report"}
+                tabIndex={0}
                 className={`pt-tab${active.kind === "report" ? " pt-tab-active" : ""}`}
                 onClick={() => {
                   setActive({ kind: "report" });
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setActive({ kind: "report" });
+                  }
+                }}
                 title={reportRunId}
               >
                 Report
-                <span
-                  role="button"
+                <button
+                  type="button"
                   aria-label="Close report tab"
-                  tabIndex={0}
                   className="pt-tab-x"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -295,8 +335,8 @@ export default function App(): React.JSX.Element {
                   }}
                 >
                   ×
-                </span>
-              </button>
+                </button>
+              </div>
             )}
           </div>
           <main className="pt-main">

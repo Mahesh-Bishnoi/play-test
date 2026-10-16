@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { api } from "../api.js";
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
+import { api, formatApiError } from "../api.js";
 
 interface Props {
   suiteRunId: string;
@@ -46,7 +42,7 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
         setHasFailed(reportHasFailures(loaded));
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       });
   }, [suiteRunId]);
 
@@ -72,7 +68,7 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
         setNotice(`PDF exported: ${path}`);
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       })
       .finally(() => {
         setBusy(false);
@@ -92,7 +88,7 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
         }
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       })
       .finally(() => {
         setBusy(false);
@@ -100,7 +96,7 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
   };
 
   return (
-    <section aria-label="Run report" style={{ display: "grid", gap: 14 }}>
+    <section aria-label="Run report" className="pt-page">
       <div className="pt-topbar">
         <button type="button" className="pt-btn pt-btn-sm" onClick={onBack}>
           ← Back

@@ -1,12 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { api } from "../api.js";
+import { api, formatApiError } from "../api.js";
 import type { Suite, TestCase } from "../../shared/schema.js";
 import ConfirmDialog from "../components/ConfirmDialog.js";
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 interface Props {
   projectId: string;
@@ -70,7 +66,7 @@ export default function SuiteDetailPage({
         setSuites([...rows].sort((a, b) => a.name.localeCompare(b.name)));
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       });
     api
       .listCases(projectId)
@@ -78,7 +74,7 @@ export default function SuiteDetailPage({
         setCases([...rows].sort((a, b) => a.name.localeCompare(b.name)));
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
@@ -92,7 +88,7 @@ export default function SuiteDetailPage({
         setDirty(false);
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       });
   };
 
@@ -125,7 +121,7 @@ export default function SuiteDetailPage({
           }
         })
         .catch((err: unknown) => {
-          setError(errorMessage(err));
+          setError(formatApiError(err));
         });
       api
         .listCases(projectId)
@@ -133,7 +129,7 @@ export default function SuiteDetailPage({
           setCases([...rows].sort((a, b) => a.name.localeCompare(b.name)));
         })
         .catch((err: unknown) => {
-          setError(errorMessage(err));
+          setError(formatApiError(err));
         });
       if (suiteId !== null) {
         loadMembership(suiteId);
@@ -167,7 +163,7 @@ export default function SuiteDetailPage({
         onChanged?.();
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       })
       .finally(() => {
         setDeleteBusy(false);
@@ -195,7 +191,7 @@ export default function SuiteDetailPage({
         onChanged?.();
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       })
       .finally(() => {
         setDeleteBusy(false);
@@ -256,12 +252,27 @@ export default function SuiteDetailPage({
         onChanged?.();
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       });
   };
 
   const selectedSuite = suites.find((s) => s.id === suiteId) ?? null;
   const selectedCases = cases.filter((c) => checked.has(c.id));
+
+  useEffect(() => {
+    if (!runDialogOpen) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape" && !runBusy) {
+        setRunDialogOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [runDialogOpen, runBusy]);
 
   const confirmRunSuite = (): void => {
     if (selectedSuite === null || checked.size === 0) {
@@ -277,7 +288,7 @@ export default function SuiteDetailPage({
         setNotice(`Suite run started (${selectedCases.length} case(s)). Report: ${runId}`);
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       })
       .finally(() => {
         setRunBusy(false);
@@ -285,7 +296,7 @@ export default function SuiteDetailPage({
   };
 
   return (
-    <section aria-label="Suites and cases" style={{ display: "grid", gap: 16 }}>
+    <section aria-label="Suites and cases" className="pt-page">
       <div className="pt-topbar">
         <h2>Suites &amp; cases</h2>
         <span className="pt-badge">
@@ -321,8 +332,7 @@ export default function SuiteDetailPage({
             {suites.map((s) => (
               <span
                 key={s.id}
-                className={`pt-list-item${suiteId === s.id ? " pt-suite-pill-active" : ""}`}
-                style={{ padding: "4px 4px 4px 8px" }}
+                className={`pt-list-item pt-suite-pill${suiteId === s.id ? " pt-suite-pill-active" : ""}`}
               >
                 <button
                   type="button"
@@ -349,12 +359,12 @@ export default function SuiteDetailPage({
             ))}
           </div>
         )}
-        <p className="pt-hint" style={{ marginTop: 8 }}>
+        <p className="pt-hint pt-mt-8">
           New suites are created from the sidebar + — they appear here for membership and runs.
         </p>
       </div>
 
-      <div className="pt-section-head" style={{ marginBottom: 0 }}>
+      <div className="pt-section-head pt-mb-0">
         <h3 className="pt-toolbar-title">Cases</h3>
         <span className="pt-count">{cases.length} in project</span>
         <span className="pt-spacer" />
@@ -376,16 +386,15 @@ export default function SuiteDetailPage({
               <span className="pt-count">{memberIds.length} in suite</span>
             )}
           </div>
-          <div className="pt-row" style={{ marginBottom: 12 }}>
+          <div className="pt-row pt-mb-12">
             <input
               aria-label="Search cases"
-              className="pt-input"
+              className="pt-input pt-w-220"
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
               }}
               placeholder="Search cases"
-              style={{ maxInlineSize: 220 }}
             />
             <button type="button" className="pt-btn pt-btn-sm" onClick={selectAll}>
               Select all
@@ -430,6 +439,7 @@ export default function SuiteDetailPage({
                     <th>
                       <input
                         type="checkbox"
+                        className="pt-checkbox"
                         aria-label={
                           selectedSuite === null
                             ? "Select a suite above to build membership"
@@ -454,7 +464,7 @@ export default function SuiteDetailPage({
                       />
                     </th>
                     <th>Name</th>
-                    <th style={{ textAlign: "end" }}>Actions</th>
+                    <th className="pt-text-end">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -463,6 +473,7 @@ export default function SuiteDetailPage({
                       <td>
                         <input
                           type="checkbox"
+                          className="pt-checkbox"
                           aria-label={`Include case ${c.name} in ${selectedSuite?.name ?? "suite"}`}
                           title={
                             selectedSuite === null
@@ -477,8 +488,8 @@ export default function SuiteDetailPage({
                         />
                       </td>
                       <td>{c.name}</td>
-                      <td style={{ textAlign: "end" }}>
-                        <span className="pt-row" style={{ justifyContent: "flex-end" }}>
+                      <td className="pt-text-end">
+                        <span className="pt-table-actions">
                           {onOpenCase !== undefined && (
                             <button
                               type="button"
@@ -512,7 +523,7 @@ export default function SuiteDetailPage({
           )}
 
           {lastSuiteRunId !== null && onViewReport !== undefined && (
-            <div style={{ marginTop: 12 }}>
+            <div className="pt-mt-12">
               <button
                 type="button"
                 className="pt-btn pt-btn-sm"
@@ -546,7 +557,7 @@ export default function SuiteDetailPage({
             }}
           >
             <div className="pt-section-head">
-              <h3 style={{ margin: 0 }}>Run suite (unsupervised only)</h3>
+              <h3>Run suite (unsupervised only)</h3>
             </div>
             <p className="pt-sub">
               Suite <strong>{selectedSuite.name}</strong> — {selectedCases.length} case(s)

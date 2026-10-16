@@ -37,6 +37,11 @@ export interface CaseDetail {
 
 const BrowserStatusSchema = z.object({ installed: z.boolean(), executablePath: z.string() });
 
+/** Shared renderer error formatter (single copy — pages/components import this). */
+export function formatApiError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export const api = {
   listProjects(): Promise<Project[]> {
     return invoke("project:list", {}, (raw) => z.array(ProjectSchema).parse(raw));

@@ -1,11 +1,7 @@
 import { useState } from "react";
 
-import { api } from "../api.js";
+import { api, formatApiError } from "../api.js";
 import ConfirmDialog from "./ConfirmDialog.js";
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 interface Row {
   key: string;
@@ -70,7 +66,7 @@ export default function TestDataEditor({ caseId, initial, onSaved }: Props): Rea
         onSaved();
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       })
       .finally(() => {
         setSaving(false);
@@ -78,16 +74,14 @@ export default function TestDataEditor({ caseId, initial, onSaved }: Props): Rea
   };
 
   return (
-    <div style={{ display: "grid", gap: 10 }}>
+    <div className="pt-form-grid">
       {error !== null && (
-        <p role="alert" className="pt-alert pt-alert-error" style={{ margin: 0 }}>
+        <p role="alert" className="pt-alert pt-alert-error">
           {error}
         </p>
       )}
       {rows.length === 0 ? (
-        <p className="pt-empty" style={{ margin: 0 }}>
-          No keys yet — add the first one below.
-        </p>
+        <p className="pt-empty">No keys yet — add the first one below.</p>
       ) : (
         <div className="pt-table-wrap">
           <table className="pt-table">
@@ -105,8 +99,7 @@ export default function TestDataEditor({ caseId, initial, onSaved }: Props): Rea
                   <td>
                     <input
                       aria-label={`Value for ${row.key}`}
-                      className="pt-input"
-                      style={{ inlineSize: "100%" }}
+                      className="pt-input pt-mono pt-w-full"
                       value={row.value}
                       disabled={saving}
                       onChange={(e) => {
@@ -114,7 +107,7 @@ export default function TestDataEditor({ caseId, initial, onSaved }: Props): Rea
                       }}
                     />
                   </td>
-                  <td style={{ textAlign: "end" }}>
+                  <td className="pt-text-end">
                     <button
                       type="button"
                       aria-label={`Delete key ${row.key}`}
@@ -137,25 +130,23 @@ export default function TestDataEditor({ caseId, initial, onSaved }: Props): Rea
       <div className="pt-row">
         <input
           aria-label="New key"
-          className="pt-input"
+          className="pt-input pt-w-180"
           placeholder="key"
           value={newKey}
           disabled={saving}
           onChange={(e) => {
             setNewKey(e.target.value);
           }}
-          style={{ maxInlineSize: 180 }}
         />
         <input
           aria-label="New value"
-          className="pt-input"
+          className="pt-input pt-w-260"
           placeholder="value"
           value={newValue}
           disabled={saving}
           onChange={(e) => {
             setNewValue(e.target.value);
           }}
-          style={{ maxInlineSize: 260 }}
         />
         <button type="button" className="pt-btn pt-btn-sm" onClick={addRow} disabled={saving}>
           Add key

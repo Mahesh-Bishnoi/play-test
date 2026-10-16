@@ -1,0 +1,1060 @@
+<!doctype html>
+<html lang="en" data-theme="syntax-light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PlayTest — Theme Demo: Current Dark vs Syntax Light</title>
+    <style>
+      /* ============ BASE / RESET ============ */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family:
+          Inter,
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+        font-size: 15px;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* ============ CURRENT DARK (existing PlayTest / IntelliJ Darcula) ============ */
+      html[data-theme="intellij-dark"] {
+        --pt-bg: #1e1f22;
+        --pt-bg-raised: #242528;
+        --pt-sidebar: #2b2d30;
+        --pt-card: #2b2d30;
+        --pt-card-2: #313438;
+        --pt-muted: #393b40;
+        --pt-border: #393b40;
+        --pt-border-soft: #393b40;
+        --pt-fg: #dfe1e5;
+        --pt-fg-dim: #bcbec4;
+        --pt-muted-fg: #868a93;
+        --pt-accent: #3574f0;
+        --pt-accent-hover: #4682f2;
+        --pt-accent-ink: #ffffff;
+        --pt-selection: #43454a;
+        --pt-selection-accent: rgb(53 116 240 / 0.28);
+        --pt-ok: #6aab73;
+        --pt-fail: #f26b6f;
+        --pt-run: #4cb0e0;
+        --pt-warn: #e8a33d;
+        --pt-radius: 6px;
+        --pt-radius-sm: 4px;
+        --pt-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        --pt-shadow: 0 8px 28px rgb(0 0 0 / 0.45);
+        --pt-input-bg: #1e1f22;
+        --pt-hover: rgb(255 255 255 / 0.04);
+        --pt-table-head: rgb(255 255 255 / 0.02);
+        --pt-row-hover: rgb(53 116 240 / 0.08);
+        --pt-hard-shadow: none;
+        --pt-border-width: 1px;
+        --pt-tab-bg: transparent;
+        --pt-track: #1e1f22;
+      }
+
+      /* ============ NEW: SYNTAX LIGHT (off-white + black + orange) ============ */
+      html[data-theme="syntax-light"] {
+        --pt-bg: #faf7f1;
+        --pt-bg-raised: #ffffff;
+        --pt-sidebar: #ffffff;
+        --pt-card: #ffffff;
+        --pt-card-2: #fff4e8;
+        --pt-muted: #f1ece2;
+        --pt-border: #141210;
+        --pt-border-soft: #e7dfd2;
+        --pt-fg: #141210;
+        --pt-fg-dim: #2a2723;
+        --pt-muted-fg: #6f6860;
+        --pt-accent: #ff5c00;
+        --pt-accent-hover: #e04e00;
+        --pt-accent-ink: #141210;
+        --pt-selection: #141210;
+        --pt-selection-accent: rgb(255 92 0 / 0.16);
+        --pt-ok: #166534;
+        --pt-fail: #b42318;
+        --pt-run: #0b6b94;
+        --pt-warn: #b54708;
+        --pt-radius: 14px;
+        --pt-radius-sm: 9px;
+        --pt-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        --pt-shadow: 4px 4px 0 #141210;
+        --pt-input-bg: #ffffff;
+        --pt-hover: rgb(255 92 0 / 0.06);
+        --pt-table-head: #fbf3e7;
+        --pt-row-hover: rgb(255 92 0 / 0.07);
+        --pt-hard-shadow: 4px 4px 0 #141210;
+        --pt-border-width: 2px;
+        --pt-tab-bg: #ffffff;
+        --pt-track: #f1ece2;
+      }
+
+      body {
+        background: var(--pt-bg);
+        color: var(--pt-fg);
+        transition:
+          background 0.2s,
+          color 0.2s;
+      }
+
+      /* ============ DEMO CHROME ============ */
+      .demo-bar {
+        position: sticky;
+        top: 0;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 12px 20px;
+        border-bottom: var(--pt-border-width) solid var(--pt-border);
+        background: var(--pt-sidebar);
+        color: var(--pt-fg);
+      }
+      html[data-theme="syntax-light"] .demo-bar {
+        border-bottom: 2px solid #141210;
+      }
+      .demo-bar strong {
+        letter-spacing: -0.02em;
+        font-size: 16px;
+      }
+      .demo-bar .sub {
+        color: var(--pt-muted-fg);
+        font-size: 13px;
+      }
+      .seg {
+        display: flex;
+        border: var(--pt-border-width) solid var(--pt-border);
+        border-radius: 999px;
+        overflow: hidden;
+        background: var(--pt-input-bg);
+      }
+      html[data-theme="syntax-light"] .seg {
+        border: 2px solid #141210;
+        box-shadow: 3px 3px 0 #141210;
+      }
+      html[data-theme="intellij-dark"] .seg {
+        border: 1px solid #393b40;
+      }
+      .seg button {
+        appearance: none;
+        border: 0;
+        background: transparent;
+        color: var(--pt-muted-fg);
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        padding: 8px 14px;
+        cursor: pointer;
+        display: flex;
+        gap: 7px;
+        align-items: center;
+      }
+      .seg button.active {
+        background: var(--pt-accent);
+        color: var(--pt-accent-ink);
+      }
+      html[data-theme="syntax-light"] .seg button.active {
+        color: #141210;
+      }
+      .swatch-dot {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        border: 2px solid currentColor;
+        flex: none;
+      }
+      .tokens {
+        margin-left: auto;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        font-family: var(--pt-font-mono);
+        font-size: 12px;
+        color: var(--pt-muted-fg);
+      }
+      .tokens code {
+        background: var(--pt-muted);
+        padding: 2px 8px;
+        border-radius: 99px;
+        border: 1px solid var(--pt-border-soft);
+        color: var(--pt-fg-dim);
+      }
+      html[data-theme="syntax-light"] .tokens code {
+        background: #141210;
+        color: #faf7f1;
+        border-color: #141210;
+      }
+
+      /* ============ APP SHELL (mirrors App.tsx) ============ */
+      .pt-menubar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 9px 20px;
+        background: var(--pt-sidebar);
+        border-bottom: var(--pt-border-width) solid var(--pt-border);
+        color: var(--pt-fg);
+      }
+      html[data-theme="syntax-light"] .pt-menubar {
+        border-bottom: 2px solid #141210;
+      }
+      html[data-theme="intellij-dark"] .pt-menubar {
+        border-bottom: 1px solid #393b40;
+      }
+      .pt-menubar-app {
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .mark {
+        width: 30px;
+        height: 30px;
+        border-radius: 9px;
+        display: grid;
+        place-items: center;
+        background: var(--pt-accent);
+        color: var(--pt-accent-ink);
+        font-weight: 900;
+        font-size: 17px;
+        flex: none;
+      }
+      html[data-theme="syntax-light"] .mark {
+        border: 2px solid #141210;
+        box-shadow: 2px 2px 0 #141210;
+        color: #141210;
+        border-radius: 9px;
+      }
+      .pt-menubar-project {
+        color: var(--pt-muted-fg);
+        font-size: 13px;
+      }
+      .spacer {
+        flex: 1;
+      }
+      .pt-ide {
+        display: grid;
+        grid-template-columns: 290px minmax(0, 1fr);
+        min-height: calc(100vh - 109px);
+      }
+      .pt-sidebar {
+        border-right: var(--pt-border-width) solid var(--pt-border);
+        background: var(--pt-sidebar);
+        padding: 18px 15px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        color: var(--pt-fg);
+      }
+      html[data-theme="syntax-light"] .pt-sidebar {
+        border-right: 2px solid #141210;
+      }
+      html[data-theme="intellij-dark"] .pt-sidebar {
+        border-right: 1px solid #393b40;
+      }
+      .pt-side-label {
+        color: var(--pt-muted-fg);
+        font-size: 11.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin: 2px 4px 0;
+        font-family: var(--pt-font-mono);
+      }
+      html[data-theme="syntax-light"] .pt-side-label {
+        background: #141210;
+        color: #faf7f1;
+        display: inline-block;
+        padding: 3px 9px;
+        border-radius: 99px;
+        width: fit-content;
+      }
+      .pt-main {
+        padding: 22px;
+        max-width: 1120px;
+        width: 100%;
+        margin-inline: auto;
+        display: grid;
+        gap: 16px;
+        align-content: start;
+      }
+      .pt-editor-col {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        background: var(--pt-bg);
+      }
+      .pt-tabs {
+        display: flex;
+        gap: 6px;
+        padding: 10px 22px 0;
+        background: var(--pt-sidebar);
+        border-bottom: var(--pt-border-width) solid var(--pt-border);
+        overflow-x: auto;
+      }
+      html[data-theme="syntax-light"] .pt-tabs {
+        border-bottom: 2px solid #141210;
+        gap: 8px;
+      }
+      html[data-theme="intellij-dark"] .pt-tabs {
+        border-bottom: 1px solid #393b40;
+      }
+      .pt-tab {
+        border: 1px solid transparent;
+        border-bottom: none;
+        background: transparent;
+        color: var(--pt-muted-fg);
+        font: inherit;
+        font-size: 13px;
+        padding: 7px 13px;
+        border-radius: 8px 8px 0 0;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        white-space: nowrap;
+      }
+      html[data-theme="syntax-light"] .pt-tab {
+        border: 2px solid transparent;
+        border-bottom: none;
+        font-weight: 700;
+      }
+      .pt-tab-active {
+        background: var(--pt-bg);
+        color: var(--pt-fg);
+        border-color: var(--pt-border);
+      }
+      html[data-theme="syntax-light"] .pt-tab-active {
+        background: var(--pt-accent);
+        color: #141210;
+        border-color: #141210;
+      }
+      .pt-tab-x {
+        display: inline-grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        border-radius: 5px;
+        background: rgb(0 0 0 / 0.08);
+      }
+
+      /* ============ PRIMITIVES (mirrors styles.css) ============ */
+      .pt-card {
+        background: var(--pt-card);
+        border: var(--pt-border-width) solid var(--pt-border);
+        border-radius: var(--pt-radius);
+        padding: 16px;
+        color: var(--pt-fg);
+      }
+      html[data-theme="syntax-light"] .pt-card {
+        border: 2px solid #141210;
+        box-shadow: var(--pt-hard-shadow);
+      }
+      html[data-theme="intellij-dark"] .pt-card {
+        border: 1px solid #393b40;
+      }
+      .pt-panel {
+        background: var(--pt-input-bg);
+        border: 1px solid var(--pt-border-soft);
+        border-radius: var(--pt-radius);
+        padding: 14px;
+      }
+      html[data-theme="syntax-light"] .pt-panel {
+        border: 2px dashed #141210;
+        background: #fffdf8;
+      }
+      .hero {
+        display: grid;
+        gap: 8px;
+      }
+      .hero h2 {
+        margin: 0;
+        font-size: clamp(1.4rem, 1.1rem + 1.4vw, 2rem);
+        letter-spacing: -0.03em;
+        line-height: 1.05;
+      }
+      html[data-theme="syntax-light"] .hero h2 .hl {
+        background: var(--pt-accent);
+        color: #141210;
+        padding: 0 10px;
+        border-radius: 8px;
+        border: 2px solid #141210;
+        display: inline-block;
+        transform: rotate(-1.5deg);
+        box-shadow: 3px 3px 0 #141210;
+      }
+      .hero p {
+        margin: 0;
+        color: var(--pt-muted-fg);
+        font-size: 13.5px;
+        max-width: 62ch;
+      }
+      .pt-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .pt-btn {
+        appearance: none;
+        border: var(--pt-border-width) solid var(--pt-border);
+        background: var(--pt-muted);
+        color: var(--pt-fg);
+        border-radius: var(--pt-radius-sm);
+        padding: 8px 14px;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        font-family: inherit;
+        transition: transform 0.12s;
+      }
+      html[data-theme="syntax-light"] .pt-btn {
+        border: 2px solid #141210;
+        background: #fff;
+        box-shadow: 3px 3px 0 #141210;
+        border-radius: 9px;
+      }
+      html[data-theme="syntax-light"] .pt-btn:hover {
+        transform: translate(-1px, -1px);
+        box-shadow: 4px 4px 0 #141210;
+        background: #fff4e8;
+      }
+      html[data-theme="syntax-light"] .pt-btn:active {
+        transform: translate(2px, 2px);
+        box-shadow: 0 0 0 #141210;
+      }
+      html[data-theme="intellij-dark"] .pt-btn {
+        border: 1px solid #393b40;
+      }
+      .pt-btn-primary {
+        background: var(--pt-accent);
+        border-color: var(--pt-accent);
+        color: var(--pt-accent-ink);
+      }
+      html[data-theme="syntax-light"] .pt-btn-primary {
+        background: var(--pt-accent);
+        border-color: #141210;
+        color: #141210;
+      }
+      html[data-theme="intellij-dark"] .pt-btn-primary {
+        color: #fff;
+      }
+      .pt-btn-ghost {
+        background: transparent;
+      }
+      .pt-btn-sm {
+        padding: 5px 10px;
+        font-size: 13px;
+      }
+      .pt-input,
+      .pt-select {
+        background: var(--pt-input-bg);
+        border: 1px solid var(--pt-border-soft);
+        color: var(--pt-fg);
+        border-radius: var(--pt-radius-sm);
+        padding: 8px 11px;
+        font-size: 14px;
+        font-family: inherit;
+        min-width: 0;
+      }
+      html[data-theme="syntax-light"] .pt-input,
+      html[data-theme="syntax-light"] .pt-select {
+        border: 2px solid #141210;
+        border-radius: 9px;
+        background: #fff;
+      }
+      html[data-theme="syntax-light"] .pt-input:focus-visible {
+        outline: 3px solid rgb(255 92 0 / 0.35);
+      }
+      .pt-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        font-weight: 800;
+        padding: 3px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--pt-border);
+        background: var(--pt-muted);
+        color: var(--pt-fg-dim);
+        white-space: nowrap;
+      }
+      html[data-theme="syntax-light"] .pt-badge {
+        border: 2px solid #141210;
+        background: #fff;
+        color: #141210;
+      }
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentcolor;
+        flex: none;
+      }
+      .b-pass {
+        background: rgb(73 156 84 / 0.15);
+        border-color: rgb(73 156 84 / 0.55);
+        color: var(--pt-ok);
+      }
+      .b-fail {
+        background: rgb(231 72 86 / 0.13);
+        border-color: rgb(231 72 86 / 0.55);
+        color: var(--pt-fail);
+      }
+      .b-run {
+        background: rgb(53 146 196 / 0.15);
+        border-color: rgb(53 146 196 / 0.55);
+        color: var(--pt-run);
+      }
+      html[data-theme="syntax-light"] .b-pass {
+        background: #e5f6ea;
+        border-color: #141210;
+        color: #166534;
+      }
+      html[data-theme="syntax-light"] .b-fail {
+        background: #fde7e5;
+        border-color: #141210;
+        color: #b42318;
+      }
+      html[data-theme="syntax-light"] .b-run {
+        background: #e2f2fa;
+        border-color: #141210;
+        color: #0b6b94;
+      }
+      .mono {
+        font-family: var(--pt-font-mono);
+        font-size: 0.92em;
+      }
+      .pt-table-wrap {
+        overflow: auto;
+        border: var(--pt-border-width) solid var(--pt-border);
+        border-radius: var(--pt-radius);
+        background: var(--pt-card);
+      }
+      html[data-theme="syntax-light"] .pt-table-wrap {
+        border: 2px solid #141210;
+        box-shadow: var(--pt-hard-shadow);
+      }
+      html[data-theme="intellij-dark"] .pt-table-wrap {
+        border: 1px solid #393b40;
+      }
+      .pt-table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 14px;
+      }
+      .pt-table th {
+        text-align: left;
+        color: var(--pt-muted-fg);
+        font-size: 11.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--pt-border-soft);
+        background: var(--pt-table-head);
+        white-space: nowrap;
+        font-family: var(--pt-font-mono);
+      }
+      html[data-theme="syntax-light"] .pt-table th {
+        border-bottom: 2px solid #141210;
+      }
+      .pt-table td {
+        padding: 9px 12px;
+        border-bottom: 1px solid var(--pt-border-soft);
+        vertical-align: middle;
+      }
+      html[data-theme="syntax-light"] .pt-table td {
+        border-bottom: 1px solid #e7dfd2;
+      }
+      .pt-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+      .pt-table tbody tr:hover {
+        background: var(--pt-row-hover);
+      }
+      .tree {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 4px;
+      }
+      .tree-row {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        padding: 8px 10px;
+        border-radius: var(--pt-radius-sm);
+        cursor: pointer;
+        border: 1px solid transparent;
+      }
+      html[data-theme="syntax-light"] .tree-row {
+        border: 2px solid transparent;
+      }
+      .tree-row:hover {
+        background: var(--pt-hover);
+      }
+      .tree-row.active {
+        background: var(--pt-selection-accent);
+        border-color: var(--pt-accent);
+      }
+      html[data-theme="syntax-light"] .tree-row.active {
+        background: #ffe9d6;
+        border-color: #141210;
+        box-shadow: 3px 3px 0 #141210;
+      }
+      .tree-ic {
+        flex: none;
+        width: 20px;
+        text-align: center;
+      }
+      .tree-name {
+        display: block;
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .tree-meta {
+        display: block;
+        font-family: var(--pt-font-mono);
+        font-size: 12px;
+        color: var(--pt-muted-fg);
+      }
+      .runlog {
+        font-family: var(--pt-font-mono);
+        font-size: 12.5px;
+        white-space: pre-wrap;
+        background: var(--pt-track);
+        border: 1px solid var(--pt-border-soft);
+        border-radius: var(--pt-radius-sm);
+        padding: 12px;
+        color: var(--pt-fg-dim);
+        max-height: 150px;
+        overflow: auto;
+      }
+      html[data-theme="syntax-light"] .runlog {
+        background: #141210;
+        color: #ffe9d6;
+        border-color: #141210;
+      }
+      html[data-theme="intellij-dark"] .runlog {
+        color: #a9b7c6;
+      }
+      .graph {
+        height: 170px;
+        border: var(--pt-border-width) solid var(--pt-border);
+        border-radius: var(--pt-radius);
+        background:
+          radial-gradient(rgb(134 138 147 / 0.18) 1px, transparent 1px) 0 0 / 22px 22px,
+          var(--pt-input-bg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 14px;
+      }
+      html[data-theme="syntax-light"] .graph {
+        border: 2px solid #141210;
+        background-color: #fffdf8;
+      }
+      html[data-theme="intellij-dark"] .graph {
+        border: 1px solid #393b40;
+      }
+      .node {
+        width: 170px;
+        padding: 9px 11px;
+        border-radius: 10px;
+        border: 1px solid var(--pt-border);
+        border-left-width: 5px;
+        background: var(--pt-card);
+        font-size: 13px;
+      }
+      html[data-theme="syntax-light"] .node {
+        border: 2px solid #141210;
+        box-shadow: 3px 3px 0 #141210;
+        background: #fff;
+      }
+      .node b {
+        display: block;
+        font-size: 13px;
+      }
+      .node span {
+        font-family: var(--pt-font-mono);
+        font-size: 11.5px;
+        color: var(--pt-muted-fg);
+      }
+      .grid2 {
+        display: grid;
+        grid-template-columns: 1.3fr 0.9fr;
+        gap: 16px;
+        align-items: start;
+      }
+      .alert {
+        border-radius: var(--pt-radius-sm);
+        padding: 10px 12px;
+        font-size: 14px;
+        margin: 0;
+        border: 1px solid;
+      }
+      html[data-theme="syntax-light"] .alert {
+        border-width: 2px;
+      }
+      .a-ok {
+        background: rgb(34 197 94 / 0.1);
+        border-color: rgb(34 197 94 / 0.4);
+      }
+      html[data-theme="syntax-light"] .a-ok {
+        background: #e5f6ea;
+        border-color: #141210;
+      }
+      .a-warn {
+        background: rgb(245 158 11 / 0.1);
+        border-color: rgb(245 158 11 / 0.4);
+      }
+      html[data-theme="syntax-light"] .a-warn {
+        background: #fff1d6;
+        border-color: #141210;
+      }
+      .foot {
+        color: var(--pt-muted-fg);
+        font-size: 12.5px;
+        border-top: 1px solid var(--pt-border-soft);
+        padding-top: 10px;
+      }
+      html[data-theme="syntax-light"] .foot {
+        border-top: 2px dashed #141210;
+      }
+      .verdict {
+        display: grid;
+        gap: 10px;
+      }
+      .verdict table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      .verdict td {
+        padding: 6px 8px;
+        border-bottom: 1px dashed var(--pt-border-soft);
+        font-family: var(--pt-font-mono);
+        font-size: 12.5px;
+      }
+      .chip {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 4px;
+        border: 1px solid var(--pt-border);
+        vertical-align: -1px;
+        margin-right: 6px;
+      }
+      html[data-theme="syntax-light"] .chip {
+        border: 1.5px solid #141210;
+      }
+      @media (max-width: 900px) {
+        .pt-ide {
+          grid-template-columns: 1fr;
+        }
+        .grid2 {
+          grid-template-columns: 1fr;
+        }
+        .tokens {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="demo-bar">
+      <strong>PlayTest theme demo</strong>
+      <span class="sub">Toggle to compare — nothing in the app changes until you approve.</span>
+      <div class="seg" role="tablist" aria-label="Theme switcher">
+        <button id="btn-dark" role="tab" aria-selected="false" onclick="setTheme('intellij-dark')">
+          <span class="swatch-dot" style="background: #1e1f22"></span> Current dark
+        </button>
+        <button id="btn-light" role="tab" aria-selected="true" onclick="setTheme('syntax-light')">
+          <span class="swatch-dot" style="background: #ff5c00"></span> New · Syntax light
+        </button>
+      </div>
+      <div class="tokens">
+        <code id="tok-bg">#FAF7F1</code
+        ><code style="background: var(--pt-accent); color: #141210">#FF5C00</code
+        ><code>#141210</code>
+      </div>
+    </div>
+
+    <div class="pt-menubar">
+      <span class="pt-menubar-app"><span class="mark">P</span> PlayTest</span>
+      <span class="pt-menubar-project">dummy-tax-site · http://localhost:4137</span>
+      <span class="spacer"></span>
+      <span class="mono" id="theme-label" style="font-size: 12px; color: var(--pt-muted-fg)"
+        >theme: syntax-light</span
+      >
+      <button class="pt-btn pt-btn-ghost pt-btn-sm" type="button">Close Project</button>
+    </div>
+
+    <div class="pt-ide">
+      <aside class="pt-sidebar">
+        <div class="pt-side-label">Project explorer</div>
+        <input class="pt-input" style="width: 100%" value="" placeholder="Search suites & cases…" />
+        <ul class="tree">
+          <li class="tree-row active">
+            <span class="tree-ic">📁</span
+            ><span
+              ><span class="tree-name">checkout-flow</span
+              ><span class="tree-meta">4 cases</span></span
+            >
+          </li>
+          <li class="tree-row">
+            <span class="tree-ic">📁</span
+            ><span
+              ><span class="tree-name">auth-regression</span
+              ><span class="tree-meta">6 cases</span></span
+            >
+          </li>
+          <li class="tree-row" style="margin-left: 18px">
+            <span class="tree-ic">🧪</span
+            ><span
+              ><span class="tree-name">login happy path</span
+              ><span class="tree-meta">12 steps · pass</span></span
+            >
+          </li>
+          <li class="tree-row" style="margin-left: 18px">
+            <span class="tree-ic">🧪</span
+            ><span
+              ><span class="tree-name">coupon + GST edge</span
+              ><span class="tree-meta">9 steps · running</span></span
+            >
+          </li>
+          <li class="tree-row">
+            <span class="tree-ic">📁</span
+            ><span
+              ><span class="tree-name">settings</span><span class="tree-meta">2 cases</span></span
+            >
+          </li>
+        </ul>
+        <div class="pt-panel" style="display: grid; gap: 8px">
+          <b style="font-size: 13px">New suite</b>
+          <input class="pt-input" style="width: 100%" placeholder="e.g. payments" />
+          <div class="pt-row">
+            <button class="pt-btn pt-btn-primary pt-btn-sm" type="button">Create</button
+            ><button class="pt-btn pt-btn-sm" type="button">Cancel</button>
+          </div>
+        </div>
+        <div class="foot">Local-first SQLite · artifacts in ~/PlayTestData</div>
+      </aside>
+
+      <div class="pt-editor-col">
+        <div class="pt-tabs">
+          <span class="pt-tab">Suites</span
+          ><span class="pt-tab pt-tab-active"
+            >coupon + GST edge <span class="pt-tab-x">×</span></span
+          ><span class="pt-tab">Report <span class="pt-tab-x">×</span></span>
+        </div>
+        <main class="pt-main">
+          <div class="hero">
+            <div class="pt-row">
+              <span class="pt-badge b-pass"><span class="dot"></span> PASS · last run</span>
+              <span class="pt-badge b-run"><span class="dot"></span> RUNNING · step 7/9</span>
+              <span class="pt-badge"><span class="dot"></span> chromium · 1280×800</span>
+            </div>
+            <h2>Coupon + GST edge <span class="hl">Tasty run</span></h2>
+            <p>
+              Same layout, same components — only tokens change. Syntax-light keeps the chunky
+              sticker feel (hard shadow, black borders, mono labels) but on
+              <b>slightly off-white #FAF7F1</b> with <b>orange #FF5C00</b> instead of yellow.
+            </p>
+          </div>
+
+          <div class="pt-row">
+            <button class="pt-btn pt-btn-primary" type="button">▶ Run case</button>
+            <button class="pt-btn" type="button">View report</button>
+            <button class="pt-btn pt-btn-ghost" type="button">Duplicate</button>
+            <span class="spacer"></span>
+            <input class="pt-input" style="max-width: 220px" placeholder="Filter steps…" />
+            <select class="pt-select">
+              <option>chromium</option>
+              <option>firefox</option>
+            </select>
+          </div>
+
+          <div class="grid2">
+            <div class="pt-table-wrap">
+              <table class="pt-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Action</th>
+                    <th>Target</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="mono">1</td>
+                    <td><b>goto</b></td>
+                    <td class="mono">/cart</td>
+                    <td>
+                      <span class="pt-badge b-pass"><span class="dot"></span>pass</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="mono">2</td>
+                    <td><b>fill</b></td>
+                    <td class="mono">#coupon</td>
+                    <td>
+                      <span class="pt-badge b-pass"><span class="dot"></span>pass</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="mono">3</td>
+                    <td><b>click</b></td>
+                    <td class="mono">text=Apply</td>
+                    <td>
+                      <span class="pt-badge b-fail"><span class="dot"></span>fail</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="mono">4</td>
+                    <td><b>assert</b></td>
+                    <td class="mono">GST = 18%</td>
+                    <td>
+                      <span class="pt-badge b-run"><span class="dot"></span>running</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div style="display: grid; gap: 16px">
+              <div class="pt-card">
+                <div class="pt-side-label" style="margin: 0 0 8px">Run report</div>
+                <div class="pt-row" style="margin-bottom: 10px">
+                  <span class="pt-badge b-pass"><span class="dot"></span>7 pass</span>
+                  <span class="pt-badge b-fail"><span class="dot"></span>1 fail</span>
+                  <span class="pt-badge b-run"><span class="dot"></span>1 running</span>
+                </div>
+                <div class="runlog">
+                  ▶ step 7/9 click text=Apply ✓ selector resolved in 42ms ✗ assertion failed:
+                  expected GST 18%, got 18.0% — artifact: screenshot-07.png saved
+                </div>
+              </div>
+              <div class="pt-card">
+                <div class="pt-side-label" style="margin: 0 0 8px">Workflow graph</div>
+                <div class="graph">
+                  <div class="node" style="border-left-color: #166534">
+                    <b>fill #coupon</b><span>pass · 120ms</span>
+                  </div>
+                  <div class="mono">→</div>
+                  <div class="node" style="border-left-color: #ff5c00">
+                    <b>click Apply</b><span>running…</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid2">
+            <p class="alert a-ok" style="margin: 0">
+              ✓ <b>Suite green.</b> 11/12 cases passing on chromium.
+            </p>
+            <p class="alert a-warn" style="margin: 0">
+              ⚠ <b>Chromium not installed</b> — run
+              <span class="mono">npx playwright install chromium</span> once.
+            </p>
+          </div>
+
+          <div class="pt-card verdict">
+            <b>Token sheet — what changes if we ship this</b>
+            <table>
+              <tr>
+                <td>
+                  <span class="chip" style="background: #faf7f1"></span>--pt-bg: #FAF7F1 (off-white)
+                </td>
+                <td>was #1E1F22</td>
+              </tr>
+              <tr>
+                <td>
+                  <span class="chip" style="background: #ffffff"></span>--pt-card / sidebar: #FFFFFF
+                </td>
+                <td>was #2B2D30</td>
+              </tr>
+              <tr>
+                <td>
+                  <span class="chip" style="background: #141210"></span>--pt-fg / border: #141210
+                  (near-black)
+                </td>
+                <td>was #DFE1E5 / #393B40</td>
+              </tr>
+              <tr>
+                <td>
+                  <span class="chip" style="background: #ff5c00"></span>--pt-accent: #FF5C00
+                  (orange)
+                </td>
+                <td>was #3574F0 (blue)</td>
+              </tr>
+              <tr>
+                <td>borders 2px + 4px hard shadow, radius 14px</td>
+                <td>was 1px, 6px, soft shadow</td>
+              </tr>
+            </table>
+            <div class="pt-row">
+              <button
+                class="pt-btn pt-btn-primary"
+                type="button"
+                onclick="
+                  alert(
+                    'Noted — tell me in chat and I will wire it into src/renderer/styles.css with a data-theme toggle.',
+                  )
+                "
+              >
+                Approve this direction
+              </button>
+              <button class="pt-btn" type="button" onclick="setTheme('intellij-dark')">
+                Back to current dark
+              </button>
+            </div>
+            <p class="foot" style="margin: 0">
+              Implementation plan on approval: add <span class="mono">[data-theme]</span> tokens in
+              <span class="mono">styles.css</span>, persist choice in
+              <span class="mono">localStorage (playtest.theme)</span>, add toggle in menubar.
+              Current dark stays default until you flip.
+            </p>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script>
+      function setTheme(t) {
+        document.documentElement.dataset.theme = t;
+        document.getElementById("btn-dark").classList.toggle("active", t === "intellij-dark");
+        document.getElementById("btn-light").classList.toggle("active", t === "syntax-light");
+        document.getElementById("btn-dark").setAttribute("aria-selected", t === "intellij-dark");
+        document.getElementById("btn-light").setAttribute("aria-selected", t === "syntax-light");
+        document.getElementById("theme-label").textContent = "theme: " + t;
+        try {
+          localStorage.setItem("demo.theme", t);
+        } catch (e) {}
+      }
+      try {
+        const s = localStorage.getItem("demo.theme");
+        if (s === "intellij-dark" || s === "syntax-light") setTheme(s);
+        else setTheme("syntax-light");
+      } catch (e) {
+        setTheme("syntax-light");
+      }
+    </script>
+  </body>
+</html>

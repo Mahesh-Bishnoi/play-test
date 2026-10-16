@@ -48,7 +48,7 @@ export default function BrowserBanner(): React.JSX.Element | null {
   }
 
   return (
-    <div role="status" className="pt-banner" style={{ marginBottom: 16 }}>
+    <div role="status" className="pt-banner pt-mb-16">
       <span>
         {state === "checking" && "Checking for Chromium…"}
         {state === "missing" &&

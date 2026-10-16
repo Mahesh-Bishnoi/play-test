@@ -1,12 +1,8 @@
 import { useEffect, useState } from "react";
 
-import { api } from "../api.js";
+import { api, formatApiError } from "../api.js";
 import type { Project } from "../../shared/schema.js";
 import ConfirmDialog from "./ConfirmDialog.js";
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 interface Props {
   onOpen: (projectId: string) => void;
@@ -37,7 +33,7 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
         setSelectedId(sorted[0]?.id ?? null);
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       })
       .finally(() => {
         setLoading(false);
@@ -65,7 +61,7 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
         onOpen(created.id);
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       });
   };
 
@@ -88,7 +84,7 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
         setPendingDelete(null);
       })
       .catch((err: unknown) => {
-        setError(errorMessage(err));
+        setError(formatApiError(err));
       })
       .finally(() => {
         setDeleteBusy(false);
@@ -126,7 +122,7 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
             {loading ? (
               <p className="pt-hint">Loading projects…</p>
             ) : visible.length === 0 ? (
-              <p className="pt-hint">No projects yet — create one on the right.</p>
+              <p className="pt-empty">No projects yet — create one on the right.</p>
             ) : (
               <ul className="pt-tree" role="listbox" aria-label="Recent projects">
                 {visible.map((p) => (
@@ -189,7 +185,7 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
                   setPendingDelete(selected);
                 }}
               >
-                Delete…
+                Delete
               </button>
             )}
           </div>
@@ -211,6 +207,11 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
               onChange={(e) => {
                 setName(e.target.value);
               }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && name.trim() !== "") {
+                  create();
+                }
+              }}
             />
             <input
               aria-label="New project base URL"
@@ -219,6 +220,11 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
               value={baseUrl}
               onChange={(e) => {
                 setBaseUrl(e.target.value);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && name.trim() !== "") {
+                  create();
+                }
               }}
             />
             <button type="button" className="pt-btn" disabled={name.trim() === ""} onClick={create}>
