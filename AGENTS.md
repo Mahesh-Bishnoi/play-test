@@ -30,5 +30,9 @@ Read `PLAN.md` first. It is the source of truth for scope, decisions, and status
 - If blocked (contract mismatch, missing WS1 types): log `Blocked: ...` in ledger, stop, don't invent parallel contracts.
 - Prefer editing existing files over creating new ones.
 
-## 6. Quick commands (see repo README/AGENTS overrides if present)
+## 6. Dependency version policy
+- Never copy dependency versions from memory. Before adding or upgrading any dependency, check the latest stable version first (e.g. `npm view <pkg> version`, `npm view <pkg> versions --json | tail`), then pin/add it.
+- Use latest stable unless PLAN.md or a project convention pins otherwise; if you deliberately pin older, note why in the Status Ledger.
+
+## 7. Quick commands (see repo README/AGENTS overrides if present)
 - `npm run typecheck`, `npm test`, `npm run package -- --dir`
