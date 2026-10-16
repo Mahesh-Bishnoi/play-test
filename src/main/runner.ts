@@ -701,8 +701,18 @@ export class SingleCaseRunner {
   private async captureScreenshot(context: RunContext, path: string): Promise<void> {
     try {
       await context.page.screenshot(path);
+      return;
     } catch {
-      this.log("warn", `screenshot failed for ${path}`);
+      // Captures racing a just-triggered navigation fail at the CDP protocol
+      // level ("Unable to capture screenshot"). Settle briefly and retry once
+      // before giving up — dummy-tax-site e2e showed immediate post-submit
+      // captures failing deterministically in headless Chromium.
+      try {
+        await context.page.waitForTimeout(1000);
+        await context.page.screenshot(path);
+      } catch {
+        this.log("warn", `screenshot failed for ${path}`);
+      }
     }
   }
 

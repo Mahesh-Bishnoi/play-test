@@ -427,8 +427,16 @@ export class SuiteRunner {
   private async captureScreenshot(context: RunContext, path: string): Promise<void> {
     try {
       await context.page.screenshot(path);
+      return;
     } catch {
-      this.log("warn", `screenshot failed for ${path}`);
+      // Same navigation-race retry as SingleCaseRunner.captureScreenshot —
+      // the two runners mirror each other (PLAN M6), keep them consistent.
+      try {
+        await context.page.waitForTimeout(1000);
+        await context.page.screenshot(path);
+      } catch {
+        this.log("warn", `screenshot failed for ${path}`);
+      }
     }
   }
 
