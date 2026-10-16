@@ -364,7 +364,7 @@ export default function SuiteDetailPage({
         )}
       </div>
 
-      <div className="pt-card">
+      <div>
         <div className="pt-section-head">
           <h3 className="pt-toolbar-title">Cases</h3>
           <span className="pt-count">{cases.length} in project</span>
@@ -381,7 +381,7 @@ export default function SuiteDetailPage({
           </button>
         </div>
         {showCaseCreate && (
-          <div className="pt-row" style={{ marginBottom: 4 }}>
+          <div className="pt-row" style={{ marginBottom: 12 }}>
             <input
               aria-label="New case name"
               className="pt-input"
@@ -407,13 +407,15 @@ export default function SuiteDetailPage({
         )}
       </div>
 
-      {selectedSuite === null ? (
-        <p className="pt-empty">Select a suite to manage its cases.</p>
-      ) : (
+      {cases.length > 0 && (
         <div className="pt-card">
           <div className="pt-section-head">
-            <h3 className="pt-toolbar-title">{selectedSuite.name}</h3>
-            <span className="pt-count">{memberIds.length} in suite</span>
+            <h3 className="pt-toolbar-title">
+              {selectedSuite === null ? "All cases" : selectedSuite.name}
+            </h3>
+            {selectedSuite !== null && (
+              <span className="pt-count">{memberIds.length} in suite</span>
+            )}
           </div>
           <div className="pt-row" style={{ marginBottom: 12 }}>
             <input
@@ -432,24 +434,30 @@ export default function SuiteDetailPage({
             <button type="button" className="pt-btn pt-btn-sm" onClick={selectNone}>
               Select none
             </button>
-            <button
-              type="button"
-              className="pt-btn pt-btn-primary pt-btn-sm"
-              onClick={saveSelection}
-              disabled={!dirty}
-            >
-              Save selection
-            </button>
-            <button
-              type="button"
-              className="pt-btn pt-btn-sm"
-              onClick={() => {
-                setRunDialogOpen(true);
-              }}
-              disabled={checked.size === 0}
-            >
-              Run suite…
-            </button>
+            {selectedSuite === null ? (
+              <span className="pt-hint">Select a suite above to build membership.</span>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="pt-btn pt-btn-primary pt-btn-sm"
+                  onClick={saveSelection}
+                  disabled={!dirty}
+                >
+                  Save selection
+                </button>
+                <button
+                  type="button"
+                  className="pt-btn pt-btn-sm"
+                  onClick={() => {
+                    setRunDialogOpen(true);
+                  }}
+                  disabled={checked.size === 0}
+                >
+                  Run suite…
+                </button>
+              </>
+            )}
           </div>
           {visibleCases.length === 0 ? (
             <p className="pt-empty">
@@ -464,11 +472,19 @@ export default function SuiteDetailPage({
                       <input
                         type="checkbox"
                         aria-label={
-                          allVisibleChecked
-                            ? "Deselect all visible cases"
-                            : "Select all visible cases"
+                          selectedSuite === null
+                            ? "Select a suite above to build membership"
+                            : allVisibleChecked
+                              ? "Deselect all visible cases"
+                              : "Select all visible cases"
+                        }
+                        title={
+                          selectedSuite === null
+                            ? "Select a suite above to build membership"
+                            : undefined
                         }
                         checked={allVisibleChecked}
+                        disabled={selectedSuite === null}
                         onChange={() => {
                           if (allVisibleChecked) {
                             selectNone();
@@ -488,8 +504,14 @@ export default function SuiteDetailPage({
                       <td>
                         <input
                           type="checkbox"
-                          aria-label={`Include case ${c.name}`}
+                          aria-label={`Include case ${c.name} in ${selectedSuite?.name ?? "suite"}`}
+                          title={
+                            selectedSuite === null
+                              ? "Select a suite above to build membership"
+                              : `Include case ${c.name} in ${selectedSuite.name}`
+                          }
                           checked={checked.has(c.id)}
+                          disabled={selectedSuite === null}
                           onChange={() => {
                             toggle(c.id);
                           }}

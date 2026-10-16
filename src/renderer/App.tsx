@@ -21,8 +21,6 @@ export default function App(): React.JSX.Element {
     setReportRunId(null);
   };
 
-  const view: string = reportRunId !== null ? "report" : openCaseId !== null ? "case" : "suites";
-
   return (
     <div className="pt-app">
       <div className="pt-shell">
@@ -45,14 +43,18 @@ export default function App(): React.JSX.Element {
         <main className="pt-main">
           <BrowserBanner />
           {projectId === null && (
-            <div className="pt-card" style={{ marginTop: 16 }}>
+            <div className="pt-card pt-welcome" style={{ marginTop: 16 }}>
               <div className="pt-section-head">
                 <h2>Select a project to begin</h2>
               </div>
-              <p className="pt-sub">
-                Create a project in the sidebar, then manage suites, record steps, run cases, and
-                open reports here.
+              <p className="pt-sub" style={{ margin: 0 }}>
+                PlayTest records real browser runs and reports them per suite.
               </p>
+              <ol>
+                <li>Create a project in the sidebar, or select one.</li>
+                <li>Add a suite and cases, then record steps per case.</li>
+                <li>Run supervised or headless — reports land here.</li>
+              </ol>
             </div>
           )}
           {projectId !== null && reportRunId !== null && (
@@ -82,8 +84,7 @@ export default function App(): React.JSX.Element {
             />
           )}
           <p className="pt-hint" style={{ marginTop: 18 }}>
-            {view === "suites" ? "Suites" : view === "case" ? "Workflow" : "Report"} · local-first
-            SQLite · artifacts in ~/PlayTestData
+            Local-first SQLite · artifacts in ~/PlayTestData
           </p>
         </main>
       </div>

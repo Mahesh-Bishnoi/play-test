@@ -170,7 +170,7 @@ export default function ProjectsPage({ selectedId, onSelect }: Props): React.JSX
           {projects.map((p) => (
             <li
               key={p.id}
-              className={`pt-list-item${selectedId === p.id ? " pt-list-item-active" : ""}`}
+              className={`pt-list-item pt-project-item${selectedId === p.id ? " pt-list-item-active" : ""}`}
             >
               {editingId === p.id ? (
                 <div className="pt-form-grid" style={{ inlineSize: "100%", padding: 8 }}>
