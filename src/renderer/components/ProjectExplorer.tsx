@@ -12,7 +12,7 @@ interface Props {
   activeSuiteId: string | null;
   activeCaseId: string | null;
   onSelectSuite: (suiteId: string | null) => void;
-  onSelectCase: (caseId: string) => void;
+  onSelectCase: (caseId: string, name?: string) => void;
   /** Bumped by the parent to force a reload (after suite/case CRUD in main). */
   refreshToken: number;
   /** Notify the parent (main column) to reload after sidebar CRUD. */
@@ -170,7 +170,7 @@ export default function ProjectExplorer({
           setExpanded((prev) => new Set(prev).add(suiteId));
         }
         reload();
-        onSelectCase(created.id);
+        onSelectCase(created.id, created.name);
         onChanged?.();
       })
       .catch((err: unknown) => {
@@ -373,7 +373,7 @@ export default function ProjectExplorer({
                           aria-selected={activeCaseId === c.id}
                           className={`pt-tree-row pt-tree-row-nested${activeCaseId === c.id ? " pt-tree-row-active" : ""}`}
                           onClick={() => {
-                            onSelectCase(c.id);
+                            onSelectCase(c.id, c.name);
                           }}
                           title={c.name}
                         >

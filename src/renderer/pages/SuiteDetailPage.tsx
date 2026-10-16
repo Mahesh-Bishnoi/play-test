@@ -11,7 +11,9 @@ function errorMessage(err: unknown): string {
 interface Props {
   projectId: string;
   /** WS3 hook: open a case in the workflow editor (CaseDetailPage). */
-  onOpenCase?: (caseId: string) => void;
+  onOpenCase?: (caseId: string, name?: string) => void;
+  /** IDE shell: prune the editor tab when its case is deleted here. */
+  onCaseDeleted?: (caseId: string) => void;
   /** WS6 hook: open a suite-run report (RunReportPage). */
   onViewReport?: (suiteRunId: string) => void;
   /** IDE shell: suite focused in the Project explorer (controlled). */
@@ -31,6 +33,7 @@ interface Props {
 export default function SuiteDetailPage({
   projectId,
   onOpenCase,
+  onCaseDeleted,
   onViewReport,
   focusedSuiteId,
   onSuiteFocus,
@@ -188,6 +191,7 @@ export default function SuiteDetailPage({
           return next;
         });
         setPendingDeleteCase(null);
+        onCaseDeleted?.(id);
         onChanged?.();
       })
       .catch((err: unknown) => {
@@ -480,7 +484,7 @@ export default function SuiteDetailPage({
                               type="button"
                               className="pt-btn pt-btn-sm"
                               onClick={() => {
-                                onOpenCase(c.id);
+                                onOpenCase(c.id, c.name);
                               }}
                               aria-label={`Open case ${c.name} in workflow editor`}
                             >

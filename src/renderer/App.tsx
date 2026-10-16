@@ -9,23 +9,30 @@ import CaseDetailPage from "./pages/CaseDetailPage.js";
 import RunReportPage from "./pages/RunReportPage.js";
 import SuiteDetailPage from "./pages/SuiteDetailPage.js";
 
-type EditorTab = "suites" | "case" | "report";
+interface OpenCaseTab {
+  id: string;
+  name: string | null;
+}
+
+type ActiveTab = { kind: "suites" } | { kind: "case"; caseId: string } | { kind: "report" };
 
 const LAST_PROJECT_KEY = "playtest.lastProjectId";
 
 /**
  * IntelliJ-style shell: Welcome screen first, then a Project window with
- * a suite/case explorer on the left and an editor/report tab strip.
+ * a suite/case explorer on the left and an editor tab strip. Multiple test
+ * cases stay open at once — clicking a case opens (or activates) its tab,
+ * the × closes only that tab, and background tabs keep their editor/run
+ * state mounted while hidden.
  * File → Close Project returns to Welcome without deleting anything.
  */
 export default function App(): React.JSX.Element {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [activeSuiteId, setActiveSuiteId] = useState<string | null>(null);
-  const [openCaseId, setOpenCaseId] = useState<string | null>(null);
-  const [openCaseName, setOpenCaseName] = useState<string | null>(null);
+  const [openCases, setOpenCases] = useState<OpenCaseTab[]>([]);
   const [reportRunId, setReportRunId] = useState<string | null>(null);
-  const [tab, setTab] = useState<EditorTab>("suites");
+  const [active, setActive] = useState<ActiveTab>({ kind: "suites" });
   const [explorerToken, setExplorerToken] = useState(0);
   const [mainToken, setMainToken] = useState(0);
 
@@ -33,10 +40,9 @@ export default function App(): React.JSX.Element {
     setProjectId(id);
     setProject(null);
     setActiveSuiteId(null);
-    setOpenCaseId(null);
-    setOpenCaseName(null);
+    setOpenCases([]);
     setReportRunId(null);
-    setTab("suites");
+    setActive({ kind: "suites" });
     try {
       window.localStorage.setItem(LAST_PROJECT_KEY, id);
     } catch {
@@ -78,10 +84,9 @@ export default function App(): React.JSX.Element {
     setProjectId(null);
     setProject(null);
     setActiveSuiteId(null);
-    setOpenCaseId(null);
-    setOpenCaseName(null);
+    setOpenCases([]);
     setReportRunId(null);
-    setTab("suites");
+    setActive({ kind: "suites" });
     try {
       window.localStorage.removeItem(LAST_PROJECT_KEY);
     } catch {
@@ -106,28 +111,88 @@ export default function App(): React.JSX.Element {
     );
   }
 
+  const activeCaseId = active.kind === "case" ? active.caseId : null;
+
   const openCase = (caseId: string, name?: string): void => {
-    setOpenCaseId(caseId);
-    if (name !== undefined) {
-      setOpenCaseName(name);
-    } else {
+    setOpenCases((prev) => {
+      const existing = prev.find((t) => t.id === caseId);
+      if (existing !== undefined) {
+        if (name !== undefined && name !== existing.name) {
+          return prev.map((t) => (t.id === caseId ? { ...t, name } : t));
+        }
+        return prev;
+      }
+      return [...prev, { id: caseId, name: name ?? null }];
+    });
+    if (name === undefined) {
       api
         .getCaseDetail(caseId)
         .then((detail) => {
-          setOpenCaseName(detail.case.name);
+          setOpenCases((prev) =>
+            prev.map((t) => (t.id === caseId ? { ...t, name: detail.case.name } : t)),
+          );
         })
         .catch(() => {
-          setOpenCaseName(null);
+          // Tab keeps its fallback title; the editor surface shows the error.
         });
     }
-    setReportRunId(null);
-    setTab("case");
+    setActive({ kind: "case", caseId });
+  };
+
+  const closeCase = (caseId: string): void => {
+    const index = openCases.findIndex((t) => t.id === caseId);
+    const remaining = openCases.filter((t) => t.id !== caseId);
+    setOpenCases(remaining);
+    setActive((prev) => {
+      if (!(prev.kind === "case" && prev.caseId === caseId)) {
+        return prev;
+      }
+      // IntelliJ-style: closing the active tab activates a neighbor —
+      // prefer the tab to the left, else the next one, else suites.
+      if (index > 0) {
+        const left = openCases[index - 1];
+        if (left !== undefined) {
+          return { kind: "case", caseId: left.id };
+        }
+      }
+      const right = openCases[index + 1];
+      if (right !== undefined && remaining.some((t) => t.id === right.id)) {
+        return { kind: "case", caseId: right.id };
+      }
+      if (remaining.length > 0) {
+        const fallback = remaining[0];
+        if (fallback !== undefined) {
+          return { kind: "case", caseId: fallback.id };
+        }
+      }
+      return { kind: "suites" };
+    });
   };
 
   const viewReport = (suiteRunId: string): void => {
     setReportRunId(suiteRunId);
-    setTab("report");
+    setActive({ kind: "report" });
   };
+
+  const closeReport = (): void => {
+    setReportRunId(null);
+    const fallback = openCases[openCases.length - 1];
+    setActive(fallback !== undefined ? { kind: "case", caseId: fallback.id } : { kind: "suites" });
+  };
+
+  const closeCaseTab = (caseId: string, e: React.SyntheticEvent): void => {
+    e.stopPropagation();
+    closeCase(caseId);
+  };
+
+  const closeCaseKey = (caseId: string, e: React.KeyboardEvent): void => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.stopPropagation();
+      closeCase(caseId);
+    }
+  };
+
+  const activeCaseIsOpen = active.kind !== "case" || openCases.some((t) => t.id === active.caseId);
 
   return (
     <div className="pt-app">
@@ -146,16 +211,14 @@ export default function App(): React.JSX.Element {
           <ProjectExplorer
             projectId={projectId}
             activeSuiteId={activeSuiteId}
-            activeCaseId={openCaseId}
+            activeCaseId={activeCaseId}
             refreshToken={explorerToken}
             onSelectSuite={(id) => {
               setActiveSuiteId(id);
-              setOpenCaseId(null);
-              setReportRunId(null);
-              setTab("suites");
+              setActive({ kind: "suites" });
             }}
-            onSelectCase={(id) => {
-              openCase(id);
+            onSelectCase={(id, name) => {
+              openCase(id, name);
             }}
             onChanged={bumpMain}
           />
@@ -166,58 +229,51 @@ export default function App(): React.JSX.Element {
             <button
               type="button"
               role="tab"
-              aria-selected={tab === "suites"}
-              className={`pt-tab${tab === "suites" ? " pt-tab-active" : ""}`}
+              aria-selected={active.kind === "suites"}
+              className={`pt-tab${active.kind === "suites" ? " pt-tab-active" : ""}`}
               onClick={() => {
-                setTab("suites");
+                setActive({ kind: "suites" });
               }}
             >
               Suites
             </button>
-            {openCaseId !== null && (
+            {openCases.map((tab) => (
               <button
+                key={tab.id}
                 type="button"
                 role="tab"
-                aria-selected={tab === "case"}
-                className={`pt-tab${tab === "case" ? " pt-tab-active" : ""}`}
+                aria-selected={active.kind === "case" && active.caseId === tab.id}
+                className={`pt-tab${active.kind === "case" && active.caseId === tab.id ? " pt-tab-active" : ""}`}
                 onClick={() => {
-                  setTab("case");
+                  setActive({ kind: "case", caseId: tab.id });
                 }}
-                title={openCaseId}
+                title={tab.name ?? tab.id}
               >
-                {openCaseName ?? "Test case"}
+                {tab.name ?? "Test case"}
                 <span
                   role="button"
-                  aria-label="Close case tab"
+                  aria-label={`Close ${tab.name ?? "case"} tab`}
                   tabIndex={0}
                   className="pt-tab-x"
                   onClick={(e) => {
-                    e.stopPropagation();
-                    setOpenCaseId(null);
-                    setOpenCaseName(null);
-                    setTab("suites");
+                    closeCaseTab(tab.id, e);
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.stopPropagation();
-                      setOpenCaseId(null);
-                      setOpenCaseName(null);
-                      setTab("suites");
-                    }
+                    closeCaseKey(tab.id, e);
                   }}
                 >
                   ×
                 </span>
               </button>
-            )}
+            ))}
             {reportRunId !== null && (
               <button
                 type="button"
                 role="tab"
-                aria-selected={tab === "report"}
-                className={`pt-tab${tab === "report" ? " pt-tab-active" : ""}`}
+                aria-selected={active.kind === "report"}
+                className={`pt-tab${active.kind === "report" ? " pt-tab-active" : ""}`}
                 onClick={() => {
-                  setTab("report");
+                  setActive({ kind: "report" });
                 }}
                 title={reportRunId}
               >
@@ -229,14 +285,12 @@ export default function App(): React.JSX.Element {
                   className="pt-tab-x"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setReportRunId(null);
-                    setTab(openCaseId !== null ? "case" : "suites");
+                    closeReport();
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.stopPropagation();
-                      setReportRunId(null);
-                      setTab(openCaseId !== null ? "case" : "suites");
+                      closeReport();
                     }
                   }}
                 >
@@ -246,37 +300,39 @@ export default function App(): React.JSX.Element {
             )}
           </div>
           <main className="pt-main">
-            {tab === "report" && reportRunId !== null && (
+            {active.kind === "report" && reportRunId !== null && (
               <RunReportPage
                 suiteRunId={reportRunId}
-                onBack={() => {
-                  setReportRunId(null);
-                  setTab(openCaseId !== null ? "case" : "suites");
-                }}
+                onBack={closeReport}
                 onRerun={(nextId) => {
                   setReportRunId(nextId);
                 }}
               />
             )}
-            {tab === "case" && openCaseId !== null && (
-              <CaseDetailPage
-                caseId={openCaseId}
-                onBack={() => {
-                  setOpenCaseId(null);
-                  setOpenCaseName(null);
-                  setTab("suites");
-                }}
-              />
-            )}
-            {(tab === "suites" || (tab === "case" && openCaseId === null)) && (
+            {/* Background case tabs stay mounted (hidden) so editor
+                selection and live run status survive tab switches. */}
+            {openCases.map((tab) => (
+              <div key={tab.id} hidden={!(active.kind === "case" && active.caseId === tab.id)}>
+                <CaseDetailPage
+                  caseId={tab.id}
+                  onBack={() => {
+                    setActive({ kind: "suites" });
+                  }}
+                />
+              </div>
+            ))}
+            {(active.kind === "suites" || !activeCaseIsOpen) && (
               <SuiteDetailPage
                 projectId={projectId}
                 focusedSuiteId={activeSuiteId}
                 refreshToken={mainToken}
                 onSuiteFocus={setActiveSuiteId}
                 onChanged={bumpExplorer}
-                onOpenCase={(id) => {
-                  openCase(id);
+                onOpenCase={(id, name) => {
+                  openCase(id, name);
+                }}
+                onCaseDeleted={(id) => {
+                  closeCase(id);
                 }}
                 onViewReport={viewReport}
               />
