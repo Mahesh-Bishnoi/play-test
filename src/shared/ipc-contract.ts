@@ -49,6 +49,14 @@ export const IPC_CHANNELS = [
   "transfer:importProject",
   "transfer:importSuite",
   "transfer:importCase",
+  "sync:init",
+  "sync:commit",
+  "sync:push",
+  "sync:pull",
+  "sync:status",
+  "sync:branch",
+  "sync:resolve",
+  "sync:clone",
   "system:browserStatus",
   "system:installBrowser",
   "run:step-update",
@@ -222,6 +230,76 @@ export const TransferImportCasePayload = z.object({
   suiteIds: z.array(z.string().min(1).max(100)).max(100).optional(),
 });
 
+// --- Sync: local-git project sync (Phase 2 core) ----------------------------
+// Local-path remotes only; http(s) URLs are rejected by the service.
+
+const syncDir = z.string().min(1).max(1000);
+const syncBranchName = z
+  .string()
+  .min(1)
+  .max(200)
+  .regex(
+    /^(?!.*\.\.)(?!.*\/\/)(?!\/)(?!.*\/$)(?!.*\.lock$)[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/,
+    "invalid branch name",
+  );
+
+export const SyncAuthorPayload = z.object({
+  name: z.string().trim().min(1).max(200),
+  email: z.string().trim().min(1).max(200),
+});
+
+export const SyncInitPayload = z.object({
+  projectId: z.string().min(1).max(100),
+  dir: syncDir,
+  remoteUrl: z.string().min(1).max(1000).optional(),
+  author: SyncAuthorPayload,
+  branch: syncBranchName.optional(),
+});
+
+export const SyncCommitPayload = z.object({
+  projectId: z.string().min(1).max(100),
+  dir: syncDir,
+  author: SyncAuthorPayload,
+  message: z.string().trim().min(1).max(5000),
+});
+
+export const SyncPushPayload = z.object({
+  dir: syncDir,
+  remote: z.string().min(1).max(1000).optional(),
+  branch: syncBranchName.optional(),
+});
+
+export const SyncPullPayload = z.object({
+  projectId: z.string().min(1).max(100),
+  dir: syncDir,
+  remote: z.string().min(1).max(1000).optional(),
+  branch: syncBranchName.optional(),
+});
+
+export const SyncStatusPayload = z.object({
+  projectId: z.string().min(1).max(100),
+  dir: syncDir,
+});
+
+export const SyncBranchPayload = z.object({
+  dir: syncDir,
+  name: syncBranchName,
+});
+
+export const SyncResolvePayload = z.object({
+  projectId: z.string().min(1).max(100),
+  dir: syncDir,
+  entity: z.enum(["case", "suite"]),
+  id: z.string().min(1).max(100),
+  winner: z.enum(["mine", "theirs"]),
+});
+
+export const SyncClonePayload = z.object({
+  remoteUrl: z.string().min(1).max(1000),
+  dir: syncDir,
+  branch: syncBranchName.optional(),
+});
+
 // --- System (M7: first-run browser install, PLAN §11) -------------------------
 
 export const SystemBrowserStatusPayload = z.object({});
@@ -282,6 +360,14 @@ export type TransferExportCasePayload = z.infer<typeof TransferExportCasePayload
 export type TransferImportProjectPayload = z.infer<typeof TransferImportProjectPayload>;
 export type TransferImportSuitePayload = z.infer<typeof TransferImportSuitePayload>;
 export type TransferImportCasePayload = z.infer<typeof TransferImportCasePayload>;
+export type SyncInitPayload = z.infer<typeof SyncInitPayload>;
+export type SyncCommitPayload = z.infer<typeof SyncCommitPayload>;
+export type SyncPushPayload = z.infer<typeof SyncPushPayload>;
+export type SyncPullPayload = z.infer<typeof SyncPullPayload>;
+export type SyncStatusPayload = z.infer<typeof SyncStatusPayload>;
+export type SyncBranchPayload = z.infer<typeof SyncBranchPayload>;
+export type SyncResolvePayload = z.infer<typeof SyncResolvePayload>;
+export type SyncClonePayload = z.infer<typeof SyncClonePayload>;
 export type SystemBrowserStatusPayload = z.infer<typeof SystemBrowserStatusPayload>;
 export type SystemInstallBrowserPayload = z.infer<typeof SystemInstallBrowserPayload>;
 export type RunStepUpdateEvent = z.infer<typeof RunStepUpdateEvent>;
@@ -327,6 +413,14 @@ export const IPC_PAYLOADS: Record<string, z.ZodType> = {
   "transfer:importProject": TransferImportProjectPayload,
   "transfer:importSuite": TransferImportSuitePayload,
   "transfer:importCase": TransferImportCasePayload,
+  "sync:init": SyncInitPayload,
+  "sync:commit": SyncCommitPayload,
+  "sync:push": SyncPushPayload,
+  "sync:pull": SyncPullPayload,
+  "sync:status": SyncStatusPayload,
+  "sync:branch": SyncBranchPayload,
+  "sync:resolve": SyncResolvePayload,
+  "sync:clone": SyncClonePayload,
   "system:browserStatus": SystemBrowserStatusPayload,
   "system:installBrowser": SystemInstallBrowserPayload,
 };

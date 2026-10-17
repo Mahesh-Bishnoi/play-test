@@ -11,6 +11,7 @@ import {
   registerRunnerHandlers,
   registerSystemHandlers,
   registerTransferHandlers,
+  registerSyncHandlers,
 } from "./ipc-register.js";
 import { SingleCaseRunner, playwrightLauncher } from "./runner.js";
 import { SuiteRunner } from "./suite-runner.js";
@@ -127,6 +128,9 @@ void app.whenReady().then(() => {
       },
     },
   );
+  registerSyncHandlers((channel, listener) => {
+    ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
+  }, handle.db);
   createWindow();
 
   app.on("activate", () => {

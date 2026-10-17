@@ -65,6 +65,56 @@ export interface ImportOutcome {
   };
 }
 
+export interface SyncAuthorInput {
+  name: string;
+  email: string;
+}
+
+const SyncCommitResultSchema = z.object({ hash: z.string(), changed: z.array(z.string()) });
+export interface SyncCommitResult {
+  hash: string;
+  changed: string[];
+}
+
+const SyncConflictSchema = z.object({
+  entity: z.enum(["case", "suite"]),
+  id: z.string(),
+  name: z.string(),
+});
+export interface SyncConflict {
+  entity: "case" | "suite";
+  id: string;
+  name: string;
+}
+
+const SyncPullResultSchema = z.object({
+  applied: z.array(z.string()),
+  conflicts: z.array(SyncConflictSchema),
+});
+export interface SyncPullResult {
+  applied: string[];
+  conflicts: SyncConflict[];
+}
+
+const SyncStatusResultSchema = z.object({
+  branch: z.string(),
+  local: z.string().nullable(),
+  tracking: z.string().nullable(),
+  ahead: z.number().int(),
+  behind: z.number().int(),
+  dirty: z.boolean(),
+});
+export interface SyncStatusResult {
+  branch: string;
+  local: string | null;
+  tracking: string | null;
+  ahead: number;
+  behind: number;
+  dirty: boolean;
+}
+
+const SyncPushResultSchema = z.object({ pushed: z.boolean(), hash: z.string() });
+
 /** Shared renderer error formatter (single copy — pages/components import this). */
 export function formatApiError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -224,6 +274,69 @@ export const api = {
       "transfer:importCase",
       suiteIds === undefined ? { projectId } : { projectId, suiteIds },
       (raw) => ImportOutcomeSchema.parse(raw),
+    );
+  },
+
+  // Sync (local-git project sync; stable ids — pull converges, never dupes).
+  syncInit(
+    projectId: string,
+    dir: string,
+    author: SyncAuthorInput,
+    opts?: { remoteUrl?: string; branch?: string },
+  ): Promise<SyncCommitResult> {
+    return invoke("sync:init", { projectId, dir, author, ...opts }, (raw) =>
+      SyncCommitResultSchema.parse(raw),
+    );
+  },
+  syncCommit(
+    projectId: string,
+    dir: string,
+    author: SyncAuthorInput,
+    message: string,
+  ): Promise<SyncCommitResult> {
+    return invoke("sync:commit", { projectId, dir, author, message }, (raw) =>
+      SyncCommitResultSchema.parse(raw),
+    );
+  },
+  syncPush(
+    dir: string,
+    opts?: { remote?: string; branch?: string },
+  ): Promise<{ pushed: boolean; hash: string }> {
+    return invoke("sync:push", { dir, ...opts }, (raw) => SyncPushResultSchema.parse(raw));
+  },
+  syncPull(
+    projectId: string,
+    dir: string,
+    opts?: { remote?: string; branch?: string },
+  ): Promise<SyncPullResult> {
+    return invoke("sync:pull", { projectId, dir, ...opts }, (raw) =>
+      SyncPullResultSchema.parse(raw),
+    );
+  },
+  syncStatus(projectId: string, dir: string): Promise<SyncStatusResult> {
+    return invoke("sync:status", { projectId, dir }, (raw) => SyncStatusResultSchema.parse(raw));
+  },
+  syncBranch(dir: string, name: string): Promise<{ branch: string }> {
+    return invoke("sync:branch", { dir, name }, (raw) =>
+      z.object({ branch: z.string() }).parse(raw),
+    );
+  },
+  syncResolve(
+    projectId: string,
+    dir: string,
+    entity: "case" | "suite",
+    id: string,
+    winner: "mine" | "theirs",
+  ): Promise<{ resolved: boolean }> {
+    return invoke("sync:resolve", { projectId, dir, entity, id, winner }, (raw) =>
+      z.object({ resolved: z.boolean() }).parse(raw),
+    );
+  },
+  syncClone(remoteUrl: string, dir: string, branch?: string): Promise<{ projectId: string }> {
+    return invoke(
+      "sync:clone",
+      branch === undefined ? { remoteUrl, dir } : { remoteUrl, dir, branch },
+      (raw) => z.object({ projectId: z.string() }).parse(raw),
     );
   },
 
