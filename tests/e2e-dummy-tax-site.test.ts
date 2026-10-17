@@ -522,6 +522,10 @@ describeE2E("e2e against dummy income-tax site", () => {
     expect(failRow?.videoPath).not.toBeNull();
     expect(existsSync(failRow?.videoPath as string)).toBe(true);
 
+    // The mixed run below passes explicit caseIds, so the failing case must be
+    // a suite member (runSuite rejects non-members).
+    setSuiteCases(db, suiteId, [login, failing]);
+
     const suiteRunner = new SuiteRunner(db, {
       launchBrowser: playwrightLauncher(),
       emit,
@@ -556,8 +560,8 @@ describeE2E("e2e against dummy income-tax site", () => {
     await resetSite();
     const caseId = defineCase("Tax input parity", kv, [
       { order: 0, action: "goto", value: "{{base}}/login" },
-      { order: 1, action: "assert-title", value: "Login" },
-      { order: 2, action: "assert-url", value: "/login" },
+      { order: 1, action: "assert-title", value: "/Login/" },
+      { order: 2, action: "assert-url", value: "/\\/login$/" },
       { order: 3, action: "type", selector: "#email", value: "{{email}}" },
       { order: 4, action: "assert-value", selector: "#email", value: "{{email}}" },
       { order: 5, action: "assert-editable", selector: "#email" },
@@ -580,7 +584,7 @@ describeE2E("e2e against dummy income-tax site", () => {
     const caseId = defineCase("Tax checkbox parity", kv, [
       { order: 0, action: "goto", value: "{{base}}/" },
       { order: 1, action: "dblclick", selector: "getByTestId('cta-login')" },
-      { order: 2, action: "assert-url", value: "/login" },
+      { order: 2, action: "assert-url", value: "/\\/login$/" },
       { order: 3, action: "fill", selector: "#email", value: "{{email}}" },
       { order: 4, action: "fill", selector: "#password", value: "{{password}}" },
       { order: 5, action: "click", selector: '[data-testid="login-submit"]' },
@@ -593,7 +597,7 @@ describeE2E("e2e against dummy income-tax site", () => {
       // is gone (assert-hidden) and the URL proves the redirect.
       { order: 11, action: "goto", value: "{{base}}/login" },
       { order: 12, action: "assert-hidden", selector: "#login-form" },
-      { order: 13, action: "assert-url", value: "/dashboard" },
+      { order: 13, action: "assert-url", value: "/\\/dashboard$/" },
     ]);
     const started = await runSingle(caseId);
     expect(caseStatus(started.caseRunId)).toBe("passed");

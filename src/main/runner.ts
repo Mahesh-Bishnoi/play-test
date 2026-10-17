@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { eq } from "drizzle-orm";
 import { chromium } from "playwright";
+import { expect } from "playwright/test";
 import type { Browser, BrowserContext, Locator, Page } from "playwright";
 
 import type {
@@ -19,11 +20,7 @@ import {
 } from "../shared/ipc-contract.js";
 import { RunStepUpdateEvent } from "../shared/ipc-contract.js";
 import type { RunMode, StepRow } from "../shared/schema.js";
-import {
-  CHAIN_METHODS,
-  PAGE_FACTORY_METHODS,
-  splitTopLevel,
-} from "../shared/locator-allowlist.js";
+import { CHAIN_METHODS, PAGE_FACTORY_METHODS, splitTopLevel } from "../shared/locator-allowlist.js";
 import { MissingTestDataKeyError, substituteTestDataValue } from "../shared/step-types.js";
 import type { StepStatus } from "../shared/step-types.js";
 import type { AppDatabase } from "./db.js";
@@ -58,11 +55,7 @@ export interface RunPage {
   dblclick(selector: string, timeoutMs?: number): Promise<void>;
   fill(selector: string, value: string, timeoutMs?: number): Promise<void>;
   type(selector: string, value: string, timeoutMs?: number): Promise<void>;
-  selectOption(
-    selector: string,
-    value: string | string[],
-    timeoutMs?: number,
-  ): Promise<void>;
+  selectOption(selector: string, value: string | string[], timeoutMs?: number): Promise<void>;
   check(selector: string, timeoutMs?: number): Promise<void>;
   uncheck(selector: string, timeoutMs?: number): Promise<void>;
   hover(selector: string, timeoutMs?: number): Promise<void>;
@@ -185,7 +178,11 @@ export function parseClickValue(value: string | undefined): {
       if (Array.isArray(parsed["modifiers"])) {
         const mods = (parsed["modifiers"] as unknown[]).filter(
           (m): m is NonNullable<ClickStepOptions["modifiers"]>[number] =>
-            m === "Alt" || m === "Control" || m === "ControlOrMeta" || m === "Meta" || m === "Shift",
+            m === "Alt" ||
+            m === "Control" ||
+            m === "ControlOrMeta" ||
+            m === "Meta" ||
+            m === "Shift",
         );
         if (mods.length > 0) {
           out.modifiers = mods;
@@ -202,7 +199,10 @@ export function parseClickValue(value: string | undefined): {
       return { double: false, options };
     }
   }
-  const tokens = trimmed.toLowerCase().split(/[\s+,]+/).flatMap((t) => t.split("-"));
+  const tokens = trimmed
+    .toLowerCase()
+    .split(/[\s+,]+/)
+    .flatMap((t) => t.split("-"));
   let double = false;
   const modifiers = new Set<NonNullable<ClickStepOptions["modifiers"]>[number]>();
   for (const token of tokens) {
@@ -234,10 +234,11 @@ export function parseClickValue(value: string | undefined): {
 }
 
 /**
- * Select `value` encoding (no schema change): a JSON array selects multiple
- * options (`["a", "b"]`), anything else selects the single named value/label.
+ * Shared value encoding for `select` (multi-select) and `assert-value`
+ * (`toHaveValues`): a JSON array of strings when the value looks like one,
+ * else the raw string.
  */
-export function parseSelectValue(value: string): string | string[] {
+export function parseStringList(value: string): string | string[] {
   const trimmed = value.trim();
   if (trimmed.startsWith("[")) {
     try {
@@ -246,10 +247,18 @@ export function parseSelectValue(value: string): string | string[] {
         return parsed as string[];
       }
     } catch {
-      // Not JSON — fall through to single-value select.
+      // Not JSON — fall through to the single-value form.
     }
   }
   return value;
+}
+
+/**
+ * Select `value` encoding (no schema change): a JSON array selects multiple
+ * options (`["a", "b"]`), anything else selects the single named value/label.
+ */
+export function parseSelectValue(value: string): string | string[] {
+  return parseStringList(value);
 }
 
 /**
@@ -1633,7 +1642,12 @@ function rejectLocatorOptions(options: unknown, full: string): void {
 
 // --- Production Playwright adapter -----------------------------------------------
 
-/** Hand-rolled assert polls wait as long as Playwright's own default action timeout. */
+/**
+ * Assertion timeout default, matching Playwright's own assertion budget: every
+ * `assert-*` step goes through `playwright/test`'s web-first matchers, so a
+ * failure carries Playwright's Expected/Received diff and call log instead of a
+ * one-line hand-rolled message.
+ */
 const DEFAULT_ASSERT_TIMEOUT_MS = 30_000;
 
 class PlaywrightRunPage implements RunPage {
@@ -1701,154 +1715,65 @@ class PlaywrightRunPage implements RunPage {
   }
 
   async assertVisible(selector: string, timeoutMs?: number): Promise<void> {
-    try {
-      await this.loc(selector).first().waitFor({ state: "visible", timeout: timeoutMs });
-    } catch (err) {
-      throw new Error(`expected visible: ${selector} (${asMessage(err)})`);
-    }
+    await expect(this.loc(selector)).toBeVisible(this.assertTimeout(timeoutMs));
   }
 
   async assertHidden(selector: string, timeoutMs?: number): Promise<void> {
-    try {
-      await this.loc(selector).first().waitFor({ state: "hidden", timeout: timeoutMs });
-    } catch (err) {
-      throw new Error(`expected hidden: ${selector} (${asMessage(err)})`);
-    }
+    await expect(this.loc(selector)).toBeHidden(this.assertTimeout(timeoutMs));
   }
 
   async assertEnabled(selector: string, timeoutMs?: number): Promise<void> {
-    try {
-      await this.pollState(selector, (l) => l.isEnabled(), timeoutMs);
-    } catch (err) {
-      throw new Error(`expected enabled: ${selector} (${asMessage(err)})`);
-    }
+    await expect(this.loc(selector)).toBeEnabled(this.assertTimeout(timeoutMs));
   }
 
   async assertDisabled(selector: string, timeoutMs?: number): Promise<void> {
-    try {
-      await this.pollState(selector, (l) => l.isDisabled(), timeoutMs);
-    } catch (err) {
-      throw new Error(`expected disabled: ${selector} (${asMessage(err)})`);
-    }
+    await expect(this.loc(selector)).toBeDisabled(this.assertTimeout(timeoutMs));
   }
 
   async assertEditable(selector: string, timeoutMs?: number): Promise<void> {
-    try {
-      await this.pollState(selector, (l) => l.isEditable(), timeoutMs);
-    } catch (err) {
-      throw new Error(`expected editable: ${selector} (${asMessage(err)})`);
-    }
+    await expect(this.loc(selector)).toBeEditable(this.assertTimeout(timeoutMs));
   }
 
   async assertFocused(selector: string, timeoutMs?: number): Promise<void> {
-    try {
-      await this.pollState(
-        selector,
-        async (l) => (await l.evaluate((el) => el === document.activeElement).catch(() => false)) as boolean,
-        timeoutMs,
-      );
-    } catch (err) {
-      throw new Error(`expected focused: ${selector} (${asMessage(err)})`);
-    }
+    await expect(this.loc(selector)).toBeFocused(this.assertTimeout(timeoutMs));
   }
 
   async assertChecked(selector: string, timeoutMs?: number): Promise<void> {
-    try {
-      await this.pollState(selector, (l) => l.isChecked(), timeoutMs);
-    } catch (err) {
-      throw new Error(`expected checked: ${selector} (${asMessage(err)})`);
-    }
+    await expect(this.loc(selector)).toBeChecked(this.assertTimeout(timeoutMs));
   }
 
   async assertUnchecked(selector: string, timeoutMs?: number): Promise<void> {
-    try {
-      await this.pollState(selector, async (l) => !(await l.isChecked()), timeoutMs);
-    } catch (err) {
-      throw new Error(`expected unchecked: ${selector} (${asMessage(err)})`);
-    }
+    await expect(this.loc(selector)).not.toBeChecked(this.assertTimeout(timeoutMs));
   }
 
   async assertValue(selector: string, value: string, timeoutMs?: number): Promise<void> {
-    try {
-      await this.pollState(selector, async (l) => (await l.inputValue()) === value, timeoutMs);
-    } catch (err) {
-      throw new Error(`expected value "${value}" in: ${selector} (${asMessage(err)})`);
+    const expected = parseStringList(value);
+    if (Array.isArray(expected)) {
+      await expect(this.loc(selector)).toHaveValues(expected, this.assertTimeout(timeoutMs));
+      return;
     }
+    await expect(this.loc(selector)).toHaveValue(expected, this.assertTimeout(timeoutMs));
   }
 
   async assertCount(selector: string, expected: number, timeoutMs?: number): Promise<void> {
-    try {
-      await this.pollState(
-        selector,
-        async (l) => (await l.count()) === expected,
-        timeoutMs,
-        false,
-      );
-    } catch (err) {
-      throw new Error(`expected count ${expected}: ${selector} (${asMessage(err)})`);
-    }
+    await expect(this.loc(selector)).toHaveCount(expected, this.assertTimeout(timeoutMs));
   }
 
   async assertUrl(value: string, timeoutMs?: number): Promise<void> {
-    const deadline = Date.now() + (timeoutMs ?? DEFAULT_ASSERT_TIMEOUT_MS);
-    for (;;) {
-      if (matchesText(this.page.url(), value)) {
-        return;
-      }
-      if (Date.now() >= deadline) {
-        throw new Error(`expected URL containing "${value}", got: ${this.page.url()}`);
-      }
-      await this.page.waitForTimeout(100);
-    }
+    await expect(this.page).toHaveURL(parseAssertMatcher(value), this.assertTimeout(timeoutMs));
   }
 
   async assertTitle(value: string, timeoutMs?: number): Promise<void> {
-    const deadline = Date.now() + (timeoutMs ?? DEFAULT_ASSERT_TIMEOUT_MS);
-    for (;;) {
-      if (matchesText(await this.page.title(), value)) {
-        return;
-      }
-      if (Date.now() >= deadline) {
-        throw new Error(`expected title containing "${value}", got: ${await this.page.title()}`);
-      }
-      await this.page.waitForTimeout(100);
-    }
-  }
-
-  /** Poll a boolean locator state until true or the timeout elapses. */
-  private async pollState(
-    selector: string,
-    check: (loc: Locator) => Promise<boolean>,
-    timeoutMs?: number,
-    first = true,
-  ): Promise<void> {
-    const deadline = Date.now() + (timeoutMs ?? DEFAULT_ASSERT_TIMEOUT_MS);
-    const root = this.loc(selector);
-    const loc = first ? root.first() : root;
-    for (;;) {
-      try {
-        if (await check(loc)) {
-          return;
-        }
-      } catch {
-        // Element may not exist yet — keep polling until the deadline.
-      }
-      if (Date.now() >= deadline) {
-        throw new Error("timed out waiting for expected state");
-      }
-      await this.page.waitForTimeout(100);
-    }
+    await expect(this.page).toHaveTitle(parseAssertMatcher(value), this.assertTimeout(timeoutMs));
   }
 
   async assertText(selector: string, value: string, timeoutMs?: number): Promise<void> {
-    try {
-      await this.loc(selector)
-        .filter({ hasText: value })
-        .first()
-        .waitFor({ state: "visible", timeout: timeoutMs });
-    } catch (err) {
-      throw new Error(`expected text "${value}" in: ${selector} (${asMessage(err)})`);
-    }
+    await expect(this.loc(selector)).toContainText(value, this.assertTimeout(timeoutMs));
+  }
+
+  /** Web-first matchers default to 30 s, overridable per step (PLAN §2). */
+  private assertTimeout(timeoutMs?: number): { timeout: number } {
+    return { timeout: timeoutMs ?? DEFAULT_ASSERT_TIMEOUT_MS };
   }
 
   async waitForTimeout(ms: number): Promise<void> {
@@ -1894,21 +1819,21 @@ class PlaywrightRunContext implements RunContext {
   }
 }
 
-function asMessage(err: unknown): string {
-  return err instanceof Error ? (err.message.split("\n")[0] ?? err.message) : String(err);
-}
-
-/** Substring match, or `/pattern/flags` regex when the value looks like one. */
-function matchesText(actual: string, expected: string): boolean {
-  if (expected.length >= 2 && expected.startsWith("/") && expected.lastIndexOf("/") > 0) {
-    const lastSlash = expected.lastIndexOf("/");
+/**
+ * `/pattern/flags` → RegExp; anything else is the literal string the matcher
+ * compares against. Playwright 1.64 matches plain URL/title strings exactly
+ * (no glob expansion) — patterns need the `/…/flags` form.
+ */
+function parseAssertMatcher(value: string): string | RegExp {
+  if (value.length >= 2 && value.startsWith("/") && value.lastIndexOf("/") > 0) {
+    const lastSlash = value.lastIndexOf("/");
     try {
-      return new RegExp(expected.slice(1, lastSlash), expected.slice(lastSlash + 1)).test(actual);
+      return new RegExp(value.slice(1, lastSlash), value.slice(lastSlash + 1));
     } catch {
-      return actual.includes(expected);
+      return value;
     }
   }
-  return actual.includes(expected);
+  return value;
 }
 
 /** Production launcher: Chromium only (MVP locked decision). */

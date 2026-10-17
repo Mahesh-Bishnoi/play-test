@@ -44,8 +44,8 @@ const ACTION_HINTS: Record<StepAction, string> = {
   "assert-editable": "Needs a Selector to assert editable.",
   "assert-focused": "Needs a Selector to assert focused.",
   "assert-count": "Needs a Selector plus the expected count in Value.",
-  "assert-url": "Value = expected URL text (substring or /regex/).",
-  "assert-title": "Value = expected page-title text (substring or /regex/).",
+  "assert-url": "Value = the exact page URL, or /regex/ to pattern-match it.",
+  "assert-title": "Value = the exact page title, or /regex/ to pattern-match it.",
   wait: "Value = milliseconds to sleep, or a Selector to wait for.",
 };
 

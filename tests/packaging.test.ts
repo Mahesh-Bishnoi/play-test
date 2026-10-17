@@ -9,9 +9,18 @@ import mainViteConfig from "../vite.main.config.js";
  * `main.cjs` crashes on boot with `Cannot find module '<pkg>'` (seen with
  * `playwright`: the Vite plugin's default ignore keeps only `/.vite`).
  */
-function externals(): string[] {
+function externals(): Array<string | RegExp> {
   const ext = mainViteConfig.build?.rolldownOptions?.external;
-  return Array.isArray(ext) ? ext.filter((e): e is string => typeof e === "string") : [];
+  return Array.isArray(ext) ? ext : [];
+}
+
+/** Runtime deps the packaged app must resolve from node_modules. */
+const RUNTIME_PACKAGES = ["playwright", "playwright-core", "better-sqlite3"];
+
+function isExternal(specifier: string): boolean {
+  return externals().some((entry) =>
+    typeof entry === "string" ? entry === specifier : entry.test(specifier),
+  );
 }
 
 function ignore(): (file: string) => boolean {
@@ -22,7 +31,12 @@ function ignore(): (file: string) => boolean {
 
 describe("packaged app ships runtime deps for externals", () => {
   it("declares externals in the main vite config", () => {
-    expect(externals()).toContain("playwright");
+    for (const pkg of RUNTIME_PACKAGES) {
+      expect(isExternal(pkg)).toBe(true);
+    }
+    // M13: assertions import `expect` from the `playwright/test` subpath —
+    // an exact-match entry would inline it instead of resolving at runtime.
+    expect(isExternal("playwright/test")).toBe(true);
   });
 
   it("keeps the built output and package.json", () => {
@@ -31,8 +45,8 @@ describe("packaged app ships runtime deps for externals", () => {
   });
 
   it("keeps node_modules for every external", () => {
-    for (const ext of externals()) {
-      expect(ignore()(`/node_modules/${ext}/package.json`)).toBe(false);
+    for (const pkg of RUNTIME_PACKAGES) {
+      expect(ignore()(`/node_modules/${pkg}/package.json`)).toBe(false);
     }
   });
 

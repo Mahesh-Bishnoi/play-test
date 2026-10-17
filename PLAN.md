@@ -10,7 +10,7 @@
 
 | Milestone | Status | Notes |
 | --- | --- | --- |
-| M13 — Playwright `expect` assertions + diagnostics | not started | do first |
+| M13 — Playwright `expect` assertions + diagnostics | in progress | items 1–2 done; next item 3 |
 | M14 — Case profiles: recorded environment applied at run time | not started | after M13 |
 | M15 — Recorder & locator coverage + new actions | not started | after M14 |
 | M16 — Runtime parity: popups and downloads | not started | after M15 |
@@ -29,15 +29,15 @@ against the current implementation.
 
 ## M13 — Playwright `expect` assertions + diagnostics
 
-Status: not started · Next: item 1 (`vite.main.config.ts` external)
+Status: in progress · Next: item 3 (`formatStepError`)
 
 Goal: every `assert-*` step runs through Playwright web-first matchers; errors keep
 Playwright's full detail; failure evidence survives a supervised resume.
 
-- [ ] **1.** `vite.main.config.ts` — keep `playwright/test` external: replace `"playwright"`
+- [x] **1.** `vite.main.config.ts` — keep `playwright/test` external: replace `"playwright"`
       with `/^playwright($|\/)/` (or add `"playwright/test"`); the exact-match entry would
       bundle the subpath.
-- [ ] **2.** `src/main/runner.ts` — `import { expect } from "playwright/test"` (ships inside
+- [x] **2.** `src/main/runner.ts` — `import { expect } from "playwright/test"` (ships inside
       the installed `playwright` package; no `@playwright/test` dependency). Replace
       `pollState`, the count loop, the URL/title loops, `matchesText`, and the `.first()` waits:
       - visible/hidden → `toBeVisible` / `toBeHidden`; enabled/disabled → `toBeEnabled` /
@@ -45,10 +45,17 @@ Playwright's full detail; failure evidence survives a supervised resume.
         `toBeChecked` / `not.toBeChecked()`; value → `toHaveValue` (JSON array value →
         `toHaveValues`); text → `toContainText`; count → `toHaveCount`; url → `toHaveURL`;
         title → `toHaveTitle`.
-      - URL/title: plain string = Playwright anchored glob (`*`, `**`), `/pattern/flags` = RegExp.
-        Substring semantics are dropped (decided).
-      - Strict matching: no `.first()`. `assert-count` keeps counting all matches.
-      - Every matcher gets `{ timeout: timeoutMs ?? 30_000 }`.
+      - URL/title: plain string = **exact** match, `/pattern/flags` = RegExp. **Corrected
+        2026-10-17:** the plan said "anchored glob"; verified against Playwright 1.64.1
+        (`toHaveURL` → `serializeExpectedTextValues`), plain strings are exact and no glob is
+        expanded (`**/x` fails, substring fails). Glob semantics belong to `waitForURL`, not
+        `toHaveURL`/`toHaveTitle`. User chose native passthrough (no hand-rolled glob shim);
+        `SPECS.md` §2 wording still says "anchored glob" — amendment proposed, needs approval.
+        Existing e2e fixtures that relied on substring values were switched to `/regex/`.
+      - Strict matching: no `.first()` — `assert-text` on a selector that resolves to several
+        elements now fails with Playwright's "resolved to N elements" strict-mode error.
+        `assert-count` keeps counting all matches.
+      - Every matcher gets `{ timeout: timeoutMs ?? 30_000 }` (`assertTimeout` helper).
 - [ ] **3.** Error fidelity — delete `asMessage`; add `formatStepError(err)` that keeps the
       full Playwright message (Expected/Received/Call log), trims trailing whitespace, caps
       at 8 000 chars; used for `step_runs.error`, report cells, run log.
@@ -68,7 +75,8 @@ Playwright's full detail; failure evidence survives a supervised resume.
       e2e file to `test:e2e`.
 
 **Done when:** no hand-rolled polling remains, error text shows Playwright's diff, and
-`npm run verify`, `npm run package -- --dir`, plus the new e2e leg pass.
+`npm run verify` + `npm run package` (Forge 8 dropped the old `--dir` flag; plain
+`package` already writes `out/…-linux-x64`), plus the new e2e leg pass.
 
 ## M14 — Case profiles: recorded environment applied at run time
 

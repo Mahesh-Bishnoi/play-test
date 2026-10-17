@@ -243,6 +243,10 @@ describeE2E("e2e against local fixture site", () => {
     expect(failRow?.videoPath).not.toBeNull();
     expect(existsSync(failRow?.videoPath as string)).toBe(true);
 
+    // The mixed run below passes explicit caseIds, so the failing case must be
+    // a suite member (runSuite rejects non-members).
+    setSuiteCases(db, suite.id, [navigate.id, failing.id]);
+
     const suiteRunner2 = new SuiteRunner(db, {
       launchBrowser: playwrightLauncher(),
       emit,
