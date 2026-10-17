@@ -242,6 +242,68 @@ describe("parseCodegenOutput (PLAN §7, M15)", () => {
     expect(multi.unsupported).toEqual([]);
   });
 
+  it("adopts the popup page variable of an inline Promise.all (M16)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "const [page1] = await Promise.all([page.waitForEvent('popup'), page.getByRole('link', { name: 'Sign in' }).click()]);",
+        "await page1.getByRole('textbox', { name: 'Password' }).fill('pw');",
+        "await page1.getByRole('button', { name: 'Sign in' }).click();",
+      ].join("\n"),
+    );
+    expect(steps.map((s) => s.action)).toEqual(["click", "fill", "click"]);
+    expect(steps[0]).toMatchObject({
+      action: "click",
+      selector: "getByRole('link', { name: 'Sign in' })",
+      value: '{"popup":true}',
+    });
+    expect(steps[1]).toMatchObject({
+      action: "fill",
+      selector: "getByRole('textbox', { name: 'Password' })",
+      value: "pw",
+    });
+    expect(unsupported).toEqual([]);
+  });
+
+  it("adopts the popup page variable of a multi-line Promise.all (M16)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "const [page1] = await Promise.all([",
+        "  page.waitForEvent('popup'),",
+        "  page.getByRole('link', { name: 'Sign in' }).click(),",
+        "]);",
+        "await page1.getByRole('button', { name: 'Done' }).click();",
+      ].join("\n"),
+    );
+    expect(steps.map((s) => s.action)).toEqual(["click", "click"]);
+    expect(steps[0]).toMatchObject({
+      action: "click",
+      selector: "getByRole('link', { name: 'Sign in' })",
+      value: '{"popup":true}',
+    });
+    expect(steps[1]).toMatchObject({
+      action: "click",
+      selector: "getByRole('button', { name: 'Done' })",
+      value: undefined,
+    });
+    expect(unsupported).toEqual([]);
+  });
+
+  it("does not adopt an inline Promise.all download variable (M16)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('link', { name: 'Download' }).click()]);",
+        "await download.suggestedFilename();",
+      ].join("\n"),
+    );
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({
+      action: "click",
+      selector: "getByRole('link', { name: 'Download' })",
+      value: '{"download":true}',
+    });
+    expect(unsupported).toEqual([]);
+  });
+
   it("leaves a plain click value-less and only marks the click a wait precedes (M16)", () => {
     const { steps, unsupported } = parseCodegenOutput(
       [

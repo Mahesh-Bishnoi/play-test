@@ -519,9 +519,12 @@ function rewriteAdoptedPage(line: string, aliases: ReadonlySet<string>): string 
  * page.getByRole(…).click()]);` → the marker plus the click sub-statement
  * (re-parsed as an ordinary click). A `Promise.all` split over several lines is
  * instead picked up by the per-line `waitForEvent` booking in
- * {@link parseCodegenOutput}.
+ * {@link parseCodegenOutput}. `target` is the destructured page variable the
+ * marker's element settles into (adopted for later steps), or null.
  */
-function inlinePromiseAllClick(stmt: string): { marker: ClickEventMarker; click: string } | null {
+function inlinePromiseAllClick(
+  stmt: string,
+): { marker: ClickEventMarker; click: string; target: string | null } | null {
   const marker = "Promise.all(";
   const idx = stmt.indexOf(marker);
   if (idx === -1) {
@@ -536,14 +539,51 @@ function inlinePromiseAllClick(stmt: string): { marker: ClickEventMarker; click:
     return null;
   }
   let event: ClickEventMarker | undefined;
+  let eventIndex = -1;
   let click: string | undefined;
-  for (const part of splitTopLevel(trimmed.slice(1, -1), ",")) {
-    event ??= eventMarkerFrom(part);
+  for (const [index, part] of splitTopLevel(trimmed.slice(1, -1), ",").entries()) {
+    if (event === undefined) {
+      const partEvent = eventMarkerFrom(part);
+      if (partEvent !== undefined) {
+        event = partEvent;
+        eventIndex = index;
+      }
+    }
     if (click === undefined && part.includes("page.") && /\.click\(/.test(part)) {
       click = part.trim();
     }
   }
-  return event === undefined || click === undefined ? null : { marker: event, click };
+  if (event === undefined || click === undefined) {
+    return null;
+  }
+  return { marker: event, click, target: destructuredBinding(stmt, eventIndex) };
+}
+
+/**
+ * The array-destructured binding name of `const [a, b] = ...` for the
+ * initialiser array's `index`-th element (`Promise.all` preserves input order).
+ * `""` marks an elision (`[, b]`); anything unusable yields null.
+ */
+function destructuredBinding(stmt: string, index: number): string | null {
+  if (index < 0) {
+    return null;
+  }
+  const names = /^\s*(?:const|let|var)\s+\[([^\]]*)\]\s*=/.exec(stmt)?.[1];
+  const binding = names?.split(",")[index]?.trim();
+  return binding === undefined || binding === "" ? null : binding;
+}
+
+/**
+ * `const [page1] = await Promise.all([` opening a `Promise.all` whose array
+ * elements sit on the following lines -> the destructured binding names. The
+ * single-line form never matches here (a trailing element is left on the line).
+ */
+function promiseAllOpener(line: string): string[] | null {
+  const names =
+    /^\s*(?:const|let|var)\s+\[([^\]]*)\]\s*=\s*(?:await\s+)?Promise\.all\(\s*\[?\s*$/.exec(
+      line,
+    )?.[1];
+  return names === undefined ? null : names.split(",").map((name) => name.trim());
 }
 
 /**
@@ -781,10 +821,18 @@ export function parseCodegenOutput(code: string): {
   // names the adopted page variable.
   let popupAwait: { promiseVar: string } | null = null;
   const adoptedPages = new Set<string>();
+  // Destructured bindings of a multi-line `Promise.all` opener, consumed by the
+  // first `waitForEvent` booking that follows it.
+  let promiseAllBindings: string[] | null = null;
   for (const line of code.split("\n")) {
     // Single-line inline form: `await Promise.all([page.waitForEvent(…), …click()])`.
     const inline = inlinePromiseAllClick(line);
     if (inline !== null) {
+      // The inline form settles its popup element straight into the destructured
+      // binding, with no separate `await <promise>` line to catch.
+      if (inline.marker === "popup" && inline.target !== null) {
+        adoptedPages.add(inline.target);
+      }
       const parsed = parseLine(inline.click, inline.marker);
       if (parsed?.kind === "step") {
         steps.push({ ...parsed.step, order: steps.length });
@@ -793,16 +841,34 @@ export function parseCodegenOutput(code: string): {
       }
       pending = null;
       popupAwait = null;
+      promiseAllBindings = null;
+      continue;
+    }
+    // A multi-line `Promise.all` opener names its bindings a few lines before the
+    // `waitForEvent` element books; remember them until that booking consumes them.
+    const opener = promiseAllOpener(line);
+    if (opener !== null) {
+      promiseAllBindings = opener;
       continue;
     }
     // Bookkeeping: a `waitForEvent` wait arms the marker, its settlement clears it.
     const booking = pendingEventFrom(line);
     if (booking !== null) {
       pending = booking;
+      // Codegen puts the waited event first in the array, so the first binding is
+      // the popup page variable; a download variable is never adopted.
+      const inlineTarget =
+        booking.marker === "popup" && booking.promiseVar === null && promiseAllBindings !== null
+          ? promiseAllBindings[0]
+          : undefined;
+      if (inlineTarget !== undefined && inlineTarget !== "") {
+        adoptedPages.add(inlineTarget);
+      }
       popupAwait =
         booking.marker === "popup" && booking.promiseVar !== null
           ? { promiseVar: booking.promiseVar }
           : null;
+      promiseAllBindings = null;
       continue;
     }
     const settled = settledPromise(line);
@@ -824,11 +890,13 @@ export function parseCodegenOutput(code: string): {
       unsupported.push(parsed.entry);
       pending = null;
       popupAwait = null;
+      promiseAllBindings = null;
       continue;
     }
     steps.push({ ...parsed.step, order: steps.length });
     // The marker rides the click it was armed for; any other step ends the pattern.
     pending = null;
+    promiseAllBindings = null;
     if (parsed.step.action !== "click") {
       popupAwait = null;
     }

@@ -234,9 +234,11 @@ Goal: clicks that open a tab or start a download behave like Playwright's own pa
       link); update the `test:e2e` list. Plus the `recorder-runner-contract.test.ts` popup/
       download acceptance: parsed steps (marker + adopted-page steps) pass `executeStep`.
 
-Known limitation: the inline `Promise.all([page.waitForEvent('popup'), …click()])` recording
-gets the `popup` token on its click, but its destructured page variable is not adopted for
-later steps — the 3-line `const p = await pPromise;` shape is the supported one.
+Popup recording shapes (updated 2026-10-17): both the 3-line
+`const p = await pPromise;` form and the inline `Promise.all([page.waitForEvent('popup'), …
+click()])` form — single-line and multi-line — adopt the popup page variable, so the
+`page1.…` steps recorded on it parse too; `download` variables are never adopted. Note
+codegen itself only emits the 3-line shape — the inline form arrives via pasted snippets.
 
 **Done when:** a recorded OAuth-style popup flow and a download flow run end-to-end.
 
