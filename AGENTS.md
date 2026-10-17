@@ -3,36 +3,34 @@
 Read `PLAN.md` first. It is the source of truth for scope, decisions, and status. This file tells you **how to use it**.
 
 ## 1. Startup checklist (every agent, every session)
-1. Read `PLAN.md` fully — sections 2 (Locked Decisions), 5 (IPC Contract), 12 (Workstreams).
-2. Check section 14 Status Ledger — find your WS row, see what's done/remaining.
-3. Claim work: add a row `| <date> | <WS> | Claimed: <milestone/task> | ... |` before writing code.
-4. Respect file ownership in §12. Edit only your WS paths unless ledger notes a cross-WS exception.
+1. Read `PLAN.md` fully — §2 (Locked Decisions), §5 (IPC Contract).
+2. Check `git log --oneline -10` + `git status` for what's done/in progress (history lives in git, not PLAN.md).
+3. Respect ownership in PLAN §3. Edit only your area unless the task says otherwise.
 
 ## 2. Workstream rules
-- One agent per WS (WS1–WS6). WS1 (`src/shared/*`, DB schema) freezes contracts first — others must not change shared types without a ledger entry + updating all consumers.
+- `src/shared/*` (contracts, step types) is frozen — don't change without updating all consumers + noting why in the commit message.
 - Small, reviewable edits. Match existing style. TypeScript strict, zod-validate all IPC payloads.
 - Never commit secrets, browsers, or `~/PlayTestData` artifacts. No `rm -rf`, no network-wide commands.
 
-## 3. How to record work in PLAN.md
-- Update checkboxes in §13 Milestones when a milestone is fully verified.
-- Append to §14 Status Ledger (never rewrite history):
-  `| YYYY-MM-DD | WSx | Done: ... | Remaining: ... | Notes: files changed, checks run |`
-- If you change scope, IPC, or schema: add a `Notes:` entry explaining why + what WSs are affected. Locked Decisions (§2) need user approval — propose, don't assume.
+## 3. How to record work
+- PLAN.md is a current-state spec, not a log — do not append history rows.
+- Update PLAN.md only when scope, IPC, or schema changes (plus §11 Status when a milestone opens/closes).
+- Locked Decisions (§2) need user approval — propose, don't assume.
 
 ## 4. Definition of Done per task
-- Code + `npm run typecheck` clean (or WS-specific check in §17).
+- Code + `npm run typecheck` clean (PLAN §9 if a narrower check is documented there).
 - Unit tests for parser/substitution if touched (`vitest`).
 - Manual smoke where applicable: create project → add step → run → report exists.
-- Ledger row added with files changed + checks run + outcome.
+- Commit message lists files changed + checks run + outcome.
 
 ## 5. Coordination
-- Before editing another WS's files: note it in ledger first, keep diff minimal.
-- If blocked (contract mismatch, missing WS1 types): log `Blocked: ...` in ledger, stop, don't invent parallel contracts.
+- Before editing another area's files: keep the diff minimal, explain why in the commit message.
+- If blocked (contract mismatch, missing shared types): stop, don't invent parallel contracts — ask the user.
 - Prefer editing existing files over creating new ones.
 
 ## 6. Dependency version policy
 - Never copy dependency versions from memory. Before adding or upgrading any dependency, check the latest stable version first (e.g. `npm view <pkg> version`, `npm view <pkg> versions --json | tail`), then pin/add it.
-- Use latest stable unless PLAN.md or a project convention pins otherwise; if you deliberately pin older, note why in the Status Ledger.
+- Use latest stable unless PLAN.md or a project convention pins otherwise; if you deliberately pin older, note why in the commit message.
 
 ## 7. Quick commands (see repo README/AGENTS overrides if present)
 - `npm run typecheck`, `npm test`, `npm run package -- --dir`

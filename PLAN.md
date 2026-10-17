@@ -1,309 +1,160 @@
-# PlayTest — Electron + Playwright Manual-Tester Studio — Build Plan
+# PlayTest — Electron + Playwright Manual-Tester Studio
 
-> Living record for multiple LLM agents. Update `Status Ledger` + checkboxes as work completes. Keep this file as source of truth for scope.
+> Current-state spec, not history. Past decisions and fixes live in `git log` + tests.
+> `src/shared/*` is the source of truth for types and IPC — if this file conflicts
+> with code on behavior, code wins; on intent, §2 wins (needs user approval to change).
 
 ## 1. Vision
-Desktop UI for manual testers to: create Projects → Suites → Test Cases → record via Playwright codegen → edit steps in n8n-style workflow graph → run supervised (single) or unsupervised (single/suite parallel headless) → screenshots + failure video → self-contained HTML + PDF reports → re-run failures.
+
+Desktop UI for manual testers: Projects → Suites → Test Cases → record via
+Playwright codegen → edit steps in workflow graph → run supervised (single) or
+unsupervised (single/suite parallel headless) → screenshots + failure video →
+self-contained HTML + PDF reports → re-run failures. Local-first, Chromium only.
 
 ## 2. Locked Decisions (do not revisit without user approval)
-- [x] Shell: Electron + TypeScript (Forge + Vite), React + Tailwind + shadcn, `@xyflow/react` for step graph.
-- [x] DB: local-first SQLite (`better-sqlite3` + Drizzle ORM). Artifacts on disk.
-- [x] Browsers: Chromium only (MVP). `playwright install chromium` on first run.
-- [x] Recording: external `playwright codegen` window (not embedded). Parse output → editable `TestStep[]`.
-- [x] Steps: editable/tweakable table + workflow graph; green=pass, red=fail, grey=skipped, blue=running.
-- [x] Execution: suite-parallel from day one (`workers = min(cpu/2, cases)`).
-- [x] Hierarchy: `Project (1) → Suite (N) → Case (N)` via join table (case reusable across suites). Select individual / select-all at suite detail + pre-run dialog.
-- [x] Resume semantics: resume-from-failed-step **only** for supervised single-case runs (context kept open). Suites: full re-run or re-run-failed-cases-only.
-- [x] Modes: Supervised = single case, headed, pauses. Unsupervised = single or suite, headless, never pauses.
-- [x] Artifacts: screenshot after every step; video `retain-on-failure` only.
-- [x] Reports: self-contained single-file HTML (drill-down) + PDF export (shareable). Both per suite run.
-- [x] Test data: KV now (`{{key}}` substitution), column `source='kv'|'csv'` reserved for future CSV upload.
 
-## 3. Repo Layout (target)
+- Shell: Electron + TypeScript (Forge + Vite), React + Tailwind, `@xyflow/react` step graph.
+- DB: local-first SQLite (`better-sqlite3` + Drizzle). Artifacts on disk under `~/PlayTestData`.
+- Browsers: Chromium only. `playwright install chromium` on first run + in-app progress check.
+- Recording: external `playwright codegen` window (not embedded). Parse output → editable steps.
+- Steps: 25 actions (see `STEP_ACTIONS` in `src/shared/step-types.ts`); table + linear graph;
+  green=pass, red=fail, grey=skipped, blue=running.
+- Execution: suite-parallel (`workers = min(cpu/2, cases)`); direct `playwright` library
+  (not `@playwright/test` — so no UI mode / sharding / multi-browser; see Non-goals).
+- Hierarchy: `Project (1) → Suite (N) → Case (N)` via join table (cases reusable across suites).
+- Resume: resume-from-failed-step only for supervised single-case runs (context kept open).
+  Suites: full re-run or re-run-failed-cases-only.
+- Modes: Supervised = single case, headed, pauses, optional `actionDelayMs` pacing.
+  Unsupervised = single or suite, headless, never pauses.
+- Artifacts: screenshot after every step (retry-once on navigation race); video + trace
+  `retain-on-failure` only.
+- Reports: self-contained single-file HTML + PDF export per suite run. Trace opens via
+  `playwright show-trace` (button only when `trace.zip` exists).
+- Test data: KV `{{key}}` substitution at run time; missing key fails the step with
+  `missing test-data key: X`. `source` column reserved for future CSV.
+- Transfer: file import/export (`.playtest.json`, versioned) with copy semantics (fresh ids,
+  membership by name, target `baseUrl` wins). No runs/artifacts in bundles.
+- Sync (Phase 2): per-project local-git sync via `src/main/git-sync.ts`, local-path remotes
+  only (http(s) rejected), snapshot layout `project.json` + `suites/<id>.json` + `cases/<id>.json`,
+  stable DB ids, entity three-way merge, conflicts in `.git/playtest-conflicts.json`.
+- M11 closed as wont-do (2026-10-17): Inspector debug via `PWDEBUG=1`/`page.pause()` is not
+  viable in-process (env cached at import, pause is a no-op without inspector, cancel/resume
+  hang mid-step). Keep supervised resume instead.
+- Non-goals: UI Mode, `--project` multi-browser, sharding, `show-report` HTML-reporter,
+  retries/sharding/timeout config UI, VS Code extension. Post-MVP path: per-project
+  `browser` field + `postinstall` line. No DB migration without re-plan.
+
+## 3. Repo Layout (actual)
+
 ```
 src/
-  main/         // Electron main: db, ipc, recorder, runner, reports, packaging hooks
-    db.ts / schema.ts
+  main/
+    db.ts / schema.ts / artifacts.ts
     ipc-projects.ts / ipc-suites.ts / ipc-cases.ts / ipc-steps.ts
-    recorder.ts     // spawn codegen, parse output
-    runner.ts       // spec generation, playwright launch, event streaming
-    artifacts.ts    // screenshot/video/trace paths
-    reports.ts      // html + pdf generation
-  preload/      // contextBridge safe API only
-  renderer/     // React: pages + components
-    pages/ProjectsPage, SuiteDetailPage, CaseDetailPage (workflow), RunReportPage
-    components/StepNode, StepEditorPanel, SuiteSelector, RunDialog, ReportView
-  shared/       // zod schemas + types + ipc contract (SINGLE SOURCE)
-    schema.ts / ipc-contract.ts / step-types.ts
-PLAYTEST_DATA/ignoored — runtime user data lives in ~/PlayTestData, not repo.
+    ipc-register.ts / main.ts
+    recorder.ts / runner.ts / suite-runner.ts
+    reports.ts / trace-viewer.ts / browser-setup.ts
+    transfer.ts / git-sync.ts
+  preload/preload.ts            // allowlisted invoke + run:* subscribe only
+  renderer/
+    api.ts / main.tsx / App.tsx / styles.css / theme.ts
+    pages/WelcomeScreen, ProjectExplorer, SuiteDetailPage, CaseDetailPage, RunReportPage
+    components/StepNode, StepGraph, StepEditorPanel, TestDataEditor,
+      RecorderImportPreview, SyncPanel, BrowserBanner, ConfirmDialog,
+      pick-locator.ts, suite-run-filter.ts, workflow-layout.ts
+  shared/schema.ts / step-types.ts / ipc-contract.ts / export-format.ts
+tests/                          // vitest unit + PLAYTEST_E2E-gated e2e (DummyTax, local site)
+dummy-tax-site/server.js        // zero-dep manual-trial portal (npm run dummy:tax-site)
+scripts/seed-dummy-tax.mjs      // idempotent seed of ~/PlayTestData (npm run seed:dummy-tax)
 ```
 
+Runtime data lives in `~/PlayTestData`, never in the repo. Generated `drizzle/` is excluded
+from formatting.
+
 ## 4. Data Model (Drizzle/SQLite)
+
 - `projects(id, name, baseUrl, createdAt)`
 - `test_suites(id, projectId, name, createdAt)`
 - `test_cases(id, projectId, name, description, url, createdAt)`
 - `suite_test_cases(suiteId, caseId)` — PK(suiteId, caseId)
-- `test_steps(id, caseId, order, action, selector, value, timeoutMs, editedAt)` — `action: goto|click|fill|select|check|press|assert-visible|assert-text|wait`
-- `test_data(caseId, key, value, source)` — MVP `source='kv'`
+- `test_steps(id, caseId, order, action, selector, value, timeoutMs, editedAt)` —
+  `action` is plain text; valid values = `STEP_ACTIONS` (25: goto/click/dblclick/fill/type/
+  select/check/uncheck/hover/focus/press + 13 asserts + wait). Click variants and multi-select
+  encode in `value` (`parseClickValue` / `parseSelectValue` in `runner.ts`).
+- `test_data(caseId, key, value, source)` — `source='kv'` today.
 - `suite_runs(id, suiteId|null, mode, status, startedAt, endedAt, reportHtmlPath, reportPdfPath)`
 - `case_runs(id, suiteRunId, caseId, status, durationMs, videoPath)`
 - `step_runs(id, caseRunId, stepId, order, status, error, screenshotPath, durationMs)`
 
 Artifacts: `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/step-<NN>.png, failed.webm, trace.zip`
 
-## 5. IPC Contract (freeze early — `src/shared/ipc-contract.ts`)
-Renderer ↔ Main via `ipcMain.handle`, streaming via `webContents.send`:
-- `project:create/list/get/update/delete`
-- `suite:create/list/get/update/delete`, `suite:setCases(suiteId, caseIds[])`
-- `case:create/list/get/update/delete`, `step:upsert/move/delete/reorder`
-- `testdata:get/set(caseId, Record<string,string>)`
-- `recorder:start({baseUrl}) → {pid}`, `recorder:stop() → {steps: TestStep[]}`
-- `runner:runSingle({caseId, mode:'supervised'|'unsupervised'}) → {suiteRunId}`
-- `runner:runSuite({suiteId, caseIds[], mode:'unsupervised'}) → {suiteRunId}`
-- `runner:resumeFromStep({caseRunId, fromOrder})`, `runner:rerunFailed({suiteRunId})`, `runner:cancel({suiteRunId})`
-- Events: `run:step-update {caseRunId, order, status}`, `run:log {level, msg}`, `run:finished {suiteRunId, summary}`
-- `report:getHtml(suiteRunId)`, `report:exportPdf(suiteRunId) → path`
+## 5. IPC Contract (`src/shared/ipc-contract.ts` is canonical, zod-validated in main)
 
-## 6. UI Spec
-- **ProjectsPage:** CRUD projects, baseUrl field.
-- **SuiteDetailPage:** case table with checkboxes, Select all/none, search, Save selection, Run Suite (unsupervised only) → pre-run confirm dialog.
-- **CaseDetailPage (workflow):** `@xyflow/react` linear chain; node color by latest `step_runs.status`; click → `StepEditorPanel` (action, selector, value with `{{key}}` hints, timeout); drag reorder; Record (launch codegen) / Stop+Import preview; Run split-button: Supervised / Unsupervised; on supervised failure show Resume vs Full re-run.
-- **RunReportPage:** suite summary (counts, durations), per-case step grid with thumbnails, links to HTML, Export PDF button, Re-run failed button.
+- CRUD: `project:*` (create/list/get/update/delete), `suite:*` (+ `suite:setCases`),
+  `case:*` (+ `case:get` returns `{case, steps}`), `step:*` (upsert/move/delete/reorder),
+  `testdata:get/set`.
+- Recorder: `recorder:start({baseUrl, viewport?, device?, colorScheme?, locale?, timezone?, storageStatePath?, saveStoragePath?})`, `recorder:stop() → {steps}`.
+- Runner: `runner:runSingle({caseId, mode, actionDelayMs?})`, `runner:runSuite({suiteId, caseIds[], mode:'unsupervised'})`,
+  `runner:resumeFromStep`, `runner:rerunFailed`, `runner:rerunLastFailed`, `runner:cancel`.
+- Reports: `report:getHtml`, `report:exportPdf`, `report:openTrace({caseRunId} | {tracePath})`.
+- Transfer: `transfer:exportProject/exportSuite/exportCase`, `transfer:importProject/importSuite/importCase`.
+- Sync: `sync:init/commit/push/pull/status/branch/resolve/clone` (local paths only).
+- System: `system:browserStatus`, `system:installBrowser`.
+- Events (main → renderer): `run:step-update`, `run:log`, `run:finished`.
 
-## 7. Recorder Spec (`recorder.ts`)
-- `start`: `spawn(npx playwright codegen <baseUrl> --output <tmp>.js)`, track pid.
-- `stop`: kill process, read tmp file, parse regex for `page.goto|click|fill|selectOption|check|press|locator(...).waitFor|expect` → `TestStep[]` ordered. Show import preview modal (accept/edit before save). Robust to parse miss → keep raw code block as `value` fallback, never drop user data.
+## 6. UX (current)
 
-## 8. Runner Spec (`runner.ts`)
-- Generate temp spec per case: wrap each step in `await test.step("s<order>-<action>", async()=>{...})` with `{{key}}` substituted from `test_data`. `screenshot: 'on'` (per step via fixture), `video: 'retain-on-failure'`, `trace: 'retain-on-failure'`.
-- Supervised-single: `workers:1, headless:false`, on step fail keep `browserContext` alive, emit paused state.
-- Unsupervised: `workers:min(cpu/2,cases), headless:true`, `fullyParallel:true`, continue-on-failure at suite level (each case independent test).
-- Resume: only if context alive; re-execute edited step + following steps in same context; else toast “context closed — full re-run required”.
-- Cancel: `SIGTERM` to playwright child, mark remaining grey/skipped.
+- Welcome screen (search, open/create/delete, import project, clone entry) → Project shell
+  (menubar + Close Project, Sync tab, browser banner).
+- ProjectExplorer: suites → nested cases tree, inline suite/case creation, search.
+- SuiteDetailPage: membership + runs only (creation lives in sidebar); checkbox table, search
+  doubles as keyword run-filter, Run-filtered scope, Re-run-last-failed, View report.
+- CaseDetailPage: linear `@xyflow/react` graph + step editor (action/selector/value+`{{key}}`
+  hints/timeout) + KV TestDataEditor + Record options disclosure (viewport/device/theme/
+  locale/timezone/storage-state, persisted in localStorage) + import preview + paste-locator
+  insert + Supervised (with speed selector) / Unsupervised run + live colors + resume/cancel + log.
+- RunReportPage: suite summary, per-case step grid with thumbnails, Open-trace buttons,
+  Export PDF, Re-run failed.
+- Themes: IntelliJ dark (default) + opt-in Syntax light, persisted, pre-paint no-flash.
 
-## 9. Reports Spec (`reports.ts`)
-- HTML: single file, inline CSS, screenshots as relative links + base64 thumbs, no CDN. Sections: suite summary, case table, per-case step timeline with error stack.
-- PDF: same data via headless Chromium print-to-PDF or `electron.printToPDF`; A4, includes failed-step screenshots.
-- Both written at `suite_runs.report*Path` on `run:finished`.
+## 7. Behavior Notes (current, not history)
 
-## 10. Test Data Spec
-- KV editor per case (key/value table). Substitution at spec-gen time: `value.replace(/\{\{(\w+)\}\}/g, lookup)`. Missing key → fail step with clear error `missing test-data key: X`. `source` column future-proofs CSV (`csv` rows → multi-run matrix, out of MVP).
+- Recorder: argv-only flag builder (`buildCodegenArgs`, allowlisted; viewport `"W,H"` comma,
+  locale → `--lang`, unknown device rejects). Parser: goto/fill/select/check/uncheck/press/
+  dblclick/type/hover/focus/click/asserts; unknown statements → `wait` + raw fallback, never
+  drop data. Resolver `resolveLocator` allowlists `getBy*`/locator chains; `page.evaluate` /
+  `frameLocator` fail with edit guidance.
+- Runner: `SingleCaseRunner` (supervised pause/resume in same context; cancel settles between
+  steps) + `SuiteRunner` (worker pool, missing-key pre-scan, fail→skip-rest, settle
+  failed > cancelled > passed, best-effort HTML). Screenshot retry-once; cancel maps to
+  skipped bucket.
+- Reports: single HTML file (inline CSS, base64 thumbs ≤500KB, step cell `action — detail`,
+  trace hint), PDF via hidden `BrowserWindow`.
+- Transfer: versioned JSON, dialogs+fs in main, re-exports byte-equal modulo `exportedAt`.
+- Sync: wholesale object copy for fetch/push/clone; merge-base walk + entity merge; push
+  rejects non-FF and checked-out-branch-of-non-bare; untrusted content zod-validated; blob caps.
 
-## 11. Packaging
-- `electron-builder` (nsis/dmg/AppImage). `postinstall`: `playwright install chromium --with-deps` hook + first-run check with progress UI. Browsers excluded from asar.
+## 8. Conventions
 
-## 12. Parallel Workstreams (agent boundaries — respect file ownership)
-| WS | Scope | Owns | Depends on |
-|----|-------|------|------------|
-| WS1 | App shell + DB + shared contracts | `src/main/db*, src/shared/*, src/main/ipc-projects*` | — (do first) |
-| WS2 | Project/Suite/Case CRUD UI | `src/renderer/pages/Projects*, SuiteDetail*` | WS1 |
-| WS3 | Workflow graph + step editor | `src/renderer/**/Step*, CaseDetail*` | WS1 |
-| WS4 | Recorder (codegen+parser) | `src/main/recorder.ts, import preview` | WS1 |
-| WS5 | Runner + artifacts (supervised/unsupervised, parallel, resume) | `src/main/runner.ts, artifacts.ts` | WS1, WS3 (step types) |
-| WS6 | Reports + packaging + test-data UI | `src/main/reports.ts, RunReport*, test-data UI` | WS5 |
+TypeScript strict (`noUncheckedIndexedAccess`), zod at every IPC boundary, no `any` in
+`src/shared/*`, unit tests for parser/substitution/selectors (`vitest`), `PLAYTEST_E2E=1`
+for Chromium legs (`npm run test:e2e`). Match surrounding style; prefer editing existing
+files. Never copy dependency versions from memory — check live (`npm view`) before adding.
 
-Rules: WS1 freezes `src/shared/*` first; others PR against it. No cross-WS file edits without noting in Status Ledger. One agent per WS.
+## 9. Verification
 
-## 13. Milestones
-- [x] M1 Shell+DB+contracts (WS1)
-- [x] M2 CRUD + selection UI (WS2)
-- [x] M3 Workflow editor, no run (WS3)
-- [x] M4 Recorder import (WS4)
-- [x] M5 Single-case run + screenshots + resume (WS5 part 1)
-- [x] M6 Parallel suite + video-on-fail + HTML/PDF + rerun-failed (WS5 part 2 + WS6)
-- [x] M7 KV data substitution + packaging + first-run browser install
-- [x] M8 Trace Viewer open for failed cases (WS5+WS6) — see §18.1
-- [x] M9 Codegen emulation + auth-state options (WS4) — see §18.2
-- [x] M10 Pick-locator → insert step (WS3+WS4) — see §18.3
-- [ ] M11 Debug-with-Inspector single-case run (WS5, spike first) — see §18.4 — CLOSED as wont-do 2026-10-17 (spike failed, see ledger; keep supervised resume)
-- [x] M12 Run-filter polish: keyword filter + last-failed shortcut (WS2+WS5) — see §18.5
+`npm run typecheck && npm test && npm run package -- --dir`, plus `npm run test:e2e` when
+runner/recorder/reports change. Manual smoke: record 3-step login → supervised run
+(pause/resume) → unsupervised suite of 2 (parallel) → HTML+PDF+failure video exist.
 
-## 14. Status Ledger (agents update this)
-| Date | WS | Done | Remaining | Notes |
-|------|----|------|-----------|-------|
-| 2026-10-16 | — | Plan approved | M1–M7 unstarted | Initial plan file created |
-| 2026-10-16 | setup | Toolchain: TS 7.0.2 + oxlint 1.88.0 + oxlint-tsgolint 7.0.2004 (type-aware) + vitest 5.0.5 + prettier 3.9.10; `verify` = typecheck+lint+format+test, all green | M1–M7 unstarted | typescript-eslint rejected: needs classic compiler API removed in TS7 (verified in typescript-7.0.2.tgz; upstream #12518 closed "not planned", support waits on TS 7.1). oxlint proven: no-explicit-any + type-aware no-floating-promises fire, exit 1 on violation. TS pinned 7.0.2 ↔ tsgolint 7.0.2004 must stay in sync. Files: package.json, tsconfig.json (strict+noUncheckedIndexedAccess), .oxlintrc.json, .prettierrc.json, vitest.config.ts, tests/toolchain.test.ts, .gitignore |
-| 2026-10-16 | WS1 | Claimed: M1 shared contracts + DB schema + project service (no cross-WS edits) | M1 in progress; M2–M7 unstarted | Scope: src/shared/* freeze, src/main/schema.ts + db.ts + ipc-projects.ts, drizzle.config.ts, tests. Electron shell bootstrap deferred to M1-part-2. Deps checked live: zod 4.6.7, drizzle-orm 0.45.4, better-sqlite3 13.0.3, drizzle-kit 0.31.11 |
-| 2026-10-16 | WS1 | Done (M1-part-1): shared contracts frozen (step-types, schema, ipc-contract v1); drizzle tables + bootstrap DDL + createDatabase; project CRUD service; drizzle migration 0000 generated | Remaining M1: Electron shell bootstrap (src/main/index.ts, preload, forge/vite wiring). M2–M7 unstarted | Files: src/shared/step-types.ts, schema.ts, ipc-contract.ts; src/main/schema.ts, db.ts, ipc-projects.ts; drizzle.config.ts, drizzle/0000_*; tests/shared-contracts.test.ts, db-projects.test.ts; .prettierignore (drizzle/ excluded as generated). Checks: `npm run verify` green (typecheck+lint+format+test, 15 tests/3 files). No cross-WS edits. |
-| 2026-10-16 | WS1 | Claimed: M1-part-2 Electron shell bootstrap (index.ts, preload, forge/vite wiring, project IPC registration) — no cross-WS edits | M1 in progress; M2–M7 unstarted | Scope: src/main/index.ts + ipc-register.ts, src/preload/preload.ts, src/renderer shell placeholder, forge.config + vite.*.config, index.html, package.json scripts. Deps checked live: electron 44.8.0, vite 8.3.4, react 19.3.1, @vitejs/plugin-react 6.1.2, @electron-forge/* 8.0.1 |
-| 2026-10-16 | WS1 | Done (M1-part-2): Electron shell boots; project:* IPC wired with zod validation; Forge 8 + Vite 8 build + `npm run package` green | M1 complete; M2–M7 unstarted (WS2 unblocked) | Files: src/main/main.ts (composition root), ipc-register.ts (testable handle registration); src/preload/preload.ts (allowlisted invoke); src/renderer/main.tsx + App.tsx (M1 IPC smoke, WS2 replaces) + playtest-api.d.ts + vite-env.d.ts; forge.config.ts, vite.{main,preload,renderer}.config.ts, index.html; package.json (start/package/make, main=.vite/build/main.cjs, electron 44.8.0/vite 8.3.4/react 19.3.1/forge 8.0.1 + @types/electron-squirrel-startup 1.0.2) + tsconfig include configs. Fixes during build: entry renamed index.ts→main.ts (forge emits main.js from basename); main/preload are .cjs (plugin-vite v8 + type:module). Checks: `npm run verify` green (17 tests/4 files, incl. new tests/ipc-register.test.ts); `npm run package` → out/playtest-linux-x64. No cross-WS edits. NOTE for WS5/WS6: better-sqlite3 native rebuild for packaged app not yet verified — packaged binary boots but DB write path in packaged app untested. |
-| 2026-10-16 | WS2 | Claimed: M2 suite/case/step/testdata services + CRUD/selection UI (extends ipc-register + main.ts wiring, replaces App.tsx) | M2 in progress; M3–M7 unstarted | Scope: src/main/ipc-suites.ts + ipc-cases.ts + ipc-steps.ts (incl. testdata), ipc-register additions, src/renderer/pages/* + App wiring. No shared contract changes (payload schemas reused; return envelopes only). No new deps. |
-| 2026-10-16 | WS2 | Done (M2): suite/case/step/testdata services + CRUD/selection UI; M2 checkbox ticked | Remaining: M3–M7 (WS3 workflow editor unblocked — case:get returns {case, steps}, step channels live) | Files: src/main/ipc-suites.ts (CRUD + setCases with same-project validation + getSuiteCaseIds), ipc-cases.ts (CRUD + cascade delete + listCasesByIds), ipc-steps.ts (upsert/move/delete/reorder with dense 0..n-1 orders + KV get/set), ipc-register.ts (registerSuite/Case/Step/TestDataHandlers + registerCrudHandlers), main.ts (registerCrudHandlers); src/renderer/api.ts (typed invoke + zod envelopes), pages/ProjectsPage.tsx (project CRUD + picker), pages/SuiteDetailPage.tsx (suite/case CRUD, checkbox table, search, select all/none, save, unsupervised pre-run dialog), App.tsx (picker + detail shell). Contract note (no payload change): suite:get → {suite, caseIds}, case:get → {case, steps} — envelopes only, IPC_PAYLOADS untouched. Checks: `npm run verify` green (24 tests/5 files, incl. new tests/crud.test.ts: 7 tests); `npm run package` green. No cross-WS file edits beyond WS2 scope (main.ts wiring + App.tsx replacement as claimed). |
-| 2026-10-16 | WS3 | Done (M3): workflow editor — CaseDetailPage (graph + table + editor, no run); M3 checkbox ticked | Remaining: M4–M7 (WS4 recorder unblocked — step types frozen, import writes via step:upsert) | Files: NEW src/renderer/components/workflow-layout.ts (pure chain/status/position helpers) + StepNode.tsx (xyflow card) + StepGraph.tsx (linear ReactFlow chain) + StepEditorPanel.tsx (action/selector/value+{{key}} hints/timeout) + pages/CaseDetailPage.tsx (load/add/save/delete/up-down + HTML5 drag reorder via step:reorder, record/run as disabled placeholders); EXTENDED src/renderer/api.ts (step:upsert/move/delete/reorder + testdata:get wrappers, additive) + App.tsx (openCaseId shell) + pages/SuiteDetailPage.tsx (optional Open button). Dep: @xyflow/react 12.12.0 (checked live, React 19 compatible). Checks: `npm run verify` green (31 tests/6 files, incl. new tests/workflow-layout.test.ts: 7 tests); `npm run package` green. No shared contract changes. |
-| 2026-10-16 | WS4 | Done (M4): codegen spawn/stop + parser + recorder IPC + import preview; M4 checkbox ticked | Remaining: M5–M7 (WS5 runner unblocked — step types frozen, steps read via listSteps) | Files: NEW src/main/recorder.ts (parseCodegenOutput pure: goto/fill/select/check/press/click/waitForTimeout→wait/asserts, unknown page stmts → wait+raw fallback, terminalStringArg so fill values don't pick up selector strings; CodegenRecorder class with injected RecorderDeps + sharedRecorder) + src/renderer/components/RecorderImportPreview.tsx (checkbox preview modal, empty-state) + tests/recorder.test.ts (7 tests: parser order/values/fallback/boilerplate + lifecycle + IPC handlers); EXTENDED ipc-register.ts (registerRecorderHandlers, zod re-validation at boundary), main.ts (recorder wiring), api.ts (start/stopRecorder wrappers), CaseDetailPage.tsx (Record URL input + Record/Stop + preview→sequential step:upsert import; runs stay WS5 placeholders). Bug found by test: firstStringArg returned selector string for fill — fixed via terminalStringArg. Checks: `npm run verify` green (38 tests/7 files); `npm run package` green. No shared contract changes. Cross-WS touches (ipc-register/main/api/CaseDetailPage) as claimed. |
-| 2026-10-16 | WS5 | Done (M5): single-case run + per-step screenshots + supervised resume; M5 checkbox ticked | Remaining: M6–M7 (WS6 unblocked — run rows + step_runs statuses + video/trace paths persisted per run; suite channels throw SuiteRunsPendingM6Error) | Files: NEW src/main/artifacts.ts (case dir/step- NN.png/failed.webm/trace.zip builders + retainVideo/discardPath) + src/main/runner.ts (substituteStepValue/executeStep pure; SingleCaseRunner with injected BrowserLauncher/emit/artifactsRoot/id/now; PlaywrightRunPage/Context prod adapter) + tests/runner.test.ts (20 tests: mapping, pass/substitution, missing-key fail-fast, unsupervised fail+skip+retain, empty-case pass, launch-failure abort, supervised pause/resume-after-edit, resume-closed, cancel mid-run/paused/finished, double-run reject, M6 stubs, IPC wiring, artifact paths); EXTENDED ipc-register.ts (registerRunnerHandlers: runSingle/resume/cancel live, runSuite/rerunFailed → M6 stub), main.ts (runner instance + webContents.send emit), preload.ts + playtest-api.d.ts (on() for run:* only), api.ts (run/resume/cancel + typed subscribe), CaseDetailPage.tsx (Run supervised/unsupervised, live graph colors, Resume-from-step/Full-re-run/Cancel, run log), vite.main.config.ts (externalize playwright/playwright-core — bundler cannot inline its drivers; first such dep, better-sqlite3 bundles fine), package.json (playwright 1.64.1). Design notes: direct library execution instead of §8 temp-specs (same observable contract; spec+reporter cannot hold a context open across IPC resume); runSingle returns {suiteRunId, caseRunId} (envelope-only addition, payloads untouched); cancel maps to skipped bucket (contract has no cancelled); wait with non-numeric value fails with edit guidance (recorder raw fallback cannot auto-run). Bugs found by verification: recordedVideoPath read via context.pages() after close() returned null — real-Chromium smoke caught it, fixed by holding the Page (Video outlives context); package build broke on playwright bundling — fixed via externalize. Checks: `npm run verify` green (58 tests/8 files); `npm run package` green; real-Chromium smoke (temp file, since deleted): 4-step data-URL run passed with 4 screenshots, bad-selector run failed with screenshot + retained failed.webm. M7 note: packaged asar ships no node_modules — externalized require("playwright") + browser/driver shipping must be solved with first-run install; headed-browser path untested (only headless-shell installed). Cross-WS touches (ipc-register/main/preload/api/CaseDetailPage/vite.main.config) as claimed. |
-| 2026-10-16 | WS5+WS6 | Claimed: M6 parallel suite + HTML/PDF + rerun-failed | M6 in progress; M7 unstarted | Scope: runner.ts suite-parallel, NEW reports.ts, report IPC + main.ts PDF wiring, api suite/report wrappers, SuiteDetail run wiring, NEW RunReportPage. No contract changes (v1 frozen). |
-| 2026-10-16 | WS5+WS6 | Done (M6): parallel suite + video-on-fail + HTML/PDF + rerun-failed; M6 checkbox ticked | Remaining: M7 (KV substitution already in runners; packaging + first-run browser install still open) | Files: NEW src/main/suite-runner.ts (SuiteRunner: worker pool defaultWorkerCount=max(1,min(floor(cpus/2),cases)), per-case unsupervised headless execution mirroring SingleCaseRunner, missing-key pre-scan, fail→skip-rest + retain video/trace, settleSuite derives failed>cancelled>passed + best-effort HTML + run:finished, rerunFailed→new suite run with failed caseIds only + NoFailedCasesError, cancelRun flag, isSingleActive mutual exclusion) + src/main/reports.ts (SuiteReport model, getSuiteReport with cancelled→skipped, escapeHtml, renderSuiteHtml single-file inline-CSS + base64 thumbs ≤500KB + step column with action + stepId, suiteReportPaths, write/read/ensure + pdf write + tryWrite best-effort) + tests/suite-runner.test.ts (FakePage/Context/Launcher + makeFixture; parallelism proof via gateFirst, serial-with-1-worker, failure isolation, missing-key no-launch, launch failure, double-run + isSingleActive rejection, cancel mid-run, rerunFailed immutability, IPC round-trip, validation, worker bounds) + tests/reports.test.ts (escape/aggregate/render/persistence/tryWrite); EXTENDED runner.ts (removed M6 stubs, +isSuiteActive/hasActiveSession, finish() writes HTML best-effort), ipc-register.ts (registerRunnerHandlers delegates suite channels to SuiteRunner + fan-out cancel; NEW registerReportHandlers), main.ts (cross-linked single/suite instances + hidden-BrowserWindow renderPdfWithElectron), api.ts (runSuite/rerunFailed/getReportHtml/exportReportPdf), SuiteDetailPage.tsx (real runSuite confirm dialog + View last report), NEW RunReportPage.tsx (iframe srcDoc + Refresh/Export PDF/Re-run failed + auto-refresh on run:finished), App.tsx (reportRunId shell). Bugs found by verification (all test-side): shared primeVideo name via contexts.length collided across parallel contexts (one file renamed/discarded by the other) → FakeLauncher.primed counter; IPC round-trip + validate-payloads tests raced sync-throwing handlers (getHtml/rerunFailed throw, not reject) and returned before settle → wait for run:finished + sync toThrow; report table lacked step identity for orphan steps → step column renders action + stepId. Checks: `npm run verify` green (82 tests/10 files); `npm run package` green. No shared contract changes. |
-| 2026-10-16 | WS6 | Claimed: M7 KV editor UI + first-run browser install + packaging | M7 in progress | Scope: api.setTestData + NEW TestDataEditor in CaseDetailPage, NEW browser-setup.ts (status/install with injected deps) + system:browserStatus/system:installBrowser (ADDITIVE v1 contract extension for PLAN §11 first-run check; payloads frozen otherwise) + BrowserBanner in App + postinstall hook. No changes to run/report/recorder paths. |
-| 2026-10-16 | WS6 | Done (M7): KV editor UI + first-run browser install + packaging; M7 checkbox ticked — ALL MILESTONES COMPLETE | Nothing remaining | Files: NEW src/main/browser-setup.ts (BrowserSetupError, getBrowserStatus query-never-throws, installChromium with nonzero/spawn/still-missing fail-loud + manual fallback in message, prod deps via chromium.executablePath/existsSync/spawn(process.execPath,[cli,install,chromium]) with createRequire(__filename-or-cwd) CLI resolution) + src/renderer/components/TestDataEditor.tsx (draft rows, add/delete, dirty-gated Save via testdata:set, server message surfaced; key-shape stays server-side) + BrowserBanner.tsx (checking/missing/installing/error, warn-not-block) + tests/browser-setup.test.ts (9 tests: status ×3, install ×4, IPC round-trip + boundary) + tests/renderer-api.test.ts (5 tests: window.playtest stub, get/set/status/install + malformed rejection); EXTENDED ipc-contract.ts (system:browserStatus/system:installBrowser + payloads, ADDITIVE — all pre-M7 channels untouched), ipc-register.ts (registerSystemHandlers, default prod deps), main.ts (wiring), api.ts (setTestData/browserStatus/installBrowser + BrowserStatusSchema), CaseDetailPage.tsx (testData state + TestDataEditor section + header comment), App.tsx (BrowserBanner), StepEditorPanel.tsx (stale M7 comment), shared-contracts.test.ts (system channels in frozen-contract list — requirement change stated), package.json (postinstall: playwright install chromium). Checks: `npm run verify` green (96 tests/12 files, was 82/10); `npm run package` green; real-env smoke: chromium.executablePath() resolves + existsSync true. Notes: preload allowlist derives from IPC_CHANNELS (no change needed); headed-browser path still untested (M5 note carries over); postinstall downloads ~170MB on next fresh `npm install`. |
-| 2026-10-16 | WS6 | Fix: packaged app crashed on boot (`Cannot find module 'playwright'`) — Vite plugin ignore dropped node_modules; then bundled better-sqlite3 loader looked for .node next to bundle + its gyp short-circuits to no-op when a host prebuild exists | Verified working | Files: forge.config.ts (custom ignore keeps /.vite+package.json+node_modules, asar.unpack **/*.node, prePackage hook compiles Electron binding with --force_build=1 + version stamp), vite.main.config.ts (externalized better-sqlite3), NEW tests/packaging.test.ts (4 tests: externals declared, output kept, externals shipped, .node unpacked). Checks: `npm run verify` green (100 tests/13 files); clean-state `npm run package` + launch loop green (no errors, window screenshot-confirmed, ~/PlayTestData/playtest.db created). Notes: dev `npm start` uses the same project-local binding (works on this machine); recorder `npx playwright codegen` in packaged app still unverified (H3 open); headed-run + Win/macOS still open. |
-| 2026-10-16 | UI | Claimed: renderer UI/UX overhaul (DOS inline-styles → dark dev-console design system, no logic changes) | In progress | Scope: NEW src/renderer/styles.css + main.tsx import; restyle App/Projects/Suite/Case/Report + Step*/Banner/Preview components with classes. Cross-WS exception noted here (touches WS2/WS3/WS6 renderer files, styles only). No IPC/contract changes. |
-| 2026-10-16 | UI | Done: dark dev-console UI (slate #0F172A + run-green accent, dotted-graph canvas, badges/alerts/cards, sidebar shell) | Nothing remaining (UI) | Files: NEW src/renderer/styles.css; restyled App/main/Projects/Suite/Case/Report + StepNode/StepGraph/StepEditorPanel/TestDataEditor/RecorderImportPreview/BrowserBanner (logic untouched). Design: ui-ux-pro-max OLED-slate/green system, no external fonts (offline-safe). Checks: `npm run verify` green (100 tests/13 files; 2 pre-existing lint warnings in tests/suite-runner.test.ts); `npm run package` green. |
-| 2026-10-16 | WS5-fix | Done: runner resolves recorder `getBy*`/`locator` chains via `resolveLocator` (was `page.locator(raw)` → CSS `Unsupported token "{"` on every recorded click). Covers single + suite runs (shared `playwrightLauncher` adapter); plain CSS unchanged; no `eval` (allowlist + strict literal parser); unsupported chains fail with edit guidance | Nothing remaining | Files: src/main/runner.ts (resolver + `PlaywrightRunPage` dispatch), tests/locator-resolve.test.ts (6 tests). Checks: `npm run verify` green (106 tests/14 files; same 2 pre-existing lint warnings); real-Chromium smoke on user site: Blog link count 1, old path reproduces exact CSS error. Note: recorded long-text steps (fused title+date) may still need shortening — they now fail with clear timeouts, not CSS errors. |
-| 2026-10-16 | validation | Done: replaced live-site test with hermetic local e2e — NEW `tests/fixtures/test-site.ts` (node:http fixture: `/` home+nav, `/form` text/select/checkbox GET form, `/result` echo `#summary`, `/products` server-side `?q=` filter; no JS/assets) spun up on ephemeral port in `beforeAll`, NEW `tests/e2e-local-site.test.ts` gated by `PLAYTEST_E2E` (deleted `tests/live-maheshbishnoi.test.ts` — live sites drift): Navigate home (goto/click/assert) + Place order (fill/select/check/submit via {{base}}/{{customer}}/{{colour}} KV) + Search products (fill + Enter press) → single 5/5 pass → parallel suite 3/3 → fail retains failed.webm → mixed 1/1 + rerunFailed → missing-key fail-fast → HTML reports; 43 artifact files, 73 events, screenshot visually confirmed | Nothing remaining | Checks: `npm run verify` green (106 passed + 1 skipped); `PLAYTEST_E2E=1 npx vitest run tests/e2e-local-site.test.ts` green (~18s). |
-| 2026-10-16 | dummy-site | Done: standalone fake income-tax portal for manual PlayTest trials — NEW `dummy-tax-site/server.js` (zero-dep node:http: `/login` POST w/ `#login-error`, `/dashboard` w/ `#welcome`, `/profile` w/ `#profile-saved`, `/file-return` ITR-1 w/ PAN+verify validation → `#form-error`, `/filing-success` w/ `#acknowledgement`, `/filings` history, `/notices` filter + `/notices/:id` + respond → `#response-saved`, cookie sessions, `/__reset`, `/health`; stable id+data-testid selectors; DUMMY banner) + `dummy-tax-site/README.md` (creds test@example.com/password123 + flow table) + `npm run dummy:tax-site` | Nothing remaining | Files: dummy-tax-site/server.js, README.md; package.json (1 script). Checks: typecheck clean, oxlint 0, prettier clean; live curl smoke: bad-login 401 #login-error, good-login 302+cookie, dashboard #welcome, profile #profile-saved, no-verify #form-error, filing → ack page #acknowledgement, 3 notices, respond #response-saved, unauth → /login, __reset ok. |
-| 2026-10-16 | e2e-tax | Done: exhaustive product e2e against DummyTax — NEW `tests/e2e-dummy-tax-site.test.ts` (13 tests, PLAYTEST_E2E-gated, server spawned as child on `--port 0` + `/__reset` isolation): all 9 step actions (goto/fill/click/select/check/press-Enter/assert-visible/assert-text/wait), CSS + text + recorder getBy* chains, KV on every value action, login happy/negative/keyboard/guard, profile cross-page assert, ITR filing + validation errors + history, notice filter/open/respond, step move/reorder, parallel 3/3 suite + HTML report, failure video + mixed + rerun-failed, missing-key fail-fast; `npm run test:e2e` runs both e2e files | Nothing remaining | Files: tests/e2e-dummy-tax-site.test.ts; server.js (`--port 0` + actual-port log + EADDRINUSE hint + id= on 3 tables); README (e2e section); package.json (`test:e2e`). Checks: `npm run verify` green (106 passed/14 skipped); `npm run test:e2e` green (14/14, ~27s). |
-| 2026-10-16 | e2e-tax-fix | Done: fixed 2 failures found by the new suite — (1) real product bug: screenshot racing a just-triggered navigation fails at CDP level (`Page.captureScreenshot: Unable to capture screenshot`) while the path was still recorded → broken report thumbnails; `captureScreenshot` in `src/main/runner.ts` + `src/main/suite-runner.ts` now settles 1s and retries once, warns only if the retry fails (no interface change; mirrors kept consistent). Cross-WS touch into WS5 files noted here. (2) Site gap: filing/notices tables had data-testid but no id → added `id=` to match the `#id` convention used by key assertion targets | Nothing remaining | Repro: hammer script showed 6/6 immediate post-submit captures failing, 6/6 retries succeeding. Checks: unit runner+suite-runner suites green (37 tests); full tax e2e 13/13; `npm run verify` + `npm run test:e2e` green. |
-| 2026-10-16 | seed | Done: seeded the REAL user DB (`~/PlayTestData/playtest.db`) for manual packaged-app check — project "DummyTax portal" (:4137) + suite "Tax flows" + 3 cases (Login 5 steps, File ITR-1 return 16, Respond to notice 12) with KV data, via a temporary gated seed test using the app's own services (deleted afterwards) | Nothing remaining | Verified via sqlite3: 1 project, suite→3 cases, 33 steps, KV rows present. Pre-existing "test project" untouched. |
-| 2026-10-16 | WS6 | Fix: report step column showed `action + stepId` UUID instead of what the step did | Nothing remaining | Files: src/main/reports.ts (ReportStep +selector/value, new formatStepDetail, step cell `action — detail`), tests/reports.test.ts (detail assertions + formatStepDetail unit test). Checks: `npm run typecheck` clean; `npx vitest run tests/reports.test.ts` 8/8; `npm test` 107 passed / 14 skipped. |
-| 2026-10-16 | UI | Claimed: sensible UI/UX overhaul — distinct select/rename/delete affordances, confirm on every delete, create-forms behind disclosures (cross-WS renderer-only exception, no IPC/contract changes) | In progress | Scope: NEW ConfirmDialog component; styles.css (flatten gradients, icon/danger/disclosure/modal styles); Projects/Suite/Case pages + StepEditor/TestDataEditor. No logic or contract changes. |
-| 2026-10-16 | UI | Done: visual-QA round (screenshot-driven via stubbed-API harness): sidebar rows are quiet borderless list items (tint + accent bar marks selection), Delete reads red vs neutral Rename, suite page is one coherent block (empty Cases shell + dashed placeholder removed; cases table always visible, checkboxes disabled with hint until a suite is picked), denser table rows, centered 3-step welcome, single footer line | Nothing remaining (UI) | Files: styles.css (project-item overrides, red danger-ghost, td 7px, welcome), ProjectsPage (item class), SuiteDetailPage (restructure + gated membership), App.tsx (welcome + footer). Harness: /tmp/opencode/shot-ui.mjs (throwaway, stubbed window.playtest + seed, 8 shots at 1440px). Checks: typecheck/lint/prettier clean, `npm test` 107 passed/14 skipped. No IPC/contract changes. |
-| 2026-10-16 | UI | Done: responsive pass — page-level overflow-x clip, inputs flex-grow in rows, table cells wrap (mono breaks), table-wrap touch scroll + 560px min-table under 640px, graph clamp(280px,45vh,420px) + node cap 64vw, report frame 65vh/min-400, editor min-width 300px→0, sidebar list capped at 320px when stacked, new 640px + 420px breakpoints (padding, table density, modal actions stretch, banner stacks) | Nothing remaining | Files: src/renderer/styles.css only (no logic/IPC changes). Checks: prettier clean, `npm run typecheck` clean, `npm run lint` clean (2 pre-existing warnings in tests/suite-runner.test.ts), `npm test` 107 passed / 14 skipped. |
+## 10. Known Limits
 
-| 2026-10-16 | UI | Claimed: IntelliJ-style theme + Welcome → Project UX (explorer tree + editor tabs + Close Project), no IPC changes | In progress | Scope: styles.css Darcula/New-UI tokens; NEW WelcomeScreen + ProjectExplorer; App shell split; SuiteDetailPage focused-suite prop. Cross-WS renderer-only exception. |
-| 2026-10-16 | UI | Done: IntelliJ New-UI dark theme + Welcome → Project UX (suite/case explorer tree, editor tabs, Close Project) | Nothing remaining (UI) | Files: styles.css (Darcula tokens #1E1F22/#2B2D30/#393B40/#3574F0 + menubar/tabs/tree/welcome sections); NEW WelcomeScreen (search + open/create/delete) + ProjectExplorer (suites→nested cases, search, +/-); App.tsx (Welcome gate, menubar with Close Project, tabs, last-project warm); SuiteDetailPage (focusedSuiteId/suite+case signals/onChanged). Checks: typecheck clean, lint clean (2 pre-existing warnings), prettier clean, `npm test` 107/14, `npm run package` green. No IPC/contract changes. |
-| 2026-10-16 | UI | Done: sidebar-owned creation — suite/case create forms moved out of the main column into ProjectExplorer (header + toggle for suites, per-suite "+ Add case" with create+auto-assign, footer project-level fallback); dead signal indirection (suite/caseCreateSignal → no-op buttons) removed; SuiteDetailPage is membership/runs only with sidebar-pointing empty states | Nothing remaining (UI) | Files: ProjectExplorer.tsx (inline forms + direct api.createSuite/createCase/setSuiteCases, onChanged→main), App.tsx (signals removed, mainToken→SuiteDetailPage refreshToken), SuiteDetailPage.tsx (create disclosures removed, refreshToken reload, sidebar hints), styles.css (pt-inline-form/pt-input-sm/pt-inline-actions/pt-add-row). Checks: typecheck clean, lint clean (2 pre-existing warnings), prettier clean, `npm test` 107 passed/14 skipped. No IPC/contract changes. |
-| 2026-10-16 | UI | Done: sidebar suite count no longer concatenates with the suite name ("feature 1"+"2 cases" read as "feature 12 cases") — tree label stacks name above muted mono count on its own line | Nothing remaining (UI) | Files: styles.css (pt-tree-label grid + block name/meta). Checks: typecheck/lint/test green (107/14, 2 pre-existing warnings). No IPC/contract changes. |
-| 2026-10-16 | UI | Claimed: multi-case editor tabs (IntelliJ-style) — open/activate/close several test cases, no IPC changes | In progress | Scope: App.tsx tab state (openCases + active), ProjectExplorer/SuiteDetail onSelect/onOpen pass name, CaseDetail Back switches tab without closing. Cross-WS renderer-only exception. |
-| 2026-10-16 | UI | Done: multi-case editor tabs — clicking a case opens (or activates) its tab, × closes only that tab, background tabs stay mounted so editor/run state survives switches, deleting an open case prunes its tab, Back switches to Suites without closing | Nothing remaining (UI) | Files: App.tsx (openCases + ActiveTab, keep-alive hidden mounts, neighbor-activate on close), ProjectExplorer.tsx (onSelectCase passes name), SuiteDetailPage.tsx (onOpenCase passes name + onCaseDeleted prunes tab). Checks: typecheck clean, lint clean (2 pre-existing warnings), prettier clean, `npm test` 107 passed/14 skipped. No IPC/contract changes. |
-| 2026-10-16 | WS5 | Done: supervised run speed control (pre-run) — optional `actionDelayMs` (0–10000ms) on `runner:runSingle`, paced between steps via injectable `delay` (persisted across pause/resume); unsupervised stays instant; CaseDetailPage Speed selector (Instant/Normal 0.6s/Slow 1.5s/Very slow 3s) | Nothing remaining | Files: src/shared/ipc-contract.ts (additive optional field, pre-M7 payloads untouched), src/main/runner.ts (RunnerDeps.delay + LiveSession.actionDelayMs + executeFrom pacing), src/renderer/api.ts (runSingleCase 3rd arg), src/renderer/pages/CaseDetailPage.tsx (SUPERVISED_SPEEDS + selector + notice), tests/runner.test.ts (4 tests: validation/N-1 waits/omitted-instant/resume pacing), tests/renderer-api.test.ts (passthrough). Checks: `npm run verify` green (112 passed/14 skipped; 2 pre-existing lint warnings). |
-| 2026-10-16 | seed | Done: repeatable DummyTax seed for live validation — NEW `scripts/seed-dummy-tax.mjs` (plain node + better-sqlite3, idempotent re-run, `--db`/`--base-url` overrides, bootstraps tables if DB missing) + `npm run seed:dummy-tax` + README section | Nothing remaining | Seeded REAL user DB (`~/PlayTestData/playtest.db`): project "DummyTax portal" (:4137) + suite "Tax flows" + 3 cases (Login 5, File ITR-1 return 16, Respond to notice 12 = 33 steps) + 17 KV rows; pre-existing "test" project untouched. Steps mirror e2e-passing flows. Checks: prettier clean, sqlite verify queries green; `npm run lint` shows 1 pre-existing error in dummy-tax-site/server.js:341 (present with my changes stashed, untouched by this change). |
-| 2026-10-16 | WS6 | Claimed: code-review fixes for RunReportPage (single-source hasFailed, hide rerun until failures known, simplify parser, add unit tests) | In progress | Scope: src/renderer/pages/RunReportPage.tsx + NEW tests/run-report.test.ts. No IPC/contract changes. |
-| 2026-10-16 | WS6 | Done: code-review fixes for RunReportPage — refresh() is the single writer of hasFailed (dropped optimistic event set), rerun button renders only on hasFailed === true (no flash/click during load), removed dead Number.isFinite guard, NEW tests/run-report.test.ts (5 tests: clean/failed via real renderSuiteHtml + both fallbacks + failover negative) | Nothing remaining | Files: src/renderer/pages/RunReportPage.tsx (-6/+3), NEW tests/run-report.test.ts. Checks: `npm run typecheck` clean, prettier clean, `npm test` 117 passed/14 skipped (was 112/14, +5 new); `npm run lint` shows only pre-existing issues in untouched files (2 warnings suite-runner.test.ts, 1 error dummy-tax-site/server.js:341). No IPC/contract changes. |
-| 2026-10-17 | transfer | Claimed: file import/export for project/suite/case (JSON, definitions+test-data, new IDs, target picker) | In progress | Scope: NEW src/shared/export-format.ts + src/main/transfer.ts + tests/transfer.test.ts; EXTEND ipc-contract/ipc-register/main/api + Welcome/Suite/Case UI. Git-committable files; in-app git panel deferred. |
-| 2026-10-17 | transfer | Done: file import/export for project/suite/case — versioned .playtest.json, copy semantics (fresh ids, membership by name, target baseUrl wins), project bundle carries suites+cases+steps+KV, no runs/artifacts; dialogs+fs in main via injected TransferIoDeps, UI on Welcome (import project) / Suites page (project+suitecase import/export) / case page (export case); 11 new tests (9 transfer incl. round-trip/rollback/scope-guards/cancel-noop, 2 renderer-api wrapper tests) | Nothing remaining (Phase 2 git-sync panel untouched) | Files: NEW src/shared/export-format.ts, src/main/transfer.ts, tests/transfer.test.ts; EXTEND src/shared/ipc-contract.ts (6 channels), src/main/ipc-register.ts (registerTransferHandlers), src/main/main.ts (dialog+fs wiring), src/renderer/api.ts (6 wrappers), WelcomeScreen/SuiteDetailPage/CaseDetailPage, tests/shared-contracts + renderer-api. Checks: `npm run typecheck` clean, prettier clean, `npm test` 134 passed/14 skipped (was 117/14, +17 incl. 5 run-report + 9 transfer + 2 api + 1 contracts… net new covered); `npm run lint` only pre-existing issues in untouched files. |
-| 2026-10-16 | UI | Done: consistency fix round — same Darcula palette, no visual redesign | Nothing remaining (UI) | Files: styles.css (semantic fg tokens, pt-badge-warn/-checkbox/-page/-text-end/-nowrap/-mb/-mt/-w/-drag-row/-label-inline/-warn-text/-suite-pill/-table-actions, duplicate .pt-main + dead .pt-list-item padding removed, #242528/#fff→tokens, tab/× focus rings); App.tsx (tabs: div[role=tab] + sibling × button, no nested interactives); ConfirmDialog/Suite-run/RecorderImportPreview Esc+backdrop+autofocus parity; Case (Paused→warn, recording→run, drag/label/spacing classes); Suite (pill/search/actions spacing classes, checkboxes styled); Report pt-page (gap 14→16); TestData (grid/mono/width classes); StepEditor (warn class, sm buttons); BrowserBanner/Welcome/Explorer class + copy + Enter-key parity; api.ts NEW formatApiError, 7 files deduped. ProjectsPage untouched functionally (still unmounted — delete or wire-up left to owner). Checks: typecheck clean, prettier clean, lint clean (2 pre-existing warnings + 1 pre-existing dummy-tax-site error), `npm test` 117 passed/14 skipped. No IPC/contract changes. |
-| 2026-10-16 | UI | Done: opt-in "Syntax light" theme (off-white #FAF7F1 + near-black #141210 + orange #FF5C00, syntax.fm-inspired brutalism) — dark stays default | Nothing remaining (UI) | Files: NEW src/renderer/theme.ts (AppTheme, THEME_STORAGE_KEY=playtest.theme, getInitialTheme/applyTheme, storage-failure fallbacks) + tests/theme.test.ts (6 tests) + docs/design-system/syntax-light.md (tokens, component rules, a11y, how to add a 3rd theme); EXTENDED styles.css (:root→:root+[data-theme=intellij-dark] so dark is explicit, NEW [data-theme=syntax-light] token block + end-of-file override section: 2px borders, 4px hard shadows, button press physics, sticker labels, dark run-log chip; dark rendering untouched) + App.tsx (theme state, menubar + welcome toggle ☀ Syntax light / ◐ IntelliJ dark, persisted) + main.tsx (pre-paint theme set, no flash). Golden: theme-demo.html at root (toggleable side-by-side, keep as review artifact). Contrast fixes from impeccable detect: accent ink is dark-on-orange (white-on-orange 3.1:1 failed), status hues stepped darker (pass #166534, fail #B42318, run #0B6B94). Skill: pbakaus/impeccable installed project-local (.opencode, gitignored per AGENTS.md — rerun `npx impeccable install --providers=opencode` on fresh clones). Checks: typecheck clean, prettier clean, `npm test` 123 passed/14 skipped (+6 new); lint shows only pre-existing issues (2 warnings suite-runner.test.ts, 1 error dummy-tax-site/server.js:341, both untouched). No IPC/contract changes. |
-| 2026-10-17 | sync | Claimed: Phase 2 e2e acceptance test FIRST (red) — two-machine sync loop vs local bare repo | In progress | Scope: NEW tests/e2e-git-sync.test.ts only. No product code. |
-| 2026-10-17 | sync | Done: Phase 2 e2e acceptance test written FIRST (red) — NEW tests/e2e-git-sync.test.ts pins the two-machine loop vs hermetic local bare repo: commit→push→clone (stable ids, steps+KV intact, no runs synced)→pull edits→divergent-entity auto-merge (push-rejected-then-pull)→same-entity conflict (local kept, resolve theirs)→branch publish+clone→unreachable-remote clean failure. Proposed src/main/git-sync.ts contract mirrored as local interfaces + dynamic import (plain `npm test` skips green; PLAYTEST_E2E=1 fails at the missing module). | Remaining: Phase 2 implementation (src/main/git-sync.ts + IPC + sync panel UI) | Files: NEW tests/e2e-git-sync.test.ts; EXTEND package.json test:e2e. Checks: `npm run typecheck` clean, prettier clean, plain run 1 skipped, PLAYTEST_E2E=1 fails red at missing module import, `npm run lint` only pre-existing untouched-file issues. |
-| 2026-10-17 | transfer | Claimed: e2e test for import/export via real files on disk (gated style) | In progress | Scope: NEW tests/e2e-transfer.test.ts only. No product code. |
-| 2026-10-17 | transfer | Done: e2e for import/export — NEW tests/e2e-transfer.test.ts (3 tests, green): real node:fs bytes via production TransferIoDeps shape through the IPC handlers (only dialogs canned), project export→disk→fresh-db import (fresh ids, steps+KV+stray case+membership intact), suite/case imports into existing project (target baseUrl wins, suite append merges), re-exports byte-equal modulo exportedAt (git-friendly), truncated + oversized files rejected | Nothing remaining | Files: NEW tests/e2e-transfer.test.ts; EXTEND package.json test:e2e. Checks: typecheck clean, prettier clean, plain run 3 skipped, PLAYTEST_E2E=1 3 passed, lint only pre-existing untouched-file issues. |
-| 2026-10-17 | sync-core | Claimed: Phase 2 core — src/main/git-sync.ts on isomorphic-git (local-path transport, entity three-way merge) + IPC + api wrappers, turn red e2e green; panel UI follows | In progress | Scope: NEW src/main/git-sync.ts; EXTEND ipc-contract/ipc-register/api; isomorphic-git@1.44.2 (HTTP transport unsupported for local paths — custom object-store transport). |
-| 2026-10-17 | sync-core | Done: Phase 2 core green — NEW src/main/git-sync.ts (snapshot layout project.json + suites/<id>.json + cases/<id>.json; stable DB ids incl. step ids; canonical sorted-keys compare; wholesale loose+pack object copy for fetch/push/clone; merge-base walk + three-way entity merge, conflicts incl. add/add + delete/edit kept local in .git/playtest-conflicts.json, merge commits, FF detection with DB apply; push rejects non-FF + checked-out-branch-of-non-bare; http(s) remotes rejected; SAFE_ID-gated paths + blob caps + zod validation on untrusted clone/pull content); 8 sync IPC channels + payloads + registerSyncHandlers + main.ts wiring + 8 api wrappers; e2e rewritten to finalized contract (positional db-first, +dbC leg) | Remaining: sync panel UI (Phase 2 slice 2) | Files: NEW src/main/git-sync.ts, EXTEND ipc-contract.ts/ipc-register.ts/main.ts/api.ts, REWRITE tests/e2e-git-sync.test.ts, EXTEND tests/shared-contracts.test.ts (+8 channels). Checks: typecheck clean, prettier clean, `npm test` 134 passed/18 skipped (skips = 4 e2e files), PLAYTEST_E2E transfer+git-sync 4 passed, lint only pre-existing untouched-file issues. |
-| 2026-10-17 | sync-panel | Claimed: sync panel UI (Sync tab: link/init, status, commit/push/pull, branches, conflict resolve; clone entry on Welcome) | In progress | Scope: NEW SyncPanel component + App tab wiring + WelcomeScreen clone row. No contract changes. |
-| 2026-10-17 | sync-panel | Done: sync panel UI — NEW SyncPanel (per-project link {dir,remote} + author in localStorage, status card, commit/push/pull, create-&-switch branch, conflict list with mine/theirs, pull surfaces pending conflicts, onChanged refresh after applied/theirs-wins); App Sync tab (suites hidden while active, other tabs untouched); WelcomeScreen clone block (clone → open, link hint) | Nothing remaining | Files: NEW src/renderer/components/SyncPanel.tsx, EXTEND App.tsx/WelcomeScreen.tsx. Checks: typecheck clean, prettier clean, `npm test` 134/18, PLAYTEST_E2E 4 passed, lint only pre-existing untouched-file issues. Known limits: open case tabs keep mounted state after pull (refresh on revisit); pending conflicts surface on pull, not on status refresh. |
-| 2026-10-17 | compat | Done: input parity (option 1) + assertion parity (option 3) — 9 → 25 step actions with no DB migration (all new steps fit the existing action/selector/value/timeoutMs shape; `action` column is plain text, no constraint). New inputs: uncheck, dblclick (first-class; legacy click+value:"dblclick" still runs), hover, focus, type (pressSequentially); click variants encoded in value (right/middle/shift/ctrl/alt/meta/force/JSON, parsed by parseClickValue); select multi via JSON-array value (parseSelectValue). New asserts: hidden, enabled, disabled, editable, focused, checked, unchecked, value, count, url, title (poll-based, substring or /regex/). Recorder maps uncheck/setChecked(false)/dblclick/pressSequentially/type/hover/focus/right-click + toBeHidden/toBeDisabled/toBeEditable/toBeFocused/toBeChecked/toHaveValue/toHaveCount/toHaveURL/toHaveTitle. | Nothing remaining | Files: EXTEND src/shared/step-types.ts (STEP_ACTIONS), src/main/runner.ts (RunPage + ClickStepOptions + parseClickValue/parseSelectValue + executeStep + PlaywrightRunPage incl. matchesText/pollState), src/main/recorder.ts (parser + terminalSelectValue), src/renderer/components/StepEditorPanel.tsx (hints), src/main/reports.ts (formatStepDetail); tests/runner.test.ts (4 new: input/assert mapping, click encoding, parsers, validation), tests/recorder.test.ts (14-statement mapping), tests/e2e-dummy-tax-site.test.ts (2 new: input parity 14 steps, checkbox/hidden/dblclick 14 steps). Bug found by e2e: assertCount polled count() on a .first()-narrowed locator (always 1) — pollState takes first=false for count. Checks: `npm test` 140 passed/20 skipped, typecheck clean, PLAYTEST_E2E parity tests green. |
-| 2026-10-17 | plan | Planned: M8–M12 Playwright-docs improvements (§18) — M8 trace-viewer open, M9 codegen emulation+auth flags, M10 pick-locator insert, M11 debug-with-inspector (spike first), M12 keyword filter + last-failed shortcut; non-goals (§18.6) UI-mode/multi-browser/sharding/show-report (need test-runner rewrite, declined) | M8–M12 unstarted, all prior M1–M7 complete | Source https://playwright.dev/docs/running-tests + /codegen-intro. All slices additive, no DB migration, independently shippable; order M8→M9→M10 now, spike M11, M12 anytime. WS: M8 WS5+WS6, M9 WS4, M10 WS3+WS4, M11 WS5, M12 WS2+WS5. Files: PLAN.md §13+§18 only. Checks: prettier clean (verify on claim). |
-| 2026-10-17 | WS5+WS6 | Claimed: M8 trace-viewer open for failed cases | M8 in progress; M9–M12 unstarted | Scope: NEW src/main/trace-viewer.ts + tests/trace-viewer.test.ts; EXTEND reports.ts (tracePath, no migration — derived from artifacts layout), ipc-contract (+report:openTrace), ipc-register, api, RunReportPage (Open-trace buttons), shared-contracts test. No DB migration, no run/recorder changes. |
-| 2026-10-17 | WS5+WS6 | Done (M8): trace viewer open for failed cases; M8 checkbox ticked | Remaining: M9–M12 (M9 codegen emulation next) | Files: NEW src/main/trace-viewer.ts (resolveTracePath/openTrace/openTraceForCase, injected deps, manual `npx playwright show-trace` fallback) + tests/trace-viewer.test.ts (12 tests: validation, spawn-args, missing-file, IPC round-trip, report hint, PLAYTEST_E2E real-Chromium leg); EXTEND reports.ts (ReportCase.tracePath derived from artifacts layout + existsSync, data-caserun/data-trace attrs, writeSuiteHtmlReport passes root), ipc-contract.ts (+report:openTrace union payload), ipc-register.ts (handler, optional spawn/pathExists fakes), api.ts (openTrace), RunReportPage.tsx (extractTraceTargets + per-case buttons), renderer-api + shared-contracts tests. Checks: typecheck clean; targeted 43 passed/1 skipped; full `npm test` 153/21; PLAYTEST_E2E trace-viewer 12/12 (~32s). `npm run verify` still blocked by pre-existing issues in untouched files (lint error dummy-tax-site/server.js:341, format drift recorder.ts/runner.ts — confirmed present with changes stashed). No DB migration. main.ts needed no change (prod spawn defaults). |
-| 2026-10-17 | WS4 | Claimed: M9 codegen emulation + auth-state options | M9 in progress; M10–M12 unstarted | Scope: src/main/recorder.ts (flag builder + options), ipc-contract (recorder:start additive optionals), ipc-register, api, CaseDetailPage (Record options disclosure + localStorage), tests/recorder.test.ts. Flags verified vs installed CLI: --viewport-size "W,H", --device, --color-scheme, --lang (not --locale), --timezone, --load-storage, --save-storage. No shell interpolation. |
-| 2026-10-17 | WS4 | Done (M9): codegen emulation + auth-state options; M9 checkbox ticked | Remaining: M10–M12 (M10 pick-locator next) | Files: EXTEND src/shared/ipc-contract.ts (RecorderStartPayload +7 additive optionals, RecorderStartOptions type), src/main/recorder.ts (UnknownRecorderDeviceError, pure buildCodegenArgs, RecorderDeps.spawnCodegen 3rd arg, start(baseUrl, options), defaultDeps validates vs real Playwright device table), src/main/ipc-register.ts (destructure passthrough), src/renderer/api.ts (startRecorder 2nd arg, omitted when unset), CaseDetailPage.tsx (Record-options disclosure + localStorage playtest.recorder.options + toRecorderOptions), tests/recorder.test.ts (+8: flag matrix/unknown-device/injection/viewport-locale-scheme/pass-through/parse-parity/IPC boundary), tests/renderer-api.test.ts (+1 passthrough). Deviations from §18.2 text (verified vs CLI, not assumed): viewport value is "W,H" comma — codegen throws `Invalid viewport size format: use "width,height"` otherwise; locale maps to --lang (no --locale flag exists); storage paths are text inputs, no new file-picker IPC channel (YAGNI). Parser unchanged. Checks: typecheck clean; `npm test` 162 passed/21 skipped (was 153/21, +9); lint + prettier show only pre-existing untouched-file issues (runner.ts format drift, dummy-tax-site/server.js:341, 2 suite-runner warnings); `npm run package` green. No DB migration. |
-| 2026-10-17 | WS3+WS4 | Claimed: M10 pick-locator → insert step | M10 in progress; M11–M12 unstarted | Scope: NEW src/renderer/components/pick-locator.ts (pure paste→validate mirroring runner resolveLocator allowlist) + tests/pick-locator.test.ts; EXTEND StepEditorPanel.tsx (hint copy) + CaseDetailPage.tsx (paste affordance → step:upsert click). No contract change, no runner/recorder changes. |
-| 2026-10-17 | WS3+WS4 | Done (M10): pick-locator → insert step; M10 checkbox ticked | Remaining: M11–M12 (spike M11 before scoping; M12 anytime) | Files: NEW src/renderer/components/pick-locator.ts (validatePastedLocator: normalize await/trailing-;, empty/multi-line/too-long rejects, page.-strip, PAGE_FACTORY/CHAIN allowlist mirror with runner-identical unsupported-selector wording, CSS fall-through accept; splitTopLevel/isRegexStart ported from runner.ts for dot-parity) + tests/pick-locator.test.ts (7 tests: DoD getByRole accept, page.-prefix + filter/first/nth + regex, CSS as-is, await/semicolon strip, DoD page.evaluate reject, frameLocator/evaluate/injection rejects, empty/multi-line rejects); EXTEND StepEditorPanel.tsx (selector hint: Pick Locator → Copy, paste here) + CaseDetailPage.tsx (pasteLocator state + addLocatorStep → step:upsert click + new "Add step from picked locator" card with hint copy, Enter-key submit). No IPC/contract changes; runner.ts + recorder.ts untouched (runner stays run-time source of truth; pre-check is intentionally lenient on literal args). Checks: typecheck clean; `npm test` 169 passed/21 skipped (was 162/21, +7); `npm run test:e2e` 20/20 green (~31s, getBy-chain parity on DummyTax covers DoD run-green); lint + prettier show only pre-existing untouched-file issues (2 suite-runner warnings, dummy-tax-site/server.js:341). |
-| 2026-10-17 | WS2+WS5 | Claimed: M12 run-filter polish (keyword filter + last-failed shortcut) | M12 in progress; M11 closed wont-do | Scope: NEW src/renderer/components/suite-run-filter.ts (pure filterCasesByKeyword) + tests/suite-run-filter.test.ts; SuiteDetailPage (Run-filtered scope + Re-run-last-failed button, no server grep); suite-runner.ts selectLastFailedCaseIds + rerunLastFailed + tests; ONE additive channel runner:rerunLastFailed (unavoidable — no read path lists suite runs; renderer cannot learn the latest run id across sessions) + api wrapper + shared-contracts/renderer-api tests. e2e: reuse existing rerunFailed leg, no new e2e file. |
-| 2026-10-17 | WS2+WS5 | Done (M12): keyword filter + last-failed shortcut; M12 checkbox ticked — ALL M8–M12 COMPLETE | Nothing remaining | Files: NEW src/renderer/components/suite-run-filter.ts (filterCasesByKeyword: trim/lowercase substring on name, empty→all) + tests/suite-run-filter.test.ts (5 tests, red-first); EXTEND src/shared/ipc-contract.ts (+runner:rerunLastFailed channel/payload/map), src/main/suite-runner.ts (selectLastFailedCaseIds: getSuite + latest non-running row by startedAt desc in SQL + failed caseRuns, NoFailedCasesError incl. no-finished-runs; rerunLastFailed: active-guard + select + start, new row), src/main/ipc-register.ts (channel + case, reuses RunnerRerunLastFailedPayload parse), src/renderer/api.ts (rerunLastFailed wrapper), src/renderer/pages/SuiteDetailPage.tsx (filterCasesByKeyword replaces inline filter; Run-filtered button only when search active, disabled with 0 filtered-checked; run dialog snapshots runCaseIds so scope survives edits; Re-run-last-failed button + handler, empty→server NoFailedCasesError message surfaced), tests/suite-runner.test.ts (4 rerunLastFailed: retry-failed-as-new + immutability, latest-wins over older failure, running-row skipped via manual live insert, unknown-suite/no-runs errors; +2 IPC wiring/validation; makeFixture +now opt), tests/shared-contracts + renderer-api (+1 each). Deviation from §18.5 text (documented): one additive read channel added — no existing read path lists suite runs, renderer cannot derive the latest run id across sessions; filter reuses the existing search box, no server grep, per plan. Checks: typecheck clean; `npm test` 179 passed/21 skipped; `npm run test:e2e` 20/20 (~32s); `npm run package` green; lint + prettier show only pre-existing untouched-file issues (2 suite-runner warnings incl. shifted lines, dummy-tax-site/server.js:341, runner.ts format drift). No DB migration. |
-| 2026-10-17 | WS5 | Claimed: M11 inspector spike (time-boxed, no product code) | M11 in progress; M12 unstarted | Scope: verify PWDEBUG=1 / page.pause() through the BrowserLauncher abstraction without hanging IPC resume/cancel. No product code — throwaway playwright-library probes from repo root, deleted afterwards. |
-| 2026-10-17 | WS5 | Done (M11-spike): CLOSED as wont-do — keep supervised resume; M11 checkbox left unticked | Remaining: M12 only | Findings: (1) PWDEBUG=1 forces inspector mode (headless=false forced, all timeouts→0, RecorderApp pauseOnNextStatement) — headed goto BLOCKED 5s+ with no human to resume, hangs the run. (2) _debugMode is cached at playwright ESM init, so process.env.PWDEBUG set after import is ignored (goto RESOLVED) — per-run env scoping is impossible in-process (playwright is imported at runner.ts top); would need a child process or restart. (3) page.pause() without inspector mode is a no-op (returned immediately, next click unblocked) — cannot implement debug alone. (4) A blocked inspector step holds session.busy=true, but cancelRun only settles between steps and resumeFromStep throws while busy — cancel/resume hang until a human resumes; context.close() unblocks pause but the runner never reaches it mid-step (would need a step-vs-cancel race = runner-loop redesign). (5) Headed renders in dev (DISPLAY=:0 present) but the packaged-app headed path + extra Inspector window remain unverified (M5 note carries over). Checks: headed smoke + 3 throwaway probes green, all deleted; no repo files changed except PLAN.md. |
+Packaged-app headed path and Win/macOS install behavior unverified; recorder `npx codegen`
+in packaged app unverified; open case tabs keep mounted state after sync pull (refresh on
+revisit); pending sync conflicts surface on pull, not status refresh. Toolchain:
+`typescript@7.0.2` ↔ `oxlint-tsgolint@7.0.2004` version-locked, upgrade together.
 
-## 15. Conventions
-TypeScript strict, zod validate all IPC payloads, Drizzle migrations, no `any` in shared, unit-test parser + substitution (`vitest`), e2e smoke: create project → add step → run headed → report exists.
+## 11. Status
 
-## 16. Risks
-Codegen parse fragility → keep raw fallback. Parallel disk I/O (video+screenshots) → cap workers. Resume state confusion → only same-context resume. Browser download size → progress UI + docs.
-- Toolchain lockstep (2026-10-16): `typescript@7.0.2` ↔ `oxlint-tsgolint@7.0.2004` are version-locked (tsgolint tracks an exact TS release). Upgrade both together or type-aware lint silently mismatches. Revisit typescript-eslint when TS 7.1 lands (upstream support waits on it, #12518).
-- Toolchain gaps (2026-10-16): Windows/macOS install behavior unverified; no React/import-ordering lint rules yet — add when WS2/WS3 land renderer code.
-
-## 17. Verification per Milestone
-`npm run typecheck && npm test && npm run package -- --dir` + manual: record 3-step login, run supervised (pause/resume), run unsupervised suite of 2 (parallel), check HTML+PDF + failure video exist.
-
-## 18. Playwright-docs improvements (M8–M12, approved 2026-10-17)
-
-Source: https://playwright.dev/docs/running-tests + https://playwright.dev/docs/codegen-intro.
-Constraint: WS5 runs the `playwright` **library** directly (not `@playwright/test`), so
-`--ui` / `--project` / sharding / `show-report` are NOT portable without a runner rewrite
-(declined — see §18.6). Everything below is additive, no DB migration, independently shippable.
-Suggested order: M8 → M9 → M10 now; spike M11 before scoping; M12 anytime.
-
-### 18.1 M8 — Trace Viewer open for failed cases (WS5+WS6)
-- Problem: `trace.zip` is saved `retain-on-failure` (single + suite runners) but nothing opens it.
-  Custom HTML report has screenshots only — no DOM snapshot / network / step timeline.
-- Scope:
-  - NEW/EXTEND `src/main/trace-viewer.ts` (or inside `reports.ts`): `openTrace(tracePath)` via
-    injected deps (`spawnShowTrace`), validates path inside artifacts root, spawns
-    `npx playwright show-trace <trace.zip>` detached; fail-loud with manual fallback message.
-  - IPC (additive): `report:openTrace({caseRunId} | {tracePath}) → {opened: true}` + payload schemas.
-  - `src/renderer/api.ts`: `openTrace` wrapper. `RunReportPage.tsx`: "Open trace" button per failed
-    case (only when `tracePath` exists on disk); warn-not-block when missing.
-  - `src/main/reports.ts`: include `tracePath` in `SuiteReport` model + render "trace available"
-    hint in HTML (no trace bytes inline — link/path only).
-- Contract: additive `report:openTrace` only; `run:*` events untouched.
-- Tests: unit (path validation, spawn args, missing-file error, IPC round-trip) + e2e leg on
-  DummyTax failing case asserts `trace.zip` exists and handler resolves (do NOT launch GUI in tests —
-  inject fake spawn).
-- DoD: failing run → Report shows Open-trace button → click launches viewer locally;
-  `npm run verify` green; `PLAYTEST_E2E` trace leg green.
-- Files owned: `src/main/reports.ts`, `RunReportPage.tsx`, `ipc-contract.ts` (+1 channel),
-  `ipc-register.ts`, `main.ts` wiring, `api.ts`, `tests/trace-viewer.test.ts`.
-
-### 18.2 M9 — Codegen emulation + auth-state options (WS4)
-- Problem: `recorder.ts` hardcodes `codegen <baseUrl> --output` — no viewport/device/theme/
-  locale/timezone, no logged-in recording. Codegen-intro emulation section maps 1:1.
-- Scope:
-  - Extend `recorder:start` payload (additive, all optional):
-    `{baseUrl, viewport?: {width,height}, device?: string, colorScheme?: 'light'|'dark',
-    locale?: string, timezone?: string, storageStatePath?: string, saveStoragePath?: string}`.
-  - `CodegenRecorder.spawnCodegen` builds allowlisted flag list only
-    (`--viewport-size WxH`, `--device`, `--color-scheme`, `--locale`/`--lang`, `--timezone`,
-    `--load-storage`, `--save-storage` — verify exact codegen flags against installed
-    `playwright@1.64.1` via `npx playwright codegen --help` before coding; reject unknown device
-    strings with clear error). No shell interpolation — argv array only.
-  - `CaseDetailPage` Record bar: disclosure with Viewport W/H + Device + Theme + Locale/Timezone
-    inputs (persist last-used in localStorage) + storage-state file picker (reuse transfer dialog
-    pattern). Parser (`parseCodegenOutput`) unchanged.
-- Contract: additive optional fields on `recorder:start`; `recorder:stop` untouched.
-- Tests: unit (flag builder matrix, injection rejection e.g. `device: "--output /evil"`,
-  IPC boundary) — no live codegen window in tests (fake `RecorderDeps`).
-- DoD: record with iPhone-ish viewport + dark scheme produces same parseable steps;
-  `npm run verify` green.
-- Files owned: `src/main/recorder.ts`, `ipc-contract.ts` (`recorder:start` payload),
-  `CaseDetailPage.tsx`, `api.ts`, `tests/recorder.test.ts` (+cases).
-
-### 18.3 M10 — Pick-locator → insert step (WS3+WS4, no contract change)
-- Problem: codegen's Pick-Locator + live-highlight playground is invisible from the app; users
-  hand-write brittle selectors that fail in `resolveLocator`.
-- Scope (no codegen change — workflow/UX only):
-  - `CaseDetailPage` / `StepEditorPanel`: hint copy "In the codegen window: Record→Stop,
-    then Pick Locator → Copy" + "Paste locator as new step" affordance: paste → validate via
-    existing `resolveLocator` allowlist (dry-run against `page` shape or regex pre-check) →
-    `step:upsert` draft with `action: click`, pasted selector, empty value.
-  - Accept unknown-but-CSS selectors as-is (fall through to `page.locator`); reject
-    non-locator chains (`page.evaluate`, `frameLocator`) with the existing edit guidance.
-- Tests: unit for the paste→validate helper (valid getBy chain, plain CSS, rejected evaluate);
-  renderer-api untouched.
-- DoD: paste `getByRole('button', { name: 'File' })` → step saves and runs green on DummyTax;
-  paste `page.evaluate(...)` → clear edit-guidance error, no step created.
-- Files owned: `StepEditorPanel.tsx`, `CaseDetailPage.tsx` (paste affordance),
-  NEW `tests/pick-locator.test.ts` or extend `tests/locator-resolve.test.ts`.
-
-### 18.4 M11 — Debug-with-Inspector single-case run (WS5, SPIKE FIRST)
-- Problem: supervised pause/resume only pauses *after* failure. Playwright Inspector step-over
-  (`--debug` / `PWDEBUG=1` / `page.pause()`) has a library equivalent but is unverified through
-  the `BrowserLauncher` abstraction.
-- Spike (time-boxed, no product code): verify `PWDEBUG=1 npx` env and/or `page.pause()` halts a
-  headed library run driven by `SingleCaseRunner` without hanging IPC resume/cancel; record
-  outcome in ledger. If spike fails → close M11 as wont-do, keep supervised resume.
-- Scope if spike passes:
-  - Additive optional `debug?: boolean` on `runner:runSingle`; when true, launch headed with
-    `PWDEBUG=1` (env scoped to the browser child only) and skip `actionDelayMs` pacing.
-  - `CaseDetailPage`: "Debug run" button next to Supervised (headed-only, single-case only,
-    suites excluded). Cancel must still close the inspector context.
-- Tests: unit (payload validation, env scoping, cancel-from-debug) with fake launcher asserting
-  env; NO inspector GUI in e2e (gated manual check only).
-- DoD: Debug run opens Inspector, step-over works, cancel closes cleanly; `npm run verify` green.
-- Files owned: `src/main/runner.ts`, `ipc-contract.ts` (+1 optional field), `api.ts`,
-  `CaseDetailPage.tsx`, `tests/runner.test.ts` (+cases).
-
-### 18.5 M12 — Run-filter polish: keyword filter + last-failed shortcut (WS2+WS5, no contract change)
-- Problem: suite selection is checkbox-only; no `-g`-style keyword run, no one-click
-  "re-run what failed last time" (analogue of `--last-failed` / `.last-run.json`).
-- Scope:
-  - `SuiteDetailPage`: keyword filter input filters the case table by name (client-side, reuse
-    existing search box — do NOT add server-side grep); "Run filtered" runs visible checked cases.
-  - "Re-run last failed" button: reads latest finished `suiteRuns` row for the suite from DB
-    (existing `report:getHtml`-adjacent query, new handler ONLY if no read path exists —
-    prefer reuse), collects its `failed` `caseRuns`, starts new suite run with those ids;
-    empty → toast "no failed cases in last run" (reuse `NoFailedCasesError` message).
-- Tests: unit for filter helper + last-failed-id selector; e2e reuse existing rerunFailed leg
-  (no new e2e file).
-- DoD: filter "login" → only login cases run; failing run → Re-run-last-failed retries exactly
-  the failed set; `npm run verify` green.
-- Files owned: `SuiteDetailPage.tsx`, possibly `ipc-suites.ts` read helper, no contract change
-  preferred (document any added read channel in ledger if unavoidable).
-
-### 18.6 Non-goals (explicitly declined, do not pick up)
-- Full UI Mode (`--ui`), `--project` multi-browser (Firefox/WebKit), sharding, `show-report`
-  HTML-reporter: require `@playwright/test` runner; conflicts with direct-library resume (§8
-  ledger 2026-10-16 WS5). Post-MVP path only: per-project `browser` field + `postinstall` line.
-- Retries/sharding/timeout config UI, VS Code extension integration: out of scope for M8–M12.
-- No DB migration in any M8–M12 slice (all new options fit existing `action/selector/value/
-  timeoutMs` shape or additive IPC fields). If a slice needs a migration, stop and re-plan.
+M1–M10 and M12 complete; transfer (file import/export) and Phase 2 git-sync core + panel
+complete; input/assertion parity (9 → 25 actions) complete. M11 closed as wont-do.
