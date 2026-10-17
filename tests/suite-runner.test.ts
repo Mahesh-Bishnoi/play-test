@@ -286,7 +286,9 @@ function finishedSummary(fx: Fixture, suiteRunId: string): unknown {
       (e.payload as { suiteRunId: string }).suiteRunId === suiteRunId,
   );
   expect(found).toHaveLength(1);
-  return (found[0]?.payload as { summary: unknown }).summary;
+  const finished = found[0];
+  if (!finished) throw new Error("run:finished event missing");
+  return (finished.payload as { summary: unknown }).summary;
 }
 
 // --- Parallel execution ---------------------------------------------------------
@@ -925,7 +927,9 @@ describe("runner + report IPC (M6)", () => {
 
   it("runSuite → getHtml → exportPdf round-trips through IPC", async () => {
     const fx = wired([{ action: "goto", value: "https://x.test" }]);
-    const { suiteRunId } = (await fx.listeners.get("runner:runSuite")?.({
+    const runSuiteHandler = fx.listeners.get("runner:runSuite");
+    if (!runSuiteHandler) throw new Error("runner:runSuite handler not wired");
+    const { suiteRunId } = (await runSuiteHandler({
       suiteId: fx.suiteId,
       caseIds: fx.caseIds,
       mode: "unsupervised",

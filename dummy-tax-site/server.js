@@ -338,7 +338,10 @@ function redirect(res, location, cookie) {
 }
 
 export function createDummyTaxServer() {
-  return createServer(async (req, res) => {
+  // The handler is async but createServer wants a void-returning listener, so
+  // it is kept separate and its promise detached. Detaching keeps the previous
+  // behavior: a rejection here was already unhandled, never a response error.
+  const handleRequest = async (req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     const path = url.pathname;
     const method = (req.method ?? "GET").toUpperCase();
@@ -510,6 +513,10 @@ export function createDummyTaxServer() {
     }
 
     send(res, 404, shell("Not found", "<h1>Not found</h1>", true));
+  };
+
+  return createServer((req, res) => {
+    void handleRequest(req, res);
   });
 }
 
