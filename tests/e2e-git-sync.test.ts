@@ -17,8 +17,8 @@ import {
   syncPull,
   syncPush,
   syncStatus,
-} from "../src/main/git-sync.js";
-import type { SyncAuthor } from "../src/main/git-sync.js";
+} from "../src/main/git-sync/sync.js";
+import type { SyncAuthor } from "../src/main/git-sync/types.js";
 import { createCase, getCase, updateCase } from "../src/main/ipc-cases.js";
 import { getCaseProfile, setCaseProfile } from "../src/main/ipc-profiles.js";
 import { createProject, getProject, updateProject } from "../src/main/ipc-projects.js";

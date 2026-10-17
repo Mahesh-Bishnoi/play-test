@@ -57,7 +57,7 @@ import {
   syncPull,
   syncPush,
   syncStatus,
-} from "./git-sync.js";
+} from "./git-sync/sync.js";
 import {
   buildCaseExport,
   buildProjectExport,

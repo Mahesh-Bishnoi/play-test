@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import { mergeEntity } from "../src/main/git-sync/merge.js";
 import {
   SnapshotCaseSchema,
-  mergeEntity,
   snapshotHash,
   type Snapshot,
   type SnapshotCase,
-} from "../src/main/git-sync.js";
+} from "../src/main/git-sync/snapshot.js";
 
 function snapshotWithName(name: string): Snapshot {
   return {

@@ -307,4 +307,12 @@ anything durable to `SPECS.md`.
   multi-line bookkeeping), `parse-line.ts` (one codegen line → step/unsupported),
   `codegen-output.ts` (whole-output state machine), `codegen-args.ts` (CLI flag
   validation), `codegen-shell.ts` (`CodegenRecorder` + `sharedRecorder`). Parser logic
-  unchanged; `npm test` green (283 passed). Phases 3–5 still to do.
+  unchanged; `npm test` green (283 passed).
+- **2026-10-17 — maintainability refactor, phase 3.** Split the 1255-line
+  `src/main/git-sync.ts` into `src/main/git-sync/`: `types.ts` (sync result types +
+  `SyncRemoteError`), `snapshot.ts` (snapshot schema + canonical hash), `snapshot-db.ts`
+  (DB ↔ snapshot), `snapshot-tree.ts` (reading a snapshot out of a git tree, still
+  size-capped and zod-validated), `conflicts.ts`, `repo.ts` (local-repo / remote-ref
+  plumbing), `merge.ts` (pure three-way `mergeEntity`), `sync.ts` (public API:
+  init/commit/push/pull/clone/status + conflict resolve). No behavior change; `npm test`
+  + the git-sync/transfer e2e tests green. Phases 4–5 still to do.

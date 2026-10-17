@@ -68,7 +68,7 @@ self-contained HTML + PDF reports → re-run failures. Local-first, Chromium onl
 - Transfer: file import/export (`.playtest.json`, versioned) with copy semantics (fresh ids,
   membership by name, target `baseUrl` wins). No runs/artifacts in bundles. Case profiles
   travel (M14); auth state files do not.
-- Sync (Phase 2): per-project local-git sync via `src/main/git-sync.ts`, local-path remotes
+- Sync (Phase 2): per-project local-git sync via `src/main/git-sync/` (`sync.ts` public API), local-path remotes
   only (http(s) rejected), snapshot layout `project.json` + `suites/<id>.json` + `cases/<id>.json`,
   stable DB ids, entity three-way merge, conflicts in `.git/playtest-conflicts.json`.
   Case profiles are part of the case entity (M14).
@@ -111,7 +111,14 @@ src/
       single-runner.ts            //   SingleCaseRunner (supervised + unsupervised)
       playwright-page.ts / playwright-context.ts / launcher.ts   // production adapters
     reports.ts / trace-viewer.ts / browser-setup.ts
-    transfer.ts / git-sync.ts
+    transfer.ts
+    git-sync/                     // per-project local-git sync (snapshot only, no runs)
+      types.ts / snapshot.ts      //   sync result types · snapshot schema + hash
+      snapshot-db.ts / snapshot-tree.ts   //   DB <-> snapshot · reading a git tree
+      conflicts.ts                //   .git/playtest-conflicts.json read/write
+      repo.ts                     //   local-repo/remote-ref plumbing
+      merge.ts                    //   pure entity three-way merge
+      sync.ts                     //   public API (init/commit/push/pull/clone/status)
     ipc-profiles.ts
     playwright-cli.ts             // shared CLI resolve/spawn (recorder + trace viewer)
   preload/preload.ts            // allowlisted invoke + run:* subscribe only
