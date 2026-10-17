@@ -23,6 +23,9 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
   const [pendingDelete, setPendingDelete] = useState<Project | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
+  const [cloneRemote, setCloneRemote] = useState("");
+  const [cloneDir, setCloneDir] = useState("");
+  const [cloneBusy, setCloneBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -99,6 +102,29 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
       })
       .finally(() => {
         setImportBusy(false);
+      });
+  };
+  const cloneShared = (): void => {
+    if (cloneRemote.trim() === "" || cloneDir.trim() === "") {
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setCloneBusy(true);
+    api
+      .syncClone(cloneRemote.trim(), cloneDir.trim())
+      .then(({ projectId }) => {
+        setNotice("Cloned shared project — opening it now. Link its folder on the Sync tab.");
+        setCloneRemote("");
+        setCloneDir("");
+        refreshProjects(projectId);
+        onOpen(projectId);
+      })
+      .catch((err: unknown) => {
+        setError(formatApiError(err));
+      })
+      .finally(() => {
+        setCloneBusy(false);
       });
   };
   const confirmDelete = (): void => {
@@ -279,6 +305,41 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
             />
             <button type="button" className="pt-btn" disabled={name.trim() === ""} onClick={create}>
               Create and open
+            </button>
+          </div>
+          <div className="pt-welcome-new">
+            <h3>Clone shared project</h3>
+            <input
+              aria-label="Shared remote path"
+              className="pt-input pt-mono"
+              placeholder="Remote path (local folder)"
+              value={cloneRemote}
+              onChange={(e) => {
+                setCloneRemote(e.target.value);
+              }}
+            />
+            <input
+              aria-label="Clone into folder"
+              className="pt-input pt-mono"
+              placeholder="New empty folder for the checkout"
+              value={cloneDir}
+              onChange={(e) => {
+                setCloneDir(e.target.value);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && cloneRemote.trim() !== "" && cloneDir.trim() !== "") {
+                  cloneShared();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="pt-btn"
+              disabled={cloneBusy || cloneRemote.trim() === "" || cloneDir.trim() === ""}
+              onClick={cloneShared}
+              title="Clone a shared sync remote (keeps shared ids — pull converges, never duplicates)"
+            >
+              {cloneBusy ? "Cloning…" : "Clone and open"}
             </button>
           </div>
         </main>

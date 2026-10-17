@@ -5,6 +5,7 @@ import { applyTheme, getInitialTheme, type AppTheme } from "./theme.js";
 import type { Project } from "../shared/schema.js";
 import BrowserBanner from "./components/BrowserBanner.js";
 import ProjectExplorer from "./components/ProjectExplorer.js";
+import SyncPanel from "./components/SyncPanel.js";
 import WelcomeScreen from "./components/WelcomeScreen.js";
 import CaseDetailPage from "./pages/CaseDetailPage.js";
 import RunReportPage from "./pages/RunReportPage.js";
@@ -15,7 +16,8 @@ interface OpenCaseTab {
   name: string | null;
 }
 
-type ActiveTab = { kind: "suites" } | { kind: "case"; caseId: string } | { kind: "report" };
+type ActiveTab =
+  { kind: "suites" } | { kind: "sync" } | { kind: "case"; caseId: string } | { kind: "report" };
 
 const LAST_PROJECT_KEY = "playtest.lastProjectId";
 
@@ -267,6 +269,17 @@ export default function App(): React.JSX.Element {
             >
               Suites
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={active.kind === "sync"}
+              className={`pt-tab${active.kind === "sync" ? " pt-tab-active" : ""}`}
+              onClick={() => {
+                setActive({ kind: "sync" });
+              }}
+            >
+              Sync
+            </button>
             {openCases.map((tab) => (
               <div
                 key={tab.id}
@@ -361,7 +374,17 @@ export default function App(): React.JSX.Element {
                 />
               </div>
             ))}
-            {(active.kind === "suites" || !activeCaseIsOpen) && (
+            {active.kind === "sync" && (
+              <SyncPanel
+                projectId={projectId}
+                projectName={project?.name ?? projectId}
+                onChanged={() => {
+                  bumpExplorer();
+                  bumpMain();
+                }}
+              />
+            )}
+            {(active.kind === "suites" || (active.kind !== "sync" && !activeCaseIsOpen)) && (
               <SuiteDetailPage
                 projectId={projectId}
                 focusedSuiteId={activeSuiteId}
