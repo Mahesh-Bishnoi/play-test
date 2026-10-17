@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Page } from "playwright";
 
-import { resolveLocator } from "../src/main/runner.js";
+import { resolveLocator } from "../src/main/runner/locator-resolve.js";
 
 // Minimal recording stand-in for a Playwright Page/Locator chain. The
 // resolver only calls allowlisted factory/filter/positional methods, so the

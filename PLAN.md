@@ -289,3 +289,15 @@ Note: the new `case_profiles.session_state` column only reaches fresh databases 
 
 Scratch space for the active milestone — blockers, findings, decisions to raise. Move
 anything durable to `SPECS.md`.
+
+- **2026-10-17 — maintainability refactor (no behavior change).** Split the 2852-line
+  `src/main/runner.ts` into `src/main/runner/` by concern: `seams.ts` (page/context/launcher
+  interfaces), `errors.ts`, `step-values.ts` (value encodings + substitution),
+  `step-evidence.ts` (screenshot + trace group), `execute-step.ts` (the 35-action switch),
+  `locator-literals.ts` (safe literal parser) + `locator-resolve.ts` (chain → Locator),
+  `single-runner.ts` (`SingleCaseRunner`), and the production adapters
+  `playwright-page.ts` / `playwright-context.ts` / `launcher.ts`. No barrel file — every
+  consumer imports the specific module. `npm run verify` + `npm run test:e2e` green.
+  Next up in the same pass: `recorder.ts`, `git-sync.ts`, the renderer pages, then
+  `suite-runner.ts` / `ipc-register.ts` / `reports.ts` / `transfer.ts` (extract only where
+  the deletion test passes).

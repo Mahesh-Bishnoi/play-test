@@ -93,7 +93,15 @@ src/
     db.ts / schema.ts / artifacts.ts
     ipc-projects.ts / ipc-suites.ts / ipc-cases.ts / ipc-steps.ts
     ipc-register.ts / main.ts
-    recorder.ts / runner.ts / suite-runner.ts
+    recorder.ts / suite-runner.ts
+    runner/                       // single-case + suite execution, split by concern
+      seams.ts / errors.ts        //   page/context interfaces · error vocabulary
+      step-values.ts              //   value encodings + {{key}} substitution
+      step-evidence.ts            //   screenshot + trace-group capture
+      execute-step.ts             //   the 35-action switch
+      locator-literals.ts / locator-resolve.ts   //   safe recorder-chain parsing
+      single-runner.ts            //   SingleCaseRunner (supervised + unsupervised)
+      playwright-page.ts / playwright-context.ts / launcher.ts   // production adapters
     reports.ts / trace-viewer.ts / browser-setup.ts
     transfer.ts / git-sync.ts
     ipc-profiles.ts
@@ -125,7 +133,8 @@ the query builder only; there is no migration runner.
 - `test_steps(id, caseId, order, action, selector, value, timeoutMs, editedAt)` —
   `action` is plain text; valid values = `STEP_ACTIONS` (35 — see
   `src/shared/step-types.ts`). Click variants and select options
-  encode in `value` (`parseClickValue` / `parseSelectValue` / `parseTypeValue` in `runner.ts`).
+  encode in `value` (`parseClickValue` / `parseSelectValue` / `parseTypeValue` in
+  `runner/step-values.ts`).
 - `test_data(caseId, key, value, source)` — `source='kv'` today.
 - `case_profiles(caseId, device, viewportW, viewportH, colorScheme, locale, timezone,
   storageState, saveStorageState, sessionState, dialogPolicy, updatedAt)` — M14, plus

@@ -7,9 +7,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { eq } from "drizzle-orm";
 
-import type { EmitRunEvent } from "../src/main/runner.js";
+import type { EmitRunEvent } from "../src/main/runner/seams.js";
 import type { StepAction } from "../src/shared/step-types.js";
-import { SingleCaseRunner, playwrightLauncher } from "../src/main/runner.js";
+import { SingleCaseRunner } from "../src/main/runner/single-runner.js";
+import { playwrightLauncher } from "../src/main/runner/launcher.js";
 import { SuiteRunner } from "../src/main/suite-runner.js";
 import { getSuiteReport, readSuiteHtmlReport } from "../src/main/reports.js";
 import { caseRuns, stepRuns } from "../src/main/schema.js";

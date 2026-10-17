@@ -69,7 +69,7 @@ import {
   saveExportFile,
 } from "./transfer.js";
 import type { TransferIoDeps } from "./transfer.js";
-import type { SingleCaseRunner } from "./runner.js";
+import type { SingleCaseRunner } from "./runner/single-runner.js";
 import type { SuiteRunner } from "./suite-runner.js";
 import { createCase, deleteCase, getCase, listCases, updateCase } from "./ipc-cases.js";
 import {

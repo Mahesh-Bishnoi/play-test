@@ -13,23 +13,24 @@ import type {
   RunPage,
   RunEventChannel,
   SelectOptionInput,
-} from "../src/main/runner.js";
+} from "../src/main/runner/seams.js";
 import {
-  captureStepScreenshot,
   ContextClosedError,
   RunAlreadyActiveError,
-  SingleCaseRunner,
   StepExecutionError,
-  executeStep,
   formatStepError,
+} from "../src/main/runner/errors.js";
+import {
   parseAssertMatcher,
   parseClickValue,
   parseSelectValue,
   parseStringList,
   parseTypeValue,
-  stepTraceLabel,
   substituteStepValue,
-} from "../src/main/runner.js";
+} from "../src/main/runner/step-values.js";
+import { captureStepScreenshot, stepTraceLabel } from "../src/main/runner/step-evidence.js";
+import { executeStep } from "../src/main/runner/execute-step.js";
+import { SingleCaseRunner } from "../src/main/runner/single-runner.js";
 import { SuiteRunner } from "../src/main/suite-runner.js";
 import { caseArtifactsDir, caseVideoPath, stepScreenshotPath } from "../src/main/artifacts.js";
 import { createDatabase } from "../src/main/db.js";

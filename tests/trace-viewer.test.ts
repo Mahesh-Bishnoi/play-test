@@ -245,7 +245,8 @@ describe("e2e trace artifact leg", () => {
   it.skipIf(!process.env["PLAYTEST_E2E"])(
     "failing single-case run retains trace.zip and openTrace resolves",
     async () => {
-      const { SingleCaseRunner, playwrightLauncher } = await import("../src/main/runner.js");
+      const { SingleCaseRunner } = await import("../src/main/runner/single-runner.js");
+      const { playwrightLauncher } = await import("../src/main/runner/launcher.js");
       const { createDatabase: mkDb } = await import("../src/main/db.js");
       const { createCase: mkCase } = await import("../src/main/ipc-cases.js");
       const { createProject: mkProject } = await import("../src/main/ipc-projects.js");

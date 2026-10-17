@@ -5,8 +5,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { eq } from "drizzle-orm";
 
-import type { EmitRunEvent } from "../src/main/runner.js";
-import { SingleCaseRunner, playwrightLauncher } from "../src/main/runner.js";
+import type { EmitRunEvent } from "../src/main/runner/seams.js";
+import { SingleCaseRunner } from "../src/main/runner/single-runner.js";
+import { playwrightLauncher } from "../src/main/runner/launcher.js";
 import { createDatabase } from "../src/main/db.js";
 import type { AppDatabase } from "../src/main/db.js";
 import { createCase } from "../src/main/ipc-cases.js";

@@ -11,9 +11,10 @@ import type {
   ContextLaunchOptions,
   RunContext,
   RunPage,
-} from "../src/main/runner.js";
-import type { RunEventChannel } from "../src/main/runner.js";
-import { RunAlreadyActiveError, SingleCaseRunner } from "../src/main/runner.js";
+} from "../src/main/runner/seams.js";
+import type { RunEventChannel } from "../src/main/runner/seams.js";
+import { RunAlreadyActiveError } from "../src/main/runner/errors.js";
+import { SingleCaseRunner } from "../src/main/runner/single-runner.js";
 import {
   NoFailedCasesError,
   SuiteRunner,

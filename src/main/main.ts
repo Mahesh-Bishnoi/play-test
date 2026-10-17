@@ -14,7 +14,8 @@ import {
   registerTransferHandlers,
   registerSyncHandlers,
 } from "./ipc-register.js";
-import { SingleCaseRunner, playwrightLauncher } from "./runner.js";
+import { SingleCaseRunner } from "./runner/single-runner.js";
+import { playwrightLauncher } from "./runner/launcher.js";
 import { SuiteRunner } from "./suite-runner.js";
 import { defaultArtifactsRoot } from "./artifacts.js";
 

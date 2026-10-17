@@ -30,17 +30,16 @@ import { getSuite, getSuiteCaseIds } from "./ipc-suites.js";
 import { getTestData, listSteps } from "./ipc-steps.js";
 import { tryWriteSuiteHtmlReport } from "./reports.js";
 import { caseRuns, stepRuns, suiteRuns } from "./schema.js";
-import type { BrowserHandle, BrowserLauncher, EmitRunEvent, RunContext } from "./runner.js";
+import type { BrowserHandle, BrowserLauncher, EmitRunEvent, RunContext } from "./runner/seams.js";
+import { RunAlreadyActiveError, formatStepError } from "./runner/errors.js";
+import { substituteStepValue } from "./runner/step-values.js";
 import {
   captureStepScreenshot,
-  contextLaunchOptionsFromProfile,
-  executeStep,
-  formatStepError,
-  RunAlreadyActiveError,
   runStepInTraceGroup,
   stepTraceLabel,
-  substituteStepValue,
-} from "./runner.js";
+} from "./runner/step-evidence.js";
+import { executeStep } from "./runner/execute-step.js";
+import { contextLaunchOptionsFromProfile } from "./runner/launcher.js";
 
 /**
  * Parallel suite runner (WS5 part 2 / M6, PLAN §2 + §8). Unsupervised only,

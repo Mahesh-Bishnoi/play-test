@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseCodegenOutput } from "../src/main/recorder";
-import { executeStep, type RunPage } from "../src/main/runner";
+import { executeStep } from "../src/main/runner/execute-step";
+import type { RunPage } from "../src/main/runner/seams";
 
 /**
  * M15 acceptance (PLAN §M15 "Done when"): a recorded flow with an iframe, an

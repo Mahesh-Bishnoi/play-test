@@ -1,7 +1,7 @@
 /**
  * Shared Playwright locator allowlist (single source of truth).
  *
- * Both `src/main/runner.ts` (execution) and
+ * Both `src/main/runner/` (execution) and
  * `src/renderer/components/pick-locator.ts` (paste pre-check) validate
  * codegen locator chains against these sets plus `splitTopLevel` /
  * `isRegexStart`. Keep this module dependency-free so main, renderer, and
