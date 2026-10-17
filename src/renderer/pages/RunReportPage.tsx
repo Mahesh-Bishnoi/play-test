@@ -23,12 +23,33 @@ export function reportHasFailures(html: string): boolean {
 }
 
 /**
+ * Trace targets embedded by `renderSuiteHtml` (M8, PLAN §18.1): each failed
+ * case's `<p class="muted" data-caserun="…" data-trace="…">` line. Pure
+ * string parse (no DOM) so it works on the raw HTML string before iframe
+ * render. Returns only cases whose trace file existed at report-write time.
+ */
+export function extractTraceTargets(html: string): { caseRunId: string; traceHref: string }[] {
+  const targets: { caseRunId: string; traceHref: string }[] = [];
+  const re = /data-caserun="([^"]+)"[^>]*data-trace="([^"]+)"/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html)) !== null) {
+    const caseRunId = match[1];
+    const traceHref = match[2];
+    if (caseRunId !== undefined && traceHref !== undefined) {
+      targets.push({ caseRunId, traceHref });
+    }
+  }
+  return targets;
+}
+
+/**
  * Suite run report (WS6 / M6, PLAN §6 + §9): renders the self-contained HTML
  * report, exports PDF, and re-runs failed cases.
  */
 export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): React.JSX.Element {
   const [html, setHtml] = useState<string | null>(null);
   const [hasFailed, setHasFailed] = useState<boolean | null>(null);
+  const [traces, setTraces] = useState<{ caseRunId: string; traceHref: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -40,6 +61,7 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
       .then((loaded) => {
         setHtml(loaded);
         setHasFailed(reportHasFailures(loaded));
+        setTraces(extractTraceTargets(loaded));
       })
       .catch((err: unknown) => {
         setError(formatApiError(err));
@@ -49,6 +71,7 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
   useEffect(() => {
     setHtml(null);
     setHasFailed(null);
+    setTraces([]);
     setNotice(null);
     setError(null);
     refresh();
@@ -95,6 +118,22 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
       });
   };
 
+  const openTraceFor = (caseRunId: string): void => {
+    setBusy(true);
+    setNotice(null);
+    api
+      .openTrace({ caseRunId })
+      .then(() => {
+        setNotice(`Trace viewer opened for ${caseRunId}`);
+      })
+      .catch((err: unknown) => {
+        setError(formatApiError(err));
+      })
+      .finally(() => {
+        setBusy(false);
+      });
+  };
+
   return (
     <section aria-label="Run report" className="pt-page">
       <div className="pt-topbar">
@@ -131,6 +170,20 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
             Re-run failed
           </button>
         )}
+        {traces.map(({ caseRunId }) => (
+          <button
+            key={caseRunId}
+            type="button"
+            className="pt-btn pt-btn-sm"
+            onClick={() => {
+              openTraceFor(caseRunId);
+            }}
+            disabled={busy}
+            title={`Open Playwright Trace Viewer for ${caseRunId}`}
+          >
+            Open trace ({caseRunId.slice(0, 8)})
+          </button>
+        ))}
       </div>
       {html === null ? (
         <p className="pt-empty">Loading report…</p>

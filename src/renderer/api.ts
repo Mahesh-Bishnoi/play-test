@@ -252,6 +252,11 @@ export const api = {
   exportReportPdf(suiteRunId: string): Promise<string> {
     return invoke("report:exportPdf", { suiteRunId }, (raw) => z.string().parse(raw));
   },
+  openTrace(input: { caseRunId: string } | { tracePath: string }): Promise<{ opened: boolean }> {
+    return invoke("report:openTrace", input, (raw) =>
+      z.object({ opened: z.literal(true) }).parse(raw),
+    );
+  },
 
   // Transfer (file import/export; copy semantics — fresh ids on import).
   exportProject(id: string): Promise<ExportOutcome> {

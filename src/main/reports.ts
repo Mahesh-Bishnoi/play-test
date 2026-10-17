@@ -4,6 +4,7 @@ import { dirname, join, relative } from "node:path";
 import { eq } from "drizzle-orm";
 
 import type { AppDatabase } from "./db.js";
+import { caseTracePath } from "./artifacts.js";
 import { caseRuns, stepRuns, suiteRuns, testCases, testSteps, testSuites } from "./schema.js";
 
 /**
@@ -34,6 +35,8 @@ export interface ReportCase {
   status: string;
   durationMs: number | null;
   videoPath: string | null;
+  /** Derived from the artifacts layout (no DB column — §18.6 forbids migrations). */
+  tracePath: string | null;
   steps: ReportStep[];
 }
 
@@ -64,7 +67,12 @@ export class SuiteRunNotFoundError extends Error {
 }
 
 /** Aggregate one suite run (single-case or parallel) into a report model. */
-export function getSuiteReport(db: AppDatabase, suiteRunId: string): SuiteReport {
+export function getSuiteReport(
+  db: AppDatabase,
+  suiteRunId: string,
+  artifactsRoot?: string,
+  pathExists: (path: string) => boolean = existsSync,
+): SuiteReport {
   const suiteRow = db.select().from(suiteRuns).where(eq(suiteRuns.id, suiteRunId)).all()[0];
   if (suiteRow === undefined) {
     throw new SuiteRunNotFoundError(suiteRunId);
@@ -98,6 +106,13 @@ export function getSuiteReport(db: AppDatabase, suiteRunId: string): SuiteReport
       status: cr.status,
       durationMs: cr.durationMs,
       videoPath: cr.videoPath,
+      tracePath: resolveCaseTracePath(
+        testCase?.projectId ?? null,
+        suiteRow,
+        cr.caseId,
+        artifactsRoot,
+        pathExists,
+      ),
       steps: stepRows.map((s) => {
         const step = stepById.get(s.stepId);
         return {
@@ -231,9 +246,15 @@ export function renderSuiteHtml(
         c.videoPath !== null
           ? `<a href="${escapeHtml(rel(c.videoPath, htmlDir))}">failed.webm</a>`
           : '<span class="muted">—</span>';
+      const traceHref = c.tracePath !== null ? rel(c.tracePath, htmlDir) : null;
+      const trace =
+        traceHref !== null
+          ? `<a href="${escapeHtml(traceHref)}">trace.zip</a>`
+          : '<span class="muted">—</span>';
+      const traceAttr = traceHref !== null ? ` data-trace="${escapeHtml(traceHref)}"` : "";
       return [
         `<h3>${escapeHtml(c.caseName)} — <span class="${c.status}">${escapeHtml(c.status)}</span></h3>`,
-        `<p class="muted">caseRun ${escapeHtml(c.caseRunId)} · video: ${video}</p>`,
+        `<p class="muted" data-caserun="${escapeHtml(c.caseRunId)}"${traceAttr}>caseRun ${escapeHtml(c.caseRunId)} · video: ${video} · trace: ${trace}</p>`,
         `<table><thead><tr><th>#</th><th>status</th><th>step</th><th>duration</th><th>screenshot</th><th>error</th></tr></thead><tbody>${stepRows}</tbody></table>`,
       ].join("\n");
     })
@@ -298,6 +319,31 @@ function rel(target: string, htmlDir?: string): string {
   return r === "" ? target : r;
 }
 
+/**
+ * Derive a case's `trace.zip` from the artifacts layout (PLAN §18.1, no DB
+ * migration). Returns the absolute path when `artifactsRoot` is given and
+ * the file exists, else null (passing runs discard traces; orphan cases
+ * without a project fall back to the run's owning project).
+ */
+function resolveCaseTracePath(
+  projectId: string | null,
+  suiteRow: { id: string; suiteId: string | null },
+  caseId: string,
+  artifactsRoot: string | undefined,
+  pathExists: (path: string) => boolean,
+): string | null {
+  if (artifactsRoot === undefined) {
+    return null;
+  }
+  const owner = projectId ?? "unknown";
+  const candidate = caseTracePath(artifactsRoot, owner, suiteRow.id, caseId);
+  try {
+    return pathExists(candidate) ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Project id owning a suite run — for report placement under its artifacts dir. */
 export function resolveReportProjectId(db: AppDatabase, suiteRunId: string): string {
   const suiteRow = db.select().from(suiteRuns).where(eq(suiteRuns.id, suiteRunId)).all()[0];
@@ -336,7 +382,7 @@ export function suiteReportPaths(
  * only for a missing suite run or an unwritable disk.
  */
 export function writeSuiteHtmlReport(db: AppDatabase, root: string, suiteRunId: string): string {
-  const report = getSuiteReport(db, suiteRunId);
+  const report = getSuiteReport(db, suiteRunId, root);
   const projectId = resolveReportProjectId(db, suiteRunId);
   const { htmlPath, dir } = suiteReportPaths(root, projectId, suiteRunId);
   mkdirSync(dir, { recursive: true });

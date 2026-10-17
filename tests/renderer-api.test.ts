@@ -97,6 +97,23 @@ describe("renderer api browser-setup wrappers (M7, PLAN §11)", () => {
   });
 });
 
+describe("renderer api report wrappers (M8, PLAN §18.1)", () => {
+  it("opens traces by caseRunId or explicit path", async () => {
+    const calls = stubPlaytest(() => Promise.resolve({ opened: true }));
+    await expect(api.openTrace({ caseRunId: "cr-0" })).resolves.toEqual({ opened: true });
+    await expect(api.openTrace({ tracePath: "/t/trace.zip" })).resolves.toEqual({ opened: true });
+    expect(calls).toEqual([
+      { channel: "report:openTrace", payload: { caseRunId: "cr-0" } },
+      { channel: "report:openTrace", payload: { tracePath: "/t/trace.zip" } },
+    ]);
+  });
+
+  it("rejects malformed open-trace responses", async () => {
+    stubPlaytest(() => Promise.resolve({ opened: false }));
+    await expect(api.openTrace({ caseRunId: "cr-0" })).rejects.toThrow();
+  });
+});
+
 describe("renderer api transfer wrappers", () => {
   it("exports through transfer channels and parses save outcomes", async () => {
     const calls = stubPlaytest((channel) => {

@@ -43,6 +43,7 @@ export const IPC_CHANNELS = [
   "runner:cancel",
   "report:getHtml",
   "report:exportPdf",
+  "report:openTrace",
   "transfer:exportProject",
   "transfer:exportSuite",
   "transfer:exportCase",
@@ -205,6 +206,11 @@ export const ReportExportPdfPayload = z.object({
   suiteRunId: z.string().min(1).max(100),
 });
 
+export const ReportOpenTracePayload = z.union([
+  z.object({ caseRunId: z.string().min(1).max(100) }),
+  z.object({ tracePath: z.string().min(1).max(1000) }),
+]);
+
 // --- Transfer: file import/export (copy semantics — fresh ids on import) -------
 
 export const TransferExportProjectPayload = z.object({
@@ -354,6 +360,7 @@ export type RunnerRerunFailedPayload = z.infer<typeof RunnerRerunFailedPayload>;
 export type RunnerCancelPayload = z.infer<typeof RunnerCancelPayload>;
 export type ReportGetHtmlPayload = z.infer<typeof ReportGetHtmlPayload>;
 export type ReportExportPdfPayload = z.infer<typeof ReportExportPdfPayload>;
+export type ReportOpenTracePayload = z.infer<typeof ReportOpenTracePayload>;
 export type TransferExportProjectPayload = z.infer<typeof TransferExportProjectPayload>;
 export type TransferExportSuitePayload = z.infer<typeof TransferExportSuitePayload>;
 export type TransferExportCasePayload = z.infer<typeof TransferExportCasePayload>;
@@ -407,6 +414,7 @@ export const IPC_PAYLOADS: Record<string, z.ZodType> = {
   "runner:cancel": RunnerCancelPayload,
   "report:getHtml": ReportGetHtmlPayload,
   "report:exportPdf": ReportExportPdfPayload,
+  "report:openTrace": ReportOpenTracePayload,
   "transfer:exportProject": TransferExportProjectPayload,
   "transfer:exportSuite": TransferExportSuitePayload,
   "transfer:exportCase": TransferExportCasePayload,

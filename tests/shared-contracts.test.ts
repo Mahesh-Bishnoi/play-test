@@ -58,6 +58,7 @@ describe("frozen IPC contract v1 (PLAN §5)", () => {
       "runner:cancel",
       "report:getHtml",
       "report:exportPdf",
+      "report:openTrace",
       "transfer:exportProject",
       "transfer:exportSuite",
       "transfer:exportCase",

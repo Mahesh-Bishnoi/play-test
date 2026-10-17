@@ -112,6 +112,11 @@ Rules: WS1 freezes `src/shared/*` first; others PR against it. No cross-WS file 
 - [x] M5 Single-case run + screenshots + resume (WS5 part 1)
 - [x] M6 Parallel suite + video-on-fail + HTML/PDF + rerun-failed (WS5 part 2 + WS6)
 - [x] M7 KV data substitution + packaging + first-run browser install
+- [x] M8 Trace Viewer open for failed cases (WS5+WS6) — see §18.1
+- [ ] M9 Codegen emulation + auth-state options (WS4) — see §18.2
+- [ ] M10 Pick-locator → insert step (WS3+WS4) — see §18.3
+- [ ] M11 Debug-with-Inspector single-case run (WS5, spike first) — see §18.4
+- [ ] M12 Run-filter polish: keyword filter + last-failed shortcut (WS2+WS5) — see §18.5
 
 ## 14. Status Ledger (agents update this)
 | Date | WS | Done | Remaining | Notes |
@@ -168,6 +173,9 @@ Rules: WS1 freezes `src/shared/*` first; others PR against it. No cross-WS file 
 | 2026-10-17 | sync-panel | Claimed: sync panel UI (Sync tab: link/init, status, commit/push/pull, branches, conflict resolve; clone entry on Welcome) | In progress | Scope: NEW SyncPanel component + App tab wiring + WelcomeScreen clone row. No contract changes. |
 | 2026-10-17 | sync-panel | Done: sync panel UI — NEW SyncPanel (per-project link {dir,remote} + author in localStorage, status card, commit/push/pull, create-&-switch branch, conflict list with mine/theirs, pull surfaces pending conflicts, onChanged refresh after applied/theirs-wins); App Sync tab (suites hidden while active, other tabs untouched); WelcomeScreen clone block (clone → open, link hint) | Nothing remaining | Files: NEW src/renderer/components/SyncPanel.tsx, EXTEND App.tsx/WelcomeScreen.tsx. Checks: typecheck clean, prettier clean, `npm test` 134/18, PLAYTEST_E2E 4 passed, lint only pre-existing untouched-file issues. Known limits: open case tabs keep mounted state after pull (refresh on revisit); pending conflicts surface on pull, not on status refresh. |
 | 2026-10-17 | compat | Done: input parity (option 1) + assertion parity (option 3) — 9 → 25 step actions with no DB migration (all new steps fit the existing action/selector/value/timeoutMs shape; `action` column is plain text, no constraint). New inputs: uncheck, dblclick (first-class; legacy click+value:"dblclick" still runs), hover, focus, type (pressSequentially); click variants encoded in value (right/middle/shift/ctrl/alt/meta/force/JSON, parsed by parseClickValue); select multi via JSON-array value (parseSelectValue). New asserts: hidden, enabled, disabled, editable, focused, checked, unchecked, value, count, url, title (poll-based, substring or /regex/). Recorder maps uncheck/setChecked(false)/dblclick/pressSequentially/type/hover/focus/right-click + toBeHidden/toBeDisabled/toBeEditable/toBeFocused/toBeChecked/toHaveValue/toHaveCount/toHaveURL/toHaveTitle. | Nothing remaining | Files: EXTEND src/shared/step-types.ts (STEP_ACTIONS), src/main/runner.ts (RunPage + ClickStepOptions + parseClickValue/parseSelectValue + executeStep + PlaywrightRunPage incl. matchesText/pollState), src/main/recorder.ts (parser + terminalSelectValue), src/renderer/components/StepEditorPanel.tsx (hints), src/main/reports.ts (formatStepDetail); tests/runner.test.ts (4 new: input/assert mapping, click encoding, parsers, validation), tests/recorder.test.ts (14-statement mapping), tests/e2e-dummy-tax-site.test.ts (2 new: input parity 14 steps, checkbox/hidden/dblclick 14 steps). Bug found by e2e: assertCount polled count() on a .first()-narrowed locator (always 1) — pollState takes first=false for count. Checks: `npm test` 140 passed/20 skipped, typecheck clean, PLAYTEST_E2E parity tests green. |
+| 2026-10-17 | plan | Planned: M8–M12 Playwright-docs improvements (§18) — M8 trace-viewer open, M9 codegen emulation+auth flags, M10 pick-locator insert, M11 debug-with-inspector (spike first), M12 keyword filter + last-failed shortcut; non-goals (§18.6) UI-mode/multi-browser/sharding/show-report (need test-runner rewrite, declined) | M8–M12 unstarted, all prior M1–M7 complete | Source https://playwright.dev/docs/running-tests + /codegen-intro. All slices additive, no DB migration, independently shippable; order M8→M9→M10 now, spike M11, M12 anytime. WS: M8 WS5+WS6, M9 WS4, M10 WS3+WS4, M11 WS5, M12 WS2+WS5. Files: PLAN.md §13+§18 only. Checks: prettier clean (verify on claim). |
+| 2026-10-17 | WS5+WS6 | Claimed: M8 trace-viewer open for failed cases | M8 in progress; M9–M12 unstarted | Scope: NEW src/main/trace-viewer.ts + tests/trace-viewer.test.ts; EXTEND reports.ts (tracePath, no migration — derived from artifacts layout), ipc-contract (+report:openTrace), ipc-register, api, RunReportPage (Open-trace buttons), shared-contracts test. No DB migration, no run/recorder changes. |
+| 2026-10-17 | WS5+WS6 | Done (M8): trace viewer open for failed cases; M8 checkbox ticked | Remaining: M9–M12 (M9 codegen emulation next) | Files: NEW src/main/trace-viewer.ts (resolveTracePath/openTrace/openTraceForCase, injected deps, manual `npx playwright show-trace` fallback) + tests/trace-viewer.test.ts (12 tests: validation, spawn-args, missing-file, IPC round-trip, report hint, PLAYTEST_E2E real-Chromium leg); EXTEND reports.ts (ReportCase.tracePath derived from artifacts layout + existsSync, data-caserun/data-trace attrs, writeSuiteHtmlReport passes root), ipc-contract.ts (+report:openTrace union payload), ipc-register.ts (handler, optional spawn/pathExists fakes), api.ts (openTrace), RunReportPage.tsx (extractTraceTargets + per-case buttons), renderer-api + shared-contracts tests. Checks: typecheck clean; targeted 43 passed/1 skipped; full `npm test` 153/21; PLAYTEST_E2E trace-viewer 12/12 (~32s). `npm run verify` still blocked by pre-existing issues in untouched files (lint error dummy-tax-site/server.js:341, format drift recorder.ts/runner.ts — confirmed present with changes stashed). No DB migration. main.ts needed no change (prod spawn defaults). |
 
 ## 15. Conventions
 TypeScript strict, zod validate all IPC payloads, Drizzle migrations, no `any` in shared, unit-test parser + substitution (`vitest`), e2e smoke: create project → add step → run headed → report exists.
@@ -179,3 +187,115 @@ Codegen parse fragility → keep raw fallback. Parallel disk I/O (video+screensh
 
 ## 17. Verification per Milestone
 `npm run typecheck && npm test && npm run package -- --dir` + manual: record 3-step login, run supervised (pause/resume), run unsupervised suite of 2 (parallel), check HTML+PDF + failure video exist.
+
+## 18. Playwright-docs improvements (M8–M12, approved 2026-10-17)
+
+Source: https://playwright.dev/docs/running-tests + https://playwright.dev/docs/codegen-intro.
+Constraint: WS5 runs the `playwright` **library** directly (not `@playwright/test`), so
+`--ui` / `--project` / sharding / `show-report` are NOT portable without a runner rewrite
+(declined — see §18.6). Everything below is additive, no DB migration, independently shippable.
+Suggested order: M8 → M9 → M10 now; spike M11 before scoping; M12 anytime.
+
+### 18.1 M8 — Trace Viewer open for failed cases (WS5+WS6)
+- Problem: `trace.zip` is saved `retain-on-failure` (single + suite runners) but nothing opens it.
+  Custom HTML report has screenshots only — no DOM snapshot / network / step timeline.
+- Scope:
+  - NEW/EXTEND `src/main/trace-viewer.ts` (or inside `reports.ts`): `openTrace(tracePath)` via
+    injected deps (`spawnShowTrace`), validates path inside artifacts root, spawns
+    `npx playwright show-trace <trace.zip>` detached; fail-loud with manual fallback message.
+  - IPC (additive): `report:openTrace({caseRunId} | {tracePath}) → {opened: true}` + payload schemas.
+  - `src/renderer/api.ts`: `openTrace` wrapper. `RunReportPage.tsx`: "Open trace" button per failed
+    case (only when `tracePath` exists on disk); warn-not-block when missing.
+  - `src/main/reports.ts`: include `tracePath` in `SuiteReport` model + render "trace available"
+    hint in HTML (no trace bytes inline — link/path only).
+- Contract: additive `report:openTrace` only; `run:*` events untouched.
+- Tests: unit (path validation, spawn args, missing-file error, IPC round-trip) + e2e leg on
+  DummyTax failing case asserts `trace.zip` exists and handler resolves (do NOT launch GUI in tests —
+  inject fake spawn).
+- DoD: failing run → Report shows Open-trace button → click launches viewer locally;
+  `npm run verify` green; `PLAYTEST_E2E` trace leg green.
+- Files owned: `src/main/reports.ts`, `RunReportPage.tsx`, `ipc-contract.ts` (+1 channel),
+  `ipc-register.ts`, `main.ts` wiring, `api.ts`, `tests/trace-viewer.test.ts`.
+
+### 18.2 M9 — Codegen emulation + auth-state options (WS4)
+- Problem: `recorder.ts` hardcodes `codegen <baseUrl> --output` — no viewport/device/theme/
+  locale/timezone, no logged-in recording. Codegen-intro emulation section maps 1:1.
+- Scope:
+  - Extend `recorder:start` payload (additive, all optional):
+    `{baseUrl, viewport?: {width,height}, device?: string, colorScheme?: 'light'|'dark',
+    locale?: string, timezone?: string, storageStatePath?: string, saveStoragePath?: string}`.
+  - `CodegenRecorder.spawnCodegen` builds allowlisted flag list only
+    (`--viewport-size WxH`, `--device`, `--color-scheme`, `--locale`/`--lang`, `--timezone`,
+    `--load-storage`, `--save-storage` — verify exact codegen flags against installed
+    `playwright@1.64.1` via `npx playwright codegen --help` before coding; reject unknown device
+    strings with clear error). No shell interpolation — argv array only.
+  - `CaseDetailPage` Record bar: disclosure with Viewport W/H + Device + Theme + Locale/Timezone
+    inputs (persist last-used in localStorage) + storage-state file picker (reuse transfer dialog
+    pattern). Parser (`parseCodegenOutput`) unchanged.
+- Contract: additive optional fields on `recorder:start`; `recorder:stop` untouched.
+- Tests: unit (flag builder matrix, injection rejection e.g. `device: "--output /evil"`,
+  IPC boundary) — no live codegen window in tests (fake `RecorderDeps`).
+- DoD: record with iPhone-ish viewport + dark scheme produces same parseable steps;
+  `npm run verify` green.
+- Files owned: `src/main/recorder.ts`, `ipc-contract.ts` (`recorder:start` payload),
+  `CaseDetailPage.tsx`, `api.ts`, `tests/recorder.test.ts` (+cases).
+
+### 18.3 M10 — Pick-locator → insert step (WS3+WS4, no contract change)
+- Problem: codegen's Pick-Locator + live-highlight playground is invisible from the app; users
+  hand-write brittle selectors that fail in `resolveLocator`.
+- Scope (no codegen change — workflow/UX only):
+  - `CaseDetailPage` / `StepEditorPanel`: hint copy "In the codegen window: Record→Stop,
+    then Pick Locator → Copy" + "Paste locator as new step" affordance: paste → validate via
+    existing `resolveLocator` allowlist (dry-run against `page` shape or regex pre-check) →
+    `step:upsert` draft with `action: click`, pasted selector, empty value.
+  - Accept unknown-but-CSS selectors as-is (fall through to `page.locator`); reject
+    non-locator chains (`page.evaluate`, `frameLocator`) with the existing edit guidance.
+- Tests: unit for the paste→validate helper (valid getBy chain, plain CSS, rejected evaluate);
+  renderer-api untouched.
+- DoD: paste `getByRole('button', { name: 'File' })` → step saves and runs green on DummyTax;
+  paste `page.evaluate(...)` → clear edit-guidance error, no step created.
+- Files owned: `StepEditorPanel.tsx`, `CaseDetailPage.tsx` (paste affordance),
+  NEW `tests/pick-locator.test.ts` or extend `tests/locator-resolve.test.ts`.
+
+### 18.4 M11 — Debug-with-Inspector single-case run (WS5, SPIKE FIRST)
+- Problem: supervised pause/resume only pauses *after* failure. Playwright Inspector step-over
+  (`--debug` / `PWDEBUG=1` / `page.pause()`) has a library equivalent but is unverified through
+  the `BrowserLauncher` abstraction.
+- Spike (time-boxed, no product code): verify `PWDEBUG=1 npx` env and/or `page.pause()` halts a
+  headed library run driven by `SingleCaseRunner` without hanging IPC resume/cancel; record
+  outcome in ledger. If spike fails → close M11 as wont-do, keep supervised resume.
+- Scope if spike passes:
+  - Additive optional `debug?: boolean` on `runner:runSingle`; when true, launch headed with
+    `PWDEBUG=1` (env scoped to the browser child only) and skip `actionDelayMs` pacing.
+  - `CaseDetailPage`: "Debug run" button next to Supervised (headed-only, single-case only,
+    suites excluded). Cancel must still close the inspector context.
+- Tests: unit (payload validation, env scoping, cancel-from-debug) with fake launcher asserting
+  env; NO inspector GUI in e2e (gated manual check only).
+- DoD: Debug run opens Inspector, step-over works, cancel closes cleanly; `npm run verify` green.
+- Files owned: `src/main/runner.ts`, `ipc-contract.ts` (+1 optional field), `api.ts`,
+  `CaseDetailPage.tsx`, `tests/runner.test.ts` (+cases).
+
+### 18.5 M12 — Run-filter polish: keyword filter + last-failed shortcut (WS2+WS5, no contract change)
+- Problem: suite selection is checkbox-only; no `-g`-style keyword run, no one-click
+  "re-run what failed last time" (analogue of `--last-failed` / `.last-run.json`).
+- Scope:
+  - `SuiteDetailPage`: keyword filter input filters the case table by name (client-side, reuse
+    existing search box — do NOT add server-side grep); "Run filtered" runs visible checked cases.
+  - "Re-run last failed" button: reads latest finished `suiteRuns` row for the suite from DB
+    (existing `report:getHtml`-adjacent query, new handler ONLY if no read path exists —
+    prefer reuse), collects its `failed` `caseRuns`, starts new suite run with those ids;
+    empty → toast "no failed cases in last run" (reuse `NoFailedCasesError` message).
+- Tests: unit for filter helper + last-failed-id selector; e2e reuse existing rerunFailed leg
+  (no new e2e file).
+- DoD: filter "login" → only login cases run; failing run → Re-run-last-failed retries exactly
+  the failed set; `npm run verify` green.
+- Files owned: `SuiteDetailPage.tsx`, possibly `ipc-suites.ts` read helper, no contract change
+  preferred (document any added read channel in ledger if unavoidable).
+
+### 18.6 Non-goals (explicitly declined, do not pick up)
+- Full UI Mode (`--ui`), `--project` multi-browser (Firefox/WebKit), sharding, `show-report`
+  HTML-reporter: require `@playwright/test` runner; conflicts with direct-library resume (§8
+  ledger 2026-10-16 WS5). Post-MVP path only: per-project `browser` field + `postinstall` line.
+- Retries/sharding/timeout config UI, VS Code extension integration: out of scope for M8–M12.
+- No DB migration in any M8–M12 slice (all new options fit existing `action/selector/value/
+  timeoutMs` shape or additive IPC fields). If a slice needs a migration, stop and re-plan.
