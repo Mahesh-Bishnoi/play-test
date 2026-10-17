@@ -87,11 +87,23 @@ export interface RunContext {
   recordedVideoPath(): Promise<string | null>;
   /** Persist the trace to `path`; `null` discards it (pass / cancel). */
   saveTrace(path: string | null): Promise<void>;
+  /**
+   * Persist the trace collected so far to `path` and keep recording (M13).
+   * A supervised run calls this the moment it pauses on failure so the
+   * evidence survives an edit-and-resume.
+   */
+  saveTraceChunk(path: string): Promise<void>;
+  /** Open a named group in the trace, closed by `groupEnd` (M13). */
+  group(name: string): Promise<void>;
+  groupEnd(): Promise<void>;
 }
 
 export interface BrowserLauncher {
-  /** `videoDir` receives Playwright's raw recording (renamed on failure). */
-  launch(headless: boolean, videoDir: string): Promise<RunContext>;
+  /**
+   * `videoDir` receives Playwright's raw recording (renamed on failure);
+   * `title` is the trace's display name (the case name).
+   */
+  launch(headless: boolean, videoDir: string, title: string): Promise<RunContext>;
 }
 
 export type RunEventChannel = "run:step-update" | "run:log" | "run:finished";
@@ -304,6 +316,37 @@ export async function captureStepScreenshot(
       }
       await page.waitForTimeout(SCREENSHOT_RETRY_DELAY_MS);
     }
+  }
+}
+
+/**
+ * Trace-viewer step label (M13): `Step N · action — detail`, where detail is
+ * the selector, or the value (URL, key, text) for selector-less steps.
+ */
+export function stepTraceLabel(step: {
+  order: number;
+  action: string;
+  selector?: string;
+  value?: string;
+}): string {
+  const detail =
+    step.selector !== undefined && step.selector !== "" ? step.selector : (step.value ?? "");
+  return detail === ""
+    ? `Step ${step.order} · ${step.action}`
+    : `Step ${step.order} · ${step.action} — ${detail}`;
+}
+
+/** Run one step inside a named trace group; the group always closes (M13). */
+export async function runStepInTraceGroup(
+  context: RunContext,
+  label: string,
+  run: () => Promise<void>,
+): Promise<void> {
+  await context.group(label);
+  try {
+    await run();
+  } finally {
+    await context.groupEnd();
   }
 }
 
@@ -671,7 +714,11 @@ export class SingleCaseRunner {
     this.session = session;
     const done = (async (): Promise<void> => {
       try {
-        const context = await this.launchBrowser.launch(parsed.mode === "unsupervised", caseDir);
+        const context = await this.launchBrowser.launch(
+          parsed.mode === "unsupervised",
+          caseDir,
+          testCase.name,
+        );
         session.context = context;
         await this.executeFrom(session, steps, data, 0, startedAt);
       } catch (err) {
@@ -778,7 +825,9 @@ export class SingleCaseRunner {
         // Substitution inside the try: data may change while paused, so a
         // deleted key fails this step (and pauses again) instead of aborting.
         const value = substituteStepValue(step.value, data);
-        await executeStep(context.page, { ...step, value });
+        await runStepInTraceGroup(context, stepTraceLabel({ ...step, value }), () =>
+          executeStep(context.page, { ...step, value }),
+        );
         await this.captureScreenshot(context, screenshotPath);
         this.updateStepRun(caseRunId, step.id, "pass", null, screenshotPath, stepStarted);
         this.stepEvent(caseRunId, step.order, "pass");
@@ -792,6 +841,15 @@ export class SingleCaseRunner {
           session.busy = false;
           session.pausedSteps = steps;
           session.pausedFromIndex = index + 1;
+          // Persist the failure evidence now: an edit-and-resume must not lose
+          // the trace. Restarting the chunk keeps the resumed run traced too.
+          try {
+            await context.saveTraceChunk(
+              caseTracePath(this.artifactsRoot, session.projectId, suiteRunId, session.caseId),
+            );
+          } catch {
+            this.log("warn", "failed to save trace");
+          }
           this.log("warn", `paused at step ${step.order} — edit the step and resume, or re-run`);
           return;
         }
@@ -1854,6 +1912,19 @@ class PlaywrightRunContext implements RunContext {
       await this.context.tracing.stop({ path });
     }
   }
+
+  async saveTraceChunk(path: string): Promise<void> {
+    await this.context.tracing.stopChunk({ path });
+    await this.context.tracing.startChunk();
+  }
+
+  async group(name: string): Promise<void> {
+    await this.context.tracing.group(name);
+  }
+
+  async groupEnd(): Promise<void> {
+    await this.context.tracing.groupEnd();
+  }
 }
 
 /**
@@ -1876,11 +1947,11 @@ export function parseAssertMatcher(value: string): string | RegExp {
 /** Production launcher: Chromium only (MVP locked decision). */
 export function playwrightLauncher(): BrowserLauncher {
   return {
-    async launch(headless: boolean, videoDir: string): Promise<RunContext> {
+    async launch(headless: boolean, videoDir: string, title: string): Promise<RunContext> {
       const browser = await chromium.launch({ headless });
       try {
         const context = await browser.newContext({ recordVideo: { dir: videoDir } });
-        await context.tracing.start({ screenshots: true, snapshots: true });
+        await context.tracing.start({ screenshots: true, snapshots: true, title });
         const page = await context.newPage();
         return new PlaywrightRunContext(browser, context, page);
       } catch (err) {

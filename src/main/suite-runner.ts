@@ -41,6 +41,8 @@ import {
   executeStep,
   formatStepError,
   RunAlreadyActiveError,
+  runStepInTraceGroup,
+  stepTraceLabel,
   substituteStepValue,
 } from "./runner.js";
 
@@ -330,7 +332,7 @@ export class SuiteRunner {
     const caseDir = ensureCaseDir(this.artifactsRoot, testCase.projectId, suiteRunId, caseId);
     let context: RunContext;
     try {
-      context = await this.launchBrowser.launch(true, caseDir);
+      context = await this.launchBrowser.launch(true, caseDir, testCase.name);
     } catch (err) {
       for (const step of steps) {
         this.createStepRun(caseRunId, step.id, step.order, "skipped", null);
@@ -364,7 +366,9 @@ export class SuiteRunner {
       const stepStarted = this.now();
       try {
         const value = substituteStepValue(step.value, data);
-        await executeStep(context.page, { ...step, value });
+        await runStepInTraceGroup(context, stepTraceLabel({ ...step, value }), () =>
+          executeStep(context.page, { ...step, value }),
+        );
         await this.captureScreenshot(context, screenshotPath);
         this.updateStepRun(caseRunId, step.id, "pass", null, screenshotPath, stepStarted);
         this.stepEvent(caseRunId, step.order, "pass");

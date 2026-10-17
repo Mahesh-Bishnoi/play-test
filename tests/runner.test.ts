@@ -18,6 +18,7 @@ import {
   parseClickValue,
   parseSelectValue,
   parseStringList,
+  stepTraceLabel,
   substituteStepValue,
 } from "../src/main/runner.js";
 import { SuiteRunner } from "../src/main/suite-runner.js";
@@ -156,6 +157,9 @@ class FakeContext implements RunContext {
   page: FakePage = new FakePage();
   closed = false;
   tracePath: string | null = null;
+  traceChunkPaths: string[] = [];
+  traceGroups: string[] = [];
+  traceGroupEnds = 0;
   videoFile: string | null = null;
 
   async close(): Promise<void> {
@@ -167,19 +171,30 @@ class FakeContext implements RunContext {
   async saveTrace(path: string | null): Promise<void> {
     this.tracePath = path;
   }
+  async saveTraceChunk(path: string): Promise<void> {
+    this.traceChunkPaths.push(path);
+  }
+  async group(name: string): Promise<void> {
+    this.traceGroups.push(name);
+  }
+  async groupEnd(): Promise<void> {
+    this.traceGroupEnds += 1;
+  }
 }
 
 class FakeLauncher implements BrowserLauncher {
   headlessSeen: boolean[] = [];
+  titlesSeen: string[] = [];
   contexts: FakeContext[] = [];
   launchFail: string | null = null;
   videoContent = "fake-video";
 
-  async launch(headless: boolean, _videoDir: string): Promise<RunContext> {
+  async launch(headless: boolean, _videoDir: string, title = ""): Promise<RunContext> {
     if (this.launchFail !== null) {
       throw new Error(this.launchFail);
     }
     this.headlessSeen.push(headless);
+    this.titlesSeen.push(title);
     const context = new FakeContext();
     this.contexts.push(context);
     return context;
@@ -398,6 +413,23 @@ describe("executeStep mapping", () => {
     expect(formatStepError("plain string")).toBe("plain string");
     // Oversized messages are capped before they reach the DB.
     expect(formatStepError(new Error("x".repeat(9_000)))).toHaveLength(8_000);
+  });
+
+  it("labels a step for the trace viewer: Step N · action — detail", () => {
+    // Selector wins when present; value is the fallback for selector-less steps.
+    expect(stepTraceLabel({ order: 2, action: "click", selector: "#go", value: "right" })).toBe(
+      "Step 2 · click — #go",
+    );
+    expect(stepTraceLabel({ order: 0, action: "goto", value: "https://x.test" })).toBe(
+      "Step 0 · goto — https://x.test",
+    );
+    expect(stepTraceLabel({ order: 1, action: "press", value: "Enter" })).toBe(
+      "Step 1 · press — Enter",
+    );
+    // No detail at all omits the suffix.
+    expect(stepTraceLabel({ order: 3, action: "assert-visible", selector: "" })).toBe(
+      "Step 3 · assert-visible",
+    );
   });
 
   it("drives new assertion actions with the right page calls", async () => {
@@ -693,6 +725,38 @@ describe("supervised pause + resume (M5)", () => {
       .all()[0];
     expect(suiteRow?.status).toBe("passed");
     expect(finishedOf(fx).summary).toEqual({ total: 1, passed: 1, failed: 0, skipped: 0 });
+  });
+
+  it("saves a trace chunk at the supervised pause so evidence survives a resume", async () => {
+    const fx = track(failingFixture());
+    const originalLaunch = fx.launcher.launch.bind(fx.launcher);
+    fx.launcher.launch = async (headless, videoDir, title) => {
+      const context = (await originalLaunch(headless, videoDir, title)) as FakeContext;
+      context.page.failWhen = (method) => method === "fill";
+      context.page.failMessage = "selector unresolved";
+      return context;
+    };
+    const started = fx.runner.runSingle({ caseId: fx.caseId, mode: "supervised" });
+    await started.done;
+
+    // The trace is titled with the case name; each executed step is one group.
+    expect(fx.launcher.titlesSeen[0]).toBe("C");
+    const live = fx.launcher.contexts[0]!;
+    expect(live.traceChunkPaths).toHaveLength(1);
+    expect(live.traceChunkPaths[0]?.endsWith("trace.zip")).toBe(true);
+    expect(live.traceGroups).toEqual(["Step 0 · goto — https://x.test", "Step 1 · fill — #name"]);
+    expect(live.traceGroupEnds).toBe(2);
+    // Still paused: context open, nothing discarded yet.
+    expect(live.closed).toBe(false);
+    expect(live.tracePath).toBeNull();
+
+    // Resume to green: the resumed chunk is discarded, the failure chunk stays.
+    live.page.failWhen = null;
+    const resumed = fx.runner.resumeFromStep({ caseRunId: started.caseRunId, fromOrder: 1 });
+    await resumed.done;
+    expect(live.closed).toBe(true);
+    expect(live.tracePath).toBeNull();
+    expect(live.traceChunkPaths).toHaveLength(1);
   });
 
   it("resume without a live session demands a full re-run", async () => {

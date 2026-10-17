@@ -10,7 +10,7 @@
 
 | Milestone | Status | Notes |
 | --- | --- | --- |
-| M13 — Playwright `expect` assertions + diagnostics | in progress | items 1–4 done; next item 5 |
+| M13 — Playwright `expect` assertions + diagnostics | in progress | items 1–5 done; next item 6 |
 | M14 — Case profiles: recorded environment applied at run time | not started | after M13 |
 | M15 — Recorder & locator coverage + new actions | not started | after M14 |
 | M16 — Runtime parity: popups and downloads | not started | after M15 |
@@ -29,7 +29,7 @@ against the current implementation.
 
 ## M13 — Playwright `expect` assertions + diagnostics
 
-Status: in progress · Next: item 5 (trace titles + per-step groups)
+Status: in progress · Next: item 6 (video `saveAs`/`delete`)
 
 Goal: every `assert-*` step runs through Playwright web-first matchers; errors keep
 Playwright's full detail; failure evidence survives a supervised resume.
@@ -65,7 +65,7 @@ Playwright's full detail; failure evidence survives a supervised resume.
       timeout: 10_000 })`; up to 2 retries 250 ms apart (was one 1 s retry), warn after the
       last failure. Retry loop extracted to the exported `captureStepScreenshot(page, path,
       onWarn)` in `runner.ts`, shared by both runners (kept them in sync).
-- [ ] **5.** Trace — start with `title: <case name>`; wrap each step in
+- [x] **5.** Trace — start with `title: <case name>`; wrap each step in
       `context.tracing.group('Step N · action — detail')` / `groupEnd()`. A failure while
       paused (supervised) calls `stopChunk({ path: <caseDir>/trace.zip })` immediately, then
       `startChunk()` so a resume keeps tracing; resume-pass/cancel calls `stop()` without a

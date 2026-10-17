@@ -131,6 +131,9 @@ class FakeContext implements RunContext {
   page: FakePage = new FakePage();
   closed = false;
   tracePath: string | null = null;
+  traceChunkPaths: string[] = [];
+  traceGroups: string[] = [];
+  traceGroupEnds = 0;
   videoFile: string | null = null;
 
   async close(): Promise<void> {
@@ -142,17 +145,27 @@ class FakeContext implements RunContext {
   async saveTrace(path: string | null): Promise<void> {
     this.tracePath = path;
   }
+  async saveTraceChunk(path: string): Promise<void> {
+    this.traceChunkPaths.push(path);
+  }
+  async group(name: string): Promise<void> {
+    this.traceGroups.push(name);
+  }
+  async groupEnd(): Promise<void> {
+    this.traceGroupEnds += 1;
+  }
 }
 
 class FakeLauncher implements BrowserLauncher {
   contexts: FakeContext[] = [];
+  titlesSeen: string[] = [];
   launchFail: string | null = null;
   /** Applied to the first launched context only (deterministic gating). */
   gateFirst: Promise<void> | null = null;
   failClicks = false;
   private primed = 0;
 
-  async launch(_headless: boolean, videoDir: string): Promise<RunContext> {
+  async launch(_headless: boolean, videoDir: string, title = ""): Promise<RunContext> {
     if (this.launchFail !== null) {
       throw new Error(this.launchFail);
     }
@@ -162,6 +175,7 @@ class FakeLauncher implements BrowserLauncher {
     }
     context.page.failClicks = this.failClicks;
     this.contexts.push(context);
+    this.titlesSeen.push(title);
     void videoDir;
     return context;
   }
