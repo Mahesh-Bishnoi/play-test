@@ -12,6 +12,8 @@ import {
   SingleCaseRunner,
   StepExecutionError,
   executeStep,
+  parseClickValue,
+  parseSelectValue,
   substituteStepValue,
 } from "../src/main/runner.js";
 import { SuiteRunner } from "../src/main/suite-runner.js";
@@ -31,7 +33,7 @@ import { MissingTestDataKeyError } from "../src/shared/step-types.js";
 
 interface RecordedCall {
   method: string;
-  args: (string | number | undefined)[];
+  args: unknown[];
 }
 
 class FakePage implements RunPage {
@@ -42,8 +44,8 @@ class FakePage implements RunPage {
   gate: Promise<void> | null = null;
   private gated = false;
 
-  private async enter(method: string, args: (string | number | undefined)[]): Promise<void> {
-    this.calls.push({ method, args });
+  private async enter(method: string, args: unknown[]): Promise<void> {
+    this.calls.push({ method, args: args as (string | number | undefined)[] });
     if (this.gate !== null && !this.gated) {
       this.gated = true;
       await this.gate;
@@ -56,8 +58,8 @@ class FakePage implements RunPage {
   async goto(url: string, timeoutMs?: number): Promise<void> {
     await this.enter("goto", [url, timeoutMs]);
   }
-  async click(selector: string, timeoutMs?: number): Promise<void> {
-    await this.enter("click", [selector, timeoutMs]);
+  async click(selector: string, timeoutMs?: number, options?: unknown): Promise<void> {
+    await this.enter("click", [selector, timeoutMs, options]);
   }
   async dblclick(selector: string, timeoutMs?: number): Promise<void> {
     await this.enter("dblclick", [selector, timeoutMs]);
@@ -65,11 +67,27 @@ class FakePage implements RunPage {
   async fill(selector: string, value: string, timeoutMs?: number): Promise<void> {
     await this.enter("fill", [selector, value, timeoutMs]);
   }
-  async selectOption(selector: string, value: string, timeoutMs?: number): Promise<void> {
+  async type(selector: string, value: string, timeoutMs?: number): Promise<void> {
+    await this.enter("type", [selector, value, timeoutMs]);
+  }
+  async selectOption(
+    selector: string,
+    value: string | string[],
+    timeoutMs?: number,
+  ): Promise<void> {
     await this.enter("selectOption", [selector, value, timeoutMs]);
   }
   async check(selector: string, timeoutMs?: number): Promise<void> {
     await this.enter("check", [selector, timeoutMs]);
+  }
+  async uncheck(selector: string, timeoutMs?: number): Promise<void> {
+    await this.enter("uncheck", [selector, timeoutMs]);
+  }
+  async hover(selector: string, timeoutMs?: number): Promise<void> {
+    await this.enter("hover", [selector, timeoutMs]);
+  }
+  async focus(selector: string, timeoutMs?: number): Promise<void> {
+    await this.enter("focus", [selector, timeoutMs]);
   }
   async press(selector: string | undefined, key: string, timeoutMs?: number): Promise<void> {
     await this.enter("press", [selector, key, timeoutMs]);
@@ -77,8 +95,41 @@ class FakePage implements RunPage {
   async assertVisible(selector: string, timeoutMs?: number): Promise<void> {
     await this.enter("assertVisible", [selector, timeoutMs]);
   }
+  async assertHidden(selector: string, timeoutMs?: number): Promise<void> {
+    await this.enter("assertHidden", [selector, timeoutMs]);
+  }
   async assertText(selector: string, value: string, timeoutMs?: number): Promise<void> {
     await this.enter("assertText", [selector, value, timeoutMs]);
+  }
+  async assertValue(selector: string, value: string, timeoutMs?: number): Promise<void> {
+    await this.enter("assertValue", [selector, value, timeoutMs]);
+  }
+  async assertChecked(selector: string, timeoutMs?: number): Promise<void> {
+    await this.enter("assertChecked", [selector, timeoutMs]);
+  }
+  async assertUnchecked(selector: string, timeoutMs?: number): Promise<void> {
+    await this.enter("assertUnchecked", [selector, timeoutMs]);
+  }
+  async assertEnabled(selector: string, timeoutMs?: number): Promise<void> {
+    await this.enter("assertEnabled", [selector, timeoutMs]);
+  }
+  async assertDisabled(selector: string, timeoutMs?: number): Promise<void> {
+    await this.enter("assertDisabled", [selector, timeoutMs]);
+  }
+  async assertEditable(selector: string, timeoutMs?: number): Promise<void> {
+    await this.enter("assertEditable", [selector, timeoutMs]);
+  }
+  async assertFocused(selector: string, timeoutMs?: number): Promise<void> {
+    await this.enter("assertFocused", [selector, timeoutMs]);
+  }
+  async assertCount(selector: string, expected: number, timeoutMs?: number): Promise<void> {
+    await this.enter("assertCount", [selector, expected, timeoutMs]);
+  }
+  async assertUrl(value: string, timeoutMs?: number): Promise<void> {
+    await this.enter("assertUrl", [value, timeoutMs]);
+  }
+  async assertTitle(value: string, timeoutMs?: number): Promise<void> {
+    await this.enter("assertTitle", [value, timeoutMs]);
   }
   async waitForTimeout(ms: number): Promise<void> {
     await this.enter("waitForTimeout", [ms, undefined]);
@@ -242,6 +293,99 @@ describe("executeStep mapping", () => {
     await executeStep(page, { order: 1, action: "press", value: "Enter" });
     expect(page.calls.map((c) => c.method)).toEqual(["dblclick", "press"]);
     expect(page.calls[1]).toMatchObject({ args: [undefined, "Enter", undefined] });
+  });
+
+  it("drives new input actions with the right page calls", async () => {
+    const page = new FakePage();
+    await executeStep(page, { order: 0, action: "dblclick", selector: "#b" });
+    await executeStep(page, { order: 1, action: "uncheck", selector: "#c" });
+    await executeStep(page, { order: 2, action: "hover", selector: "#h" });
+    await executeStep(page, { order: 3, action: "focus", selector: "#f" });
+    await executeStep(page, { order: 4, action: "type", selector: "#t", value: "hi" });
+    await executeStep(page, {
+      order: 5,
+      action: "select",
+      selector: "#s",
+      value: '["a", "b"]',
+    });
+    expect(page.calls.map((c) => c.method)).toEqual([
+      "dblclick",
+      "uncheck",
+      "hover",
+      "focus",
+      "type",
+      "selectOption",
+    ]);
+    expect(page.calls[4]).toMatchObject({ args: ["#t", "hi", undefined] });
+    expect(page.calls[5]).toMatchObject({ args: ["#s", ["a", "b"], undefined] });
+  });
+
+  it("encodes click variants in value without schema changes", async () => {
+    const page = new FakePage();
+    await executeStep(page, { order: 0, action: "click", selector: "#r", value: "right" });
+    await executeStep(page, { order: 1, action: "click", selector: "#f", value: "force" });
+    await executeStep(page, { order: 2, action: "click", selector: "#m", value: "shift-click" });
+    expect(page.calls.map((c) => c.method)).toEqual(["click", "click", "click"]);
+    expect(page.calls[0]?.args[2]).toMatchObject({ button: "right" });
+    expect(page.calls[1]?.args[2]).toMatchObject({ force: true });
+    expect(page.calls[2]?.args[2]).toMatchObject({ modifiers: ["Shift"] });
+  });
+
+  it("parses click values and select values", () => {
+    expect(parseClickValue(undefined)).toEqual({ double: false, options: {} });
+    expect(parseClickValue("dblclick").double).toBe(true);
+    expect(parseClickValue("right").options).toMatchObject({ button: "right" });
+    expect(parseClickValue('{"button":"right"}')).toEqual({
+      double: false,
+      options: { button: "right" },
+    });
+    expect(parseSelectValue('["a", "b"]')).toEqual(["a", "b"]);
+    expect(parseSelectValue("2025-26")).toBe("2025-26");
+  });
+
+  it("drives new assertion actions with the right page calls", async () => {
+    const page = new FakePage();
+    await executeStep(page, { order: 0, action: "assert-hidden", selector: "#h" });
+    await executeStep(page, { order: 1, action: "assert-enabled", selector: "#e" });
+    await executeStep(page, { order: 2, action: "assert-disabled", selector: "#d" });
+    await executeStep(page, { order: 3, action: "assert-editable", selector: "#ed" });
+    await executeStep(page, { order: 4, action: "assert-focused", selector: "#f" });
+    await executeStep(page, { order: 5, action: "assert-checked", selector: "#c" });
+    await executeStep(page, { order: 6, action: "assert-unchecked", selector: "#u" });
+    await executeStep(page, { order: 7, action: "assert-value", selector: "#v", value: "x" });
+    await executeStep(page, { order: 8, action: "assert-count", selector: ".row", value: "3" });
+    await executeStep(page, { order: 9, action: "assert-url", value: "/dashboard" });
+    await executeStep(page, { order: 10, action: "assert-title", value: "Dashboard" });
+    expect(page.calls.map((c) => c.method)).toEqual([
+      "assertHidden",
+      "assertEnabled",
+      "assertDisabled",
+      "assertEditable",
+      "assertFocused",
+      "assertChecked",
+      "assertUnchecked",
+      "assertValue",
+      "assertCount",
+      "assertUrl",
+      "assertTitle",
+    ]);
+    expect(page.calls[7]).toMatchObject({ args: ["#v", "x", undefined] });
+    expect(page.calls[8]).toMatchObject({ args: [".row", 3, undefined] });
+  });
+
+  it("rejects new actions with missing fields and bad counts", async () => {
+    const page = new FakePage();
+    await expect(executeStep(page, { order: 0, action: "uncheck" })).rejects.toThrow(/selector/);
+    await expect(executeStep(page, { order: 1, action: "type", selector: "#t" })).rejects.toThrow(
+      /value/,
+    );
+    await expect(
+      executeStep(page, { order: 2, action: "assert-value", selector: "#v" }),
+    ).rejects.toThrow(/value/);
+    await expect(
+      executeStep(page, { order: 3, action: "assert-count", selector: ".r", value: "many" }),
+    ).rejects.toThrow(/count/);
+    await expect(executeStep(page, { order: 4, action: "assert-url" })).rejects.toThrow(/URL/);
   });
 
   it("rejects missing required fields with actionable errors", async () => {

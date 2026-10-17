@@ -52,11 +52,23 @@ class FakePage implements RunPage {
   async fill(): Promise<void> {
     await this.enter("fill");
   }
+  async type(): Promise<void> {
+    await this.enter("type");
+  }
   async selectOption(): Promise<void> {
     await this.enter("selectOption");
   }
   async check(): Promise<void> {
     await this.enter("check");
+  }
+  async uncheck(): Promise<void> {
+    await this.enter("uncheck");
+  }
+  async hover(): Promise<void> {
+    await this.enter("hover");
+  }
+  async focus(): Promise<void> {
+    await this.enter("focus");
   }
   async press(): Promise<void> {
     await this.enter("press");
@@ -64,8 +76,41 @@ class FakePage implements RunPage {
   async assertVisible(): Promise<void> {
     await this.enter("assertVisible");
   }
+  async assertHidden(): Promise<void> {
+    await this.enter("assertHidden");
+  }
   async assertText(): Promise<void> {
     await this.enter("assertText");
+  }
+  async assertValue(): Promise<void> {
+    await this.enter("assertValue");
+  }
+  async assertChecked(): Promise<void> {
+    await this.enter("assertChecked");
+  }
+  async assertUnchecked(): Promise<void> {
+    await this.enter("assertUnchecked");
+  }
+  async assertEnabled(): Promise<void> {
+    await this.enter("assertEnabled");
+  }
+  async assertDisabled(): Promise<void> {
+    await this.enter("assertDisabled");
+  }
+  async assertEditable(): Promise<void> {
+    await this.enter("assertEditable");
+  }
+  async assertFocused(): Promise<void> {
+    await this.enter("assertFocused");
+  }
+  async assertCount(): Promise<void> {
+    await this.enter("assertCount");
+  }
+  async assertUrl(): Promise<void> {
+    await this.enter("assertUrl");
+  }
+  async assertTitle(): Promise<void> {
+    await this.enter("assertTitle");
   }
   async waitForTimeout(): Promise<void> {
     await this.enter("waitForTimeout");

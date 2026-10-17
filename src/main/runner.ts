@@ -41,16 +41,41 @@ import { caseRuns, stepRuns, suiteRuns } from "./schema.js";
  * Playwright `Page`; tests inject a recording fake. Timeouts pass straight
  * through — `undefined` means the Playwright default.
  */
+export interface ClickStepOptions {
+  button?: "left" | "right" | "middle";
+  modifiers?: Array<"Alt" | "Control" | "ControlOrMeta" | "Meta" | "Shift">;
+  force?: boolean;
+}
+
 export interface RunPage {
   goto(url: string, timeoutMs?: number): Promise<void>;
-  click(selector: string, timeoutMs?: number): Promise<void>;
+  click(selector: string, timeoutMs?: number, options?: ClickStepOptions): Promise<void>;
   dblclick(selector: string, timeoutMs?: number): Promise<void>;
   fill(selector: string, value: string, timeoutMs?: number): Promise<void>;
-  selectOption(selector: string, value: string, timeoutMs?: number): Promise<void>;
+  type(selector: string, value: string, timeoutMs?: number): Promise<void>;
+  selectOption(
+    selector: string,
+    value: string | string[],
+    timeoutMs?: number,
+  ): Promise<void>;
   check(selector: string, timeoutMs?: number): Promise<void>;
+  uncheck(selector: string, timeoutMs?: number): Promise<void>;
+  hover(selector: string, timeoutMs?: number): Promise<void>;
+  focus(selector: string, timeoutMs?: number): Promise<void>;
   press(selector: string | undefined, key: string, timeoutMs?: number): Promise<void>;
   assertVisible(selector: string, timeoutMs?: number): Promise<void>;
+  assertHidden(selector: string, timeoutMs?: number): Promise<void>;
   assertText(selector: string, value: string, timeoutMs?: number): Promise<void>;
+  assertValue(selector: string, value: string, timeoutMs?: number): Promise<void>;
+  assertChecked(selector: string, timeoutMs?: number): Promise<void>;
+  assertUnchecked(selector: string, timeoutMs?: number): Promise<void>;
+  assertEnabled(selector: string, timeoutMs?: number): Promise<void>;
+  assertDisabled(selector: string, timeoutMs?: number): Promise<void>;
+  assertEditable(selector: string, timeoutMs?: number): Promise<void>;
+  assertFocused(selector: string, timeoutMs?: number): Promise<void>;
+  assertCount(selector: string, expected: number, timeoutMs?: number): Promise<void>;
+  assertUrl(value: string, timeoutMs?: number): Promise<void>;
+  assertTitle(value: string, timeoutMs?: number): Promise<void>;
   waitForTimeout(ms: number): Promise<void>;
   screenshot(path: string): Promise<void>;
 }
@@ -130,6 +155,99 @@ export function substituteStepValue(
 }
 
 /**
+ * Click `value` encoding (no schema change): empty = plain left-click,
+ * legacy `"dblclick"` = double-click, `"right"` / `"middle"` = button,
+ * `"shift"` / `"ctrl"` / `"alt"` / `"meta"` (+ `-click` / `+`-joined forms) =
+ * modifiers, `"force"` = force click, or a JSON object like
+ * `{"button":"right","modifiers":["Shift"],"force":true}`.
+ */
+export function parseClickValue(value: string | undefined): {
+  double: boolean;
+  options: ClickStepOptions;
+} {
+  const options: ClickStepOptions = {};
+  if (value === undefined || value.trim() === "") {
+    return { double: false, options };
+  }
+  const trimmed = value.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      if (parsed["double"] === true || parsed["clickCount"] === 2) {
+        return { double: true, options: {} };
+      }
+      const out: ClickStepOptions = {};
+      if (parsed["button"] === "right" || parsed["button"] === "middle") {
+        out.button = parsed["button"];
+      }
+      if (Array.isArray(parsed["modifiers"])) {
+        const mods = (parsed["modifiers"] as unknown[]).filter(
+          (m): m is NonNullable<ClickStepOptions["modifiers"]>[number] =>
+            m === "Alt" || m === "Control" || m === "ControlOrMeta" || m === "Meta" || m === "Shift",
+        );
+        if (mods.length > 0) {
+          out.modifiers = mods;
+        }
+      }
+      if (parsed["force"] === true) {
+        out.force = true;
+      }
+      return { double: false, options: out };
+    } catch {
+      return { double: false, options };
+    }
+  }
+  const tokens = trimmed.toLowerCase().split(/[\s+,]+/).flatMap((t) => t.split("-"));
+  let double = false;
+  const modifiers = new Set<NonNullable<ClickStepOptions["modifiers"]>[number]>();
+  for (const token of tokens) {
+    if (token === "" || token === "click") {
+      continue;
+    }
+    if (token === "dblclick" || token === "double") {
+      double = true;
+    } else if (token === "right") {
+      options.button = "right";
+    } else if (token === "middle") {
+      options.button = "middle";
+    } else if (token === "shift") {
+      modifiers.add("Shift");
+    } else if (token === "ctrl" || token === "control") {
+      modifiers.add("Control");
+    } else if (token === "alt") {
+      modifiers.add("Alt");
+    } else if (token === "meta" || token === "mod" || token === "cmd") {
+      modifiers.add("Meta");
+    } else if (token === "force") {
+      options.force = true;
+    }
+  }
+  if (modifiers.size > 0) {
+    options.modifiers = [...modifiers];
+  }
+  return { double, options };
+}
+
+/**
+ * Select `value` encoding (no schema change): a JSON array selects multiple
+ * options (`["a", "b"]`), anything else selects the single named value/label.
+ */
+export function parseSelectValue(value: string): string | string[] {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (Array.isArray(parsed) && parsed.every((v) => typeof v === "string")) {
+        return parsed as string[];
+      }
+    } catch {
+      // Not JSON — fall through to single-value select.
+    }
+  }
+  return value;
+}
+
+/**
  * Execute one substituted step against the page. Throws StepExecutionError
  * for missing required fields so the failure message tells the user exactly
  * what to fix in the step editor.
@@ -158,11 +276,19 @@ export async function executeStep(
       if (step.selector === undefined || step.selector === "") {
         throw new StepExecutionError(`${label} needs a selector`);
       }
-      if (step.value === "dblclick") {
+      const { double, options } = parseClickValue(step.value);
+      if (double) {
         await page.dblclick(step.selector, timeoutMs);
       } else {
-        await page.click(step.selector, timeoutMs);
+        await page.click(step.selector, timeoutMs, options);
       }
+      return;
+    }
+    case "dblclick": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      await page.dblclick(step.selector, timeoutMs);
       return;
     }
     case "fill": {
@@ -182,7 +308,17 @@ export async function executeStep(
       if (step.value === undefined) {
         throw new StepExecutionError(`${label} needs a value`);
       }
-      await page.selectOption(step.selector, step.value, timeoutMs);
+      await page.selectOption(step.selector, parseSelectValue(step.value), timeoutMs);
+      return;
+    }
+    case "type": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      if (step.value === undefined) {
+        throw new StepExecutionError(`${label} needs a value`);
+      }
+      await page.type(step.selector, step.value, timeoutMs);
       return;
     }
     case "check": {
@@ -190,6 +326,27 @@ export async function executeStep(
         throw new StepExecutionError(`${label} needs a selector`);
       }
       await page.check(step.selector, timeoutMs);
+      return;
+    }
+    case "uncheck": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      await page.uncheck(step.selector, timeoutMs);
+      return;
+    }
+    case "hover": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      await page.hover(step.selector, timeoutMs);
+      return;
+    }
+    case "focus": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      await page.focus(step.selector, timeoutMs);
       return;
     }
     case "press": {
@@ -204,6 +361,89 @@ export async function executeStep(
         throw new StepExecutionError(`${label} needs a selector`);
       }
       await page.assertVisible(step.selector, timeoutMs);
+      return;
+    }
+    case "assert-hidden": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      await page.assertHidden(step.selector, timeoutMs);
+      return;
+    }
+    case "assert-enabled": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      await page.assertEnabled(step.selector, timeoutMs);
+      return;
+    }
+    case "assert-disabled": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      await page.assertDisabled(step.selector, timeoutMs);
+      return;
+    }
+    case "assert-editable": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      await page.assertEditable(step.selector, timeoutMs);
+      return;
+    }
+    case "assert-focused": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      await page.assertFocused(step.selector, timeoutMs);
+      return;
+    }
+    case "assert-checked": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      await page.assertChecked(step.selector, timeoutMs);
+      return;
+    }
+    case "assert-unchecked": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      await page.assertUnchecked(step.selector, timeoutMs);
+      return;
+    }
+    case "assert-value": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      if (step.value === undefined) {
+        throw new StepExecutionError(`${label} needs expected value in value`);
+      }
+      await page.assertValue(step.selector, step.value, timeoutMs);
+      return;
+    }
+    case "assert-count": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      if (step.value === undefined || !/^\d+$/.test(step.value.trim())) {
+        throw new StepExecutionError(`${label} needs an expected count in value`);
+      }
+      await page.assertCount(step.selector, Number.parseInt(step.value.trim(), 10), timeoutMs);
+      return;
+    }
+    case "assert-url": {
+      if (step.value === undefined || step.value === "") {
+        throw new StepExecutionError(`${label} needs expected URL text in value`);
+      }
+      await page.assertUrl(step.value, timeoutMs);
+      return;
+    }
+    case "assert-title": {
+      if (step.value === undefined || step.value === "") {
+        throw new StepExecutionError(`${label} needs expected title text in value`);
+      }
+      await page.assertTitle(step.value, timeoutMs);
       return;
     }
     case "assert-text": {
@@ -1496,8 +1736,8 @@ class PlaywrightRunPage implements RunPage {
     await this.page.goto(url, { timeout: timeoutMs });
   }
 
-  async click(selector: string, timeoutMs?: number): Promise<void> {
-    await this.loc(selector).click({ timeout: timeoutMs });
+  async click(selector: string, timeoutMs?: number, options?: ClickStepOptions): Promise<void> {
+    await this.loc(selector).click({ timeout: timeoutMs, ...options });
   }
 
   async dblclick(selector: string, timeoutMs?: number): Promise<void> {
@@ -1508,12 +1748,32 @@ class PlaywrightRunPage implements RunPage {
     await this.loc(selector).fill(value, { timeout: timeoutMs });
   }
 
-  async selectOption(selector: string, value: string, timeoutMs?: number): Promise<void> {
+  async type(selector: string, value: string, timeoutMs?: number): Promise<void> {
+    await this.loc(selector).pressSequentially(value, { timeout: timeoutMs });
+  }
+
+  async selectOption(
+    selector: string,
+    value: string | string[],
+    timeoutMs?: number,
+  ): Promise<void> {
     await this.loc(selector).selectOption(value, { timeout: timeoutMs });
   }
 
   async check(selector: string, timeoutMs?: number): Promise<void> {
     await this.loc(selector).check({ timeout: timeoutMs });
+  }
+
+  async uncheck(selector: string, timeoutMs?: number): Promise<void> {
+    await this.loc(selector).uncheck({ timeout: timeoutMs });
+  }
+
+  async hover(selector: string, timeoutMs?: number): Promise<void> {
+    await this.loc(selector).hover({ timeout: timeoutMs });
+  }
+
+  async focus(selector: string, timeoutMs?: number): Promise<void> {
+    await this.loc(selector).focus({ timeout: timeoutMs });
   }
 
   async press(selector: string | undefined, key: string, timeoutMs?: number): Promise<void> {
@@ -1529,6 +1789,138 @@ class PlaywrightRunPage implements RunPage {
       await this.loc(selector).first().waitFor({ state: "visible", timeout: timeoutMs });
     } catch (err) {
       throw new Error(`expected visible: ${selector} (${asMessage(err)})`);
+    }
+  }
+
+  async assertHidden(selector: string, timeoutMs?: number): Promise<void> {
+    try {
+      await this.loc(selector).first().waitFor({ state: "hidden", timeout: timeoutMs });
+    } catch (err) {
+      throw new Error(`expected hidden: ${selector} (${asMessage(err)})`);
+    }
+  }
+
+  async assertEnabled(selector: string, timeoutMs?: number): Promise<void> {
+    try {
+      await this.pollState(selector, (l) => l.isEnabled(), timeoutMs);
+    } catch (err) {
+      throw new Error(`expected enabled: ${selector} (${asMessage(err)})`);
+    }
+  }
+
+  async assertDisabled(selector: string, timeoutMs?: number): Promise<void> {
+    try {
+      await this.pollState(selector, (l) => l.isDisabled(), timeoutMs);
+    } catch (err) {
+      throw new Error(`expected disabled: ${selector} (${asMessage(err)})`);
+    }
+  }
+
+  async assertEditable(selector: string, timeoutMs?: number): Promise<void> {
+    try {
+      await this.pollState(selector, (l) => l.isEditable(), timeoutMs);
+    } catch (err) {
+      throw new Error(`expected editable: ${selector} (${asMessage(err)})`);
+    }
+  }
+
+  async assertFocused(selector: string, timeoutMs?: number): Promise<void> {
+    try {
+      await this.pollState(
+        selector,
+        async (l) => (await l.evaluate((el) => el === document.activeElement).catch(() => false)) as boolean,
+        timeoutMs,
+      );
+    } catch (err) {
+      throw new Error(`expected focused: ${selector} (${asMessage(err)})`);
+    }
+  }
+
+  async assertChecked(selector: string, timeoutMs?: number): Promise<void> {
+    try {
+      await this.pollState(selector, (l) => l.isChecked(), timeoutMs);
+    } catch (err) {
+      throw new Error(`expected checked: ${selector} (${asMessage(err)})`);
+    }
+  }
+
+  async assertUnchecked(selector: string, timeoutMs?: number): Promise<void> {
+    try {
+      await this.pollState(selector, async (l) => !(await l.isChecked()), timeoutMs);
+    } catch (err) {
+      throw new Error(`expected unchecked: ${selector} (${asMessage(err)})`);
+    }
+  }
+
+  async assertValue(selector: string, value: string, timeoutMs?: number): Promise<void> {
+    try {
+      await this.pollState(selector, async (l) => (await l.inputValue()) === value, timeoutMs);
+    } catch (err) {
+      throw new Error(`expected value "${value}" in: ${selector} (${asMessage(err)})`);
+    }
+  }
+
+  async assertCount(selector: string, expected: number, timeoutMs?: number): Promise<void> {
+    try {
+      await this.pollState(
+        selector,
+        async (l) => (await l.count()) === expected,
+        timeoutMs,
+        false,
+      );
+    } catch (err) {
+      throw new Error(`expected count ${expected}: ${selector} (${asMessage(err)})`);
+    }
+  }
+
+  async assertUrl(value: string, timeoutMs?: number): Promise<void> {
+    const deadline = Date.now() + (timeoutMs ?? 5000);
+    for (;;) {
+      if (matchesText(this.page.url(), value)) {
+        return;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`expected URL containing "${value}", got: ${this.page.url()}`);
+      }
+      await this.page.waitForTimeout(100);
+    }
+  }
+
+  async assertTitle(value: string, timeoutMs?: number): Promise<void> {
+    const deadline = Date.now() + (timeoutMs ?? 5000);
+    for (;;) {
+      if (matchesText(await this.page.title(), value)) {
+        return;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`expected title containing "${value}", got: ${await this.page.title()}`);
+      }
+      await this.page.waitForTimeout(100);
+    }
+  }
+
+  /** Poll a boolean locator state until true or the timeout elapses. */
+  private async pollState(
+    selector: string,
+    check: (loc: Locator) => Promise<boolean>,
+    timeoutMs?: number,
+    first = true,
+  ): Promise<void> {
+    const deadline = Date.now() + (timeoutMs ?? 5000);
+    const root = this.loc(selector);
+    const loc = first ? root.first() : root;
+    for (;;) {
+      try {
+        if (await check(loc)) {
+          return;
+        }
+      } catch {
+        // Element may not exist yet — keep polling until the deadline.
+      }
+      if (Date.now() >= deadline) {
+        throw new Error("timed out waiting for expected state");
+      }
+      await this.page.waitForTimeout(100);
     }
   }
 
@@ -1588,6 +1980,19 @@ class PlaywrightRunContext implements RunContext {
 
 function asMessage(err: unknown): string {
   return err instanceof Error ? (err.message.split("\n")[0] ?? err.message) : String(err);
+}
+
+/** Substring match, or `/pattern/flags` regex when the value looks like one. */
+function matchesText(actual: string, expected: string): boolean {
+  if (expected.length >= 2 && expected.startsWith("/") && expected.lastIndexOf("/") > 0) {
+    const lastSlash = expected.lastIndexOf("/");
+    try {
+      return new RegExp(expected.slice(1, lastSlash), expected.slice(lastSlash + 1)).test(actual);
+    } catch {
+      return actual.includes(expected);
+    }
+  }
+  return actual.includes(expected);
 }
 
 /** Production launcher: Chromium only (MVP locked decision). */

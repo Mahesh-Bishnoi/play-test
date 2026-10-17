@@ -79,6 +79,33 @@ function terminalStringArg(stmt: string, terminal: string): string | undefined {
 }
 
 /**
+ * Select value: a JSON array for multi-select (`["a", "b"]`), else the first
+ * quoted string (single value/label).
+ */
+function terminalSelectValue(stmt: string): string | undefined {
+  const marker = ".selectOption(";
+  const idx = stmt.lastIndexOf(marker);
+  if (idx === -1) {
+    return undefined;
+  }
+  const rest = stmt.slice(idx + marker.length).trim();
+  if (rest.startsWith("[")) {
+    const end = rest.indexOf("]");
+    if (end !== -1) {
+      try {
+        const parsed: unknown = JSON.parse(rest.slice(0, end + 1));
+        if (Array.isArray(parsed) && parsed.every((v) => typeof v === "string")) {
+          return JSON.stringify(parsed);
+        }
+      } catch {
+        // Fall through to single-string extraction.
+      }
+    }
+  }
+  return terminalStringArg(stmt, "selectOption");
+}
+
+/**
  * Playwright locator source for `page.<chain>.<terminal>(...)`, e.g.
  * `page.getByRole('button').click()` → `getByRole('button')`,
  * `page.locator('#id').fill('x')` → `locator('#id')`.
@@ -128,18 +155,24 @@ function parseLine(line: string): Omit<TestStep, "order"> | null {
       value: terminalStringArg(stmt, "fill"),
     };
   }
-  // Dropdown: locator.selectOption('…')
+  // Dropdown: locator.selectOption('…') / selectOption(['a', 'b'])
   if (/\.selectOption\(/.test(stmt)) {
     return {
       action: "select",
       selector: locatorSource(stmt, "selectOption"),
-      value: terminalStringArg(stmt, "selectOption"),
+      value: terminalSelectValue(stmt),
     };
   }
-  // Checkbox: locator.check() / locator.uncheck() (both → check; no unchecked state in §4)
-  if (/\.check\(/.test(stmt) || /\.uncheck\(/.test(stmt)) {
-    const terminal = /\.check\(/.test(stmt) ? "check" : "uncheck";
-    return { action: "check", selector: locatorSource(stmt, terminal) };
+  // Checkbox: locator.check() → check, locator.uncheck()/setChecked(false) → uncheck
+  if (/\.check\(/.test(stmt) || /\.uncheck\(/.test(stmt) || /\.setChecked\(/.test(stmt)) {
+    const terminal = /\.check\(/.test(stmt) ? "check" : /\.uncheck\(/.test(stmt) ? "uncheck" : "setChecked";
+    const selector = locatorSource(stmt, terminal);
+    if (/\.setChecked\(/.test(stmt)) {
+      return /setChecked\(\s*false/.test(stmt)
+        ? { action: "uncheck", selector }
+        : { action: "check", selector };
+    }
+    return terminal === "check" ? { action: "check", selector } : { action: "uncheck", selector };
   }
   // Keyboard: locator.press('Enter') / page.keyboard.press('Enter')
   if (/\.press\(/.test(stmt)) {
@@ -149,9 +182,32 @@ function parseLine(line: string): Omit<TestStep, "order"> | null {
       value: terminalStringArg(stmt, "press"),
     };
   }
-  // Click: locator.click()
+  // Char-by-char typing: locator.pressSequentially('…') / locator.type('…')
+  if (/\.pressSequentially\(/.test(stmt) || /\.type\(/.test(stmt)) {
+    const terminal = /\.pressSequentially\(/.test(stmt) ? "pressSequentially" : "type";
+    return {
+      action: "type",
+      selector: locatorSource(stmt, terminal),
+      value: terminalStringArg(stmt, terminal),
+    };
+  }
+  // Hover / focus
+  if (/\.hover\(/.test(stmt)) {
+    return { action: "hover", selector: locatorSource(stmt, "hover") };
+  }
+  if (/\.focus\(/.test(stmt)) {
+    return { action: "focus", selector: locatorSource(stmt, "focus") };
+  }
+  // Click: locator.click() — right/middle button encoded in value (runner parses)
   if (/\.click\(/.test(stmt)) {
-    return { action: "click", selector: locatorSource(stmt, "click") };
+    const selector = locatorSource(stmt, "click");
+    if (/button:\s*['"]right['"]/.test(stmt)) {
+      return { action: "click", selector, value: "right" };
+    }
+    if (/button:\s*['"]middle['"]/.test(stmt)) {
+      return { action: "click", selector, value: "middle" };
+    }
+    return { action: "click", selector };
   }
   // Explicit waits: page.waitForTimeout(500)
   if (/\.waitForTimeout\(/.test(stmt)) {
@@ -165,8 +221,42 @@ function parseLine(line: string): Omit<TestStep, "order"> | null {
   // Assertions: expect(locator).toBeVisible() / toContainText('…') / toHaveText('…')
   if (stmt.includes("expect(")) {
     const target = /expect\(\s*page\.(.+?)\s*\)/.exec(stmt)?.[1] ?? locatorSource(stmt, "expect");
+    if (/toBeHidden/.test(stmt)) {
+      return { action: "assert-hidden", selector: target };
+    }
+    if (/toBeDisabled/.test(stmt)) {
+      return { action: "assert-disabled", selector: target };
+    }
+    if (/toBeEditable/.test(stmt)) {
+      return { action: "assert-editable", selector: target };
+    }
+    if (/toBeFocused/.test(stmt)) {
+      return { action: "assert-focused", selector: target };
+    }
+    if (/toBeChecked/.test(stmt)) {
+      return { action: "assert-checked", selector: target };
+    }
+    if (/toHaveValue/.test(stmt)) {
+      return {
+        action: "assert-value",
+        selector: target,
+        value: terminalStringArg(stmt, "toHaveValue"),
+      };
+    }
+    if (/toHaveCount/.test(stmt)) {
+      const num = /toHaveCount\(\s*(\d+)/.exec(stmt)?.[1];
+      return { action: "assert-count", selector: target, value: num };
+    }
+    if (/toHaveURL/.test(stmt)) {
+      return { action: "assert-url", value: terminalStringArg(stmt, "toHaveURL") };
+    }
+    if (/toHaveTitle/.test(stmt)) {
+      return { action: "assert-title", value: terminalStringArg(stmt, "toHaveTitle") };
+    }
     if (/toBeVisible|toBeAttached|toBeEnabled/.test(stmt)) {
-      return { action: "assert-visible", selector: target };
+      return /toBeEnabled/.test(stmt)
+        ? { action: "assert-enabled", selector: target }
+        : { action: "assert-visible", selector: target };
     }
     if (/toContainText|toHaveText/.test(stmt)) {
       const terminal = /toContainText/.test(stmt) ? "toContainText" : "toHaveText";
@@ -178,9 +268,9 @@ function parseLine(line: string): Omit<TestStep, "order"> | null {
     }
     return { action: "assert-visible", selector: target, value: stmt.slice(0, 10000) };
   }
-  // dblclick is a click with a double-click marker in value (no such action in §4).
+  // dblclick is first-class (legacy click+value:"dblclick" still runs).
   if (/\.dblclick\(/.test(stmt)) {
-    return { action: "click", selector: locatorSource(stmt, "dblclick"), value: "dblclick" };
+    return { action: "dblclick", selector: locatorSource(stmt, "dblclick") };
   }
 
   // Unknown page/expect statement — keep the raw line so nothing is lost.

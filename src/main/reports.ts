@@ -169,13 +169,16 @@ export function formatStepDetail(
     case "goto":
       return val;
     case "click":
-      if (sel !== "" && val === "dblclick") {
-        return `${sel} (double-click)`;
+      if (sel !== "" && val !== "") {
+        return val === "dblclick" ? `${sel} (double-click)` : `${sel} + ${val}`;
       }
       return sel !== "" ? sel : val;
     case "fill":
+    case "type":
     case "select":
     case "assert-text":
+    case "assert-value":
+    case "assert-count":
       if (sel !== "" && val !== "") {
         return `${sel} → ${val}`;
       }

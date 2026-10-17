@@ -78,6 +78,46 @@ describe("parseCodegenOutput (PLAN §7)", () => {
     expect(steps[10]).toMatchObject({ value: "500" });
   });
 
+  it("maps new inputs and assertions (uncheck/dblclick/type/hover/focus)", () => {
+    const steps = parseCodegenOutput(
+      [
+        "await page.locator('#c').uncheck();",
+        "await page.locator('#c').setChecked(false);",
+        "await page.locator('#c').setChecked(true);",
+        "await page.locator('#b').dblclick();",
+        "await page.locator('#t').pressSequentially('hi');",
+        "await page.locator('#h').hover();",
+        "await page.locator('#f').focus();",
+        "await page.locator('#r').click({ button: 'right' });",
+        "await expect(page.locator('#h')).toBeHidden();",
+        "await expect(page.locator('#d')).toBeDisabled();",
+        "await expect(page.locator('#n')).toHaveValue('Ada');",
+        "await expect(page.locator('.row')).toHaveCount(3);",
+        "await expect(page).toHaveURL('/dashboard');",
+        "await expect(page).toHaveTitle('Dashboard');",
+      ].join("\n"),
+    );
+    expect(steps.map((s) => s.action)).toEqual([
+      "uncheck",
+      "uncheck",
+      "check",
+      "dblclick",
+      "type",
+      "hover",
+      "focus",
+      "click",
+      "assert-hidden",
+      "assert-disabled",
+      "assert-value",
+      "assert-count",
+      "assert-url",
+      "assert-title",
+    ]);
+    expect(steps[7]).toMatchObject({ value: "right" });
+    expect(steps[10]).toMatchObject({ value: "Ada" });
+    expect(steps[11]).toMatchObject({ value: "3" });
+  });
+
   it("keeps unknown page statements as wait steps instead of dropping them", () => {
     const steps = parseCodegenOutput("await page.screenshot({ path: 'a.png' });\n");
     expect(steps).toHaveLength(1);

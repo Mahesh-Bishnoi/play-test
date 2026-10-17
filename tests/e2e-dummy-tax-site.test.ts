@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
 import type { EmitRunEvent } from "../src/main/runner.js";
+import type { StepAction } from "../src/shared/step-types.js";
 import { SingleCaseRunner, playwrightLauncher } from "../src/main/runner.js";
 import { SuiteRunner } from "../src/main/suite-runner.js";
 import { getSuiteReport, readSuiteHtmlReport } from "../src/main/reports.js";
@@ -51,17 +52,6 @@ import { createSuite, setSuiteCases, updateSuite } from "../src/main/ipc-suites.
 const describeE2E = describe.skipIf(!process.env.PLAYTEST_E2E);
 
 const STEP_TIMEOUT = 20_000;
-
-type StepAction =
-  | "goto"
-  | "click"
-  | "fill"
-  | "select"
-  | "check"
-  | "press"
-  | "assert-visible"
-  | "assert-text"
-  | "wait";
 
 interface StepDef {
   order: number;
@@ -561,6 +551,54 @@ describeE2E("e2e against dummy income-tax site", () => {
     expect(retryReport.summary.failed).toBe(1);
     expect(readSuiteHtmlReport(db, artifactsRoot, retry.suiteRunId)).toContain("Retry tax failure");
   }, 240_000);
+
+  it("input parity: type + focus + hover + value/editable/enabled/count/title/url", async () => {
+    await resetSite();
+    const caseId = defineCase("Tax input parity", kv, [
+      { order: 0, action: "goto", value: "{{base}}/login" },
+      { order: 1, action: "assert-title", value: "Login" },
+      { order: 2, action: "assert-url", value: "/login" },
+      { order: 3, action: "type", selector: "#email", value: "{{email}}" },
+      { order: 4, action: "assert-value", selector: "#email", value: "{{email}}" },
+      { order: 5, action: "assert-editable", selector: "#email" },
+      { order: 6, action: "focus", selector: "#password" },
+      { order: 7, action: "assert-focused", selector: "#password" },
+      { order: 8, action: "fill", selector: "#password", value: "{{password}}" },
+      { order: 9, action: "hover", selector: '[data-testid="login-submit"]' },
+      { order: 10, action: "assert-enabled", selector: '[data-testid="login-submit"]' },
+      { order: 11, action: "assert-count", selector: "#login-form input", value: "2" },
+      { order: 12, action: "click", selector: '[data-testid="login-submit"]' },
+      { order: 13, action: "assert-text", selector: "#welcome", value: "{{name}}" },
+    ]);
+    const started = await runSingle(caseId);
+    expect(caseStatus(started.caseRunId)).toBe("passed");
+    expectScreenshots(started.caseRunId, 14);
+  }, 120_000);
+
+  it("checkbox + hidden asserts + dblclick navigation", async () => {
+    await resetSite();
+    const caseId = defineCase("Tax checkbox parity", kv, [
+      { order: 0, action: "goto", value: "{{base}}/" },
+      { order: 1, action: "dblclick", selector: "getByTestId('cta-login')" },
+      { order: 2, action: "assert-url", value: "/login" },
+      { order: 3, action: "fill", selector: "#email", value: "{{email}}" },
+      { order: 4, action: "fill", selector: "#password", value: "{{password}}" },
+      { order: 5, action: "click", selector: '[data-testid="login-submit"]' },
+      { order: 6, action: "goto", value: "{{base}}/file-return" },
+      { order: 7, action: "check", selector: "#verify" },
+      { order: 8, action: "assert-checked", selector: "#verify" },
+      { order: 9, action: "uncheck", selector: "#verify" },
+      { order: 10, action: "assert-unchecked", selector: "#verify" },
+      // Authed users hitting /login land on the dashboard: the login form
+      // is gone (assert-hidden) and the URL proves the redirect.
+      { order: 11, action: "goto", value: "{{base}}/login" },
+      { order: 12, action: "assert-hidden", selector: "#login-form" },
+      { order: 13, action: "assert-url", value: "/dashboard" },
+    ]);
+    const started = await runSingle(caseId);
+    expect(caseStatus(started.caseRunId)).toBe("passed");
+    expectScreenshots(started.caseRunId, 14);
+  }, 120_000);
 
   it("missing KV key fails fast with a clear error", async () => {
     const caseId = defineCase("Tax missing key", {}, [
