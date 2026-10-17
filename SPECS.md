@@ -169,8 +169,9 @@ plan wins until the milestone lands; this section describes the code as it is to
   `page.evaluate` / `frameLocator` fail with edit guidance (`frameLocator` support is M15).
 - Runner: `SingleCaseRunner` (supervised pause/resume in same context; cancel settles between
   steps) + `SuiteRunner` (worker pool, missing-key pre-scan, fail→skip-rest, settle
-  failed > cancelled > passed, best-effort HTML). Screenshot retry-once; cancel maps to
-  skipped bucket.
+  failed > cancelled > passed, best-effort HTML). Screenshot: animations disabled, caret
+  hidden, 10 s budget, up to two 250 ms retries (shared `captureStepScreenshot`); cancel maps
+  to skipped bucket.
 - Reports: single HTML file (inline CSS, base64 thumbs ≤500KB, step cell `action — detail`,
   trace hint), PDF via hidden `BrowserWindow`.
 - Transfer: versioned JSON, dialogs+fs in main, re-exports byte-equal modulo `exportedAt`.

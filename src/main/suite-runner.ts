@@ -37,6 +37,7 @@ import { tryWriteSuiteHtmlReport } from "./reports.js";
 import { caseRuns, stepRuns, suiteRuns } from "./schema.js";
 import type { BrowserLauncher, EmitRunEvent, RunContext } from "./runner.js";
 import {
+  captureStepScreenshot,
   executeStep,
   formatStepError,
   RunAlreadyActiveError,
@@ -512,19 +513,9 @@ export class SuiteRunner {
   }
 
   private async captureScreenshot(context: RunContext, path: string): Promise<void> {
-    try {
-      await context.page.screenshot(path);
-      return;
-    } catch {
-      // Same navigation-race retry as SingleCaseRunner.captureScreenshot —
-      // the two runners mirror each other (PLAN M6), keep them consistent.
-      try {
-        await context.page.waitForTimeout(1000);
-        await context.page.screenshot(path);
-      } catch {
-        this.log("warn", `screenshot failed for ${path}`);
-      }
-    }
+    // Same retry policy as SingleCaseRunner — the two runners mirror each
+    // other (PLAN M6); the shared helper keeps them consistent.
+    await captureStepScreenshot(context.page, path, (message) => this.log("warn", message));
   }
 
   private async safeRecordedVideo(context: RunContext): Promise<string | null> {

@@ -274,6 +274,39 @@ export function formatStepError(err: unknown): string {
   return message.trimEnd().slice(0, STEP_ERROR_MAX_CHARS);
 }
 
+/** Screenshot budget before a capture is abandoned (evidence, not a verdict). */
+const SCREENSHOT_TIMEOUT_MS = 10_000;
+/** Total capture attempts: the first plus two retries. */
+const SCREENSHOT_MAX_ATTEMPTS = 3;
+/** Gap between attempts — a save racing navigation needs a beat to settle. */
+const SCREENSHOT_RETRY_DELAY_MS = 250;
+
+/**
+ * Capture the per-step screenshot. A capture racing a just-triggered navigation
+ * fails at the CDP protocol level ("Unable to capture screenshot"); settle
+ * briefly and retry, up to two extra attempts, before giving up with a warning.
+ * Never throws — screenshots are evidence, so a missing one must not flip the
+ * step result. Shared by both runners so their behavior stays identical.
+ */
+export async function captureStepScreenshot(
+  page: RunPage,
+  path: string,
+  onWarn: (message: string) => void,
+): Promise<void> {
+  for (let attempt = 1; attempt <= SCREENSHOT_MAX_ATTEMPTS; attempt++) {
+    try {
+      await page.screenshot(path);
+      return;
+    } catch {
+      if (attempt === SCREENSHOT_MAX_ATTEMPTS) {
+        onWarn(`screenshot failed for ${path}`);
+        return;
+      }
+      await page.waitForTimeout(SCREENSHOT_RETRY_DELAY_MS);
+    }
+  }
+}
+
 /**
  * Execute one substituted step against the page. Throws StepExecutionError
  * for missing required fields so the failure message tells the user exactly
@@ -989,21 +1022,7 @@ export class SingleCaseRunner {
   // flips the step result. Awaited (not fire-and-forget) so artifacts exist
   // before the run settles — important for tests and the report page.
   private async captureScreenshot(context: RunContext, path: string): Promise<void> {
-    try {
-      await context.page.screenshot(path);
-      return;
-    } catch {
-      // Captures racing a just-triggered navigation fail at the CDP protocol
-      // level ("Unable to capture screenshot"). Settle briefly and retry once
-      // before giving up — dummy-tax-site e2e showed immediate post-submit
-      // captures failing deterministically in headless Chromium.
-      try {
-        await context.page.waitForTimeout(1000);
-        await context.page.screenshot(path);
-      } catch {
-        this.log("warn", `screenshot failed for ${path}`);
-      }
-    }
+    await captureStepScreenshot(context.page, path, (message) => this.log("warn", message));
   }
 
   private async safeRecordedVideo(context: RunContext): Promise<string | null> {
@@ -1794,7 +1813,12 @@ class PlaywrightRunPage implements RunPage {
   }
 
   async screenshot(path: string): Promise<void> {
-    await this.page.screenshot({ path });
+    await this.page.screenshot({
+      path,
+      animations: "disabled",
+      caret: "hide",
+      timeout: SCREENSHOT_TIMEOUT_MS,
+    });
   }
 }
 

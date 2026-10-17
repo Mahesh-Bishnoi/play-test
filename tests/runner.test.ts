@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 
 import type { BrowserLauncher, RunContext, RunPage, RunEventChannel } from "../src/main/runner.js";
 import {
+  captureStepScreenshot,
   ContextClosedError,
   RunAlreadyActiveError,
   SingleCaseRunner,
@@ -44,6 +45,8 @@ class FakePage implements RunPage {
   screenshots: string[] = [];
   failWhen: ((method: string) => boolean) | null = null;
   failMessage = "boom";
+  /** Number of upcoming `screenshot` calls to fail (navigation-race simulation). */
+  screenshotFailuresRemaining = 0;
   gate: Promise<void> | null = null;
   private gated = false;
 
@@ -139,6 +142,10 @@ class FakePage implements RunPage {
   }
   async screenshot(path: string): Promise<void> {
     await this.enter("screenshot", [path, undefined]);
+    if (this.screenshotFailuresRemaining > 0) {
+      this.screenshotFailuresRemaining -= 1;
+      throw new Error("Unable to capture screenshot");
+    }
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, "fake-png");
     this.screenshots.push(path);
@@ -950,6 +957,35 @@ describe("supervised speed control (actionDelayMs)", () => {
     const resumed = runner.resumeFromStep({ caseRunId: started.caseRunId, fromOrder: 1 });
     await resumed.done;
     expect(delays).toEqual([500]);
+  });
+});
+
+// --- Screenshots -----------------------------------------------------------------
+
+describe("captureStepScreenshot (M13: bounded navigation-race retry)", () => {
+  const shotPath = (): string =>
+    join(tmpdir(), `playtest-shot-${Math.random().toString(36).slice(2)}`, "step-00.png");
+
+  it("retries a racing capture up to twice, 250 ms apart, then succeeds silently", async () => {
+    const page = new FakePage();
+    page.screenshotFailuresRemaining = 2;
+    const warnings: string[] = [];
+    await captureStepScreenshot(page, shotPath(), (message) => warnings.push(message));
+    expect(page.calls.filter((c) => c.method === "screenshot")).toHaveLength(3);
+    expect(page.calls.filter((c) => c.method === "waitForTimeout").map((c) => c.args[0])).toEqual([
+      250, 250,
+    ]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("warns once after the last of three failed attempts (never throws)", async () => {
+    const page = new FakePage();
+    page.screenshotFailuresRemaining = 3;
+    const path = shotPath();
+    const warnings: string[] = [];
+    await captureStepScreenshot(page, path, (message) => warnings.push(message));
+    expect(page.calls.filter((c) => c.method === "screenshot")).toHaveLength(3);
+    expect(warnings).toEqual([`screenshot failed for ${path}`]);
   });
 });
 
