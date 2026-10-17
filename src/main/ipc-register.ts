@@ -505,7 +505,8 @@ export function registerRecorderHandlers(
       switch (channel) {
         case "recorder:start": {
           const payload = RecorderStartPayload.parse(rawPayload) as RecorderStart;
-          return recorder.start(payload.baseUrl);
+          const { baseUrl, ...options } = payload;
+          return recorder.start(baseUrl, options);
         }
         case "recorder:stop": {
           RecorderStopPayload.parse(rawPayload);

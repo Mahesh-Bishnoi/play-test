@@ -114,6 +114,30 @@ describe("renderer api report wrappers (M8, PLAN §18.1)", () => {
   });
 });
 
+describe("renderer api recorder wrappers (M9, PLAN §18.2)", () => {
+  it("sends emulation options only when provided", async () => {
+    const calls = stubPlaytest(() => Promise.resolve({ pid: 4242 }));
+    await expect(api.startRecorder("https://example.com")).resolves.toEqual({ pid: 4242 });
+    await expect(
+      api.startRecorder("https://example.com", {
+        viewport: { width: 390, height: 844 },
+        colorScheme: "dark",
+      }),
+    ).resolves.toEqual({ pid: 4242 });
+    expect(calls).toEqual([
+      { channel: "recorder:start", payload: { baseUrl: "https://example.com" } },
+      {
+        channel: "recorder:start",
+        payload: {
+          baseUrl: "https://example.com",
+          viewport: { width: 390, height: 844 },
+          colorScheme: "dark",
+        },
+      },
+    ]);
+  });
+});
+
 describe("renderer api transfer wrappers", () => {
   it("exports through transfer channels and parses save outcomes", async () => {
     const calls = stubPlaytest((channel) => {

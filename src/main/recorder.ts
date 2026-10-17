@@ -5,7 +5,18 @@ import { readFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { devices } from "playwright";
+
+import type { RecorderStartOptions } from "../shared/ipc-contract.js";
 import type { TestStep } from "../shared/step-types.js";
+
+/** Thrown when `device` is not a known Playwright device name. */
+export class UnknownRecorderDeviceError extends Error {
+  constructor(device: string) {
+    super(`unknown device "${device}" — use a Playwright device name, e.g. "iPhone 11"`);
+    this.name = "UnknownRecorderDeviceError";
+  }
+}
 
 /** Thrown when `start` is called while a codegen window is already open. */
 export class RecorderAlreadyRunningError extends Error {
@@ -165,7 +176,11 @@ function parseLine(line: string): Omit<TestStep, "order"> | null {
   }
   // Checkbox: locator.check() → check, locator.uncheck()/setChecked(false) → uncheck
   if (/\.check\(/.test(stmt) || /\.uncheck\(/.test(stmt) || /\.setChecked\(/.test(stmt)) {
-    const terminal = /\.check\(/.test(stmt) ? "check" : /\.uncheck\(/.test(stmt) ? "uncheck" : "setChecked";
+    const terminal = /\.check\(/.test(stmt)
+      ? "check"
+      : /\.uncheck\(/.test(stmt)
+        ? "uncheck"
+        : "setChecked";
     const selector = locatorSource(stmt, terminal);
     if (/\.setChecked\(/.test(stmt)) {
       return /setChecked\(\s*false/.test(stmt)
@@ -301,8 +316,92 @@ export interface CodegenChild {
   kill: (signal?: string) => boolean;
 }
 
+/**
+ * Build the argv tail for `npx playwright codegen` (everything after
+ * `["playwright", "codegen"]`). Pure: no IO. Only allowlisted flags —
+ * never interpolates option values into shell (caller passes the result
+ * as an argv array). Throws on any invalid option, including device names
+ * outside `knownDevices` (prod passes the real Playwright device table;
+ * tests inject a small set).
+ */
+export function buildCodegenArgs(
+  baseUrl: string,
+  outputPath: string,
+  options: RecorderStartOptions,
+  knownDevices?: ReadonlySet<string>,
+): string[] {
+  const args = [baseUrl, "--output", outputPath];
+  const viewport = options.viewport;
+  if (viewport !== undefined) {
+    const { width, height } = viewport;
+    const valid =
+      Number.isInteger(width) &&
+      Number.isInteger(height) &&
+      width >= 100 &&
+      width <= 7680 &&
+      height >= 100 &&
+      height <= 4320;
+    if (!valid) {
+      throw new Error(
+        `invalid viewport ${String(width)}x${String(height)} — width/height must be 100..7680 / 100..4320`,
+      );
+    }
+    args.push("--viewport-size", `${width},${height}`);
+  }
+  if (options.device !== undefined) {
+    const device = options.device;
+    if (device.startsWith("-") || device.includes("--") || !/^[A-Za-z0-9 _./()+-]+$/.test(device)) {
+      throw new Error(`unsafe device name "${device}" — must not look like a CLI flag`);
+    }
+    if (knownDevices !== undefined && !knownDevices.has(device)) {
+      throw new UnknownRecorderDeviceError(device);
+    }
+    args.push("--device", device);
+  }
+  if (options.colorScheme !== undefined) {
+    const scheme: string = options.colorScheme;
+    if (scheme !== "light" && scheme !== "dark") {
+      throw new Error(`invalid colorScheme "${scheme}" — "light" | "dark"`);
+    }
+    args.push("--color-scheme", options.colorScheme);
+  }
+  if (options.locale !== undefined) {
+    if (!/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(options.locale)) {
+      throw new Error(`invalid locale "${options.locale}" — BCP47-like, e.g. en-GB`);
+    }
+    args.push("--lang", options.locale);
+  }
+  if (options.timezone !== undefined) {
+    if (
+      options.timezone.startsWith("-") ||
+      !/^(?!.*\.\.)[A-Za-z0-9_+/-]+$/.test(options.timezone)
+    ) {
+      throw new Error(`invalid timezone "${options.timezone}" — IANA-like, e.g. Europe/Rome`);
+    }
+    args.push("--timezone", options.timezone);
+  }
+  const storageFlags = [
+    ["storageStatePath", "--load-storage"],
+    ["saveStoragePath", "--save-storage"],
+  ] as const;
+  for (const [key, flag] of storageFlags) {
+    const value = options[key];
+    if (value !== undefined) {
+      if (value === "" || value.startsWith("-") || value.includes("\0")) {
+        throw new Error(`invalid ${key} — must be a path, not a CLI flag`);
+      }
+      args.push(flag, value);
+    }
+  }
+  return args;
+}
+
 export interface RecorderDeps {
-  spawnCodegen: (outputPath: string, baseUrl: string) => CodegenChild;
+  spawnCodegen: (
+    outputPath: string,
+    baseUrl: string,
+    options: RecorderStartOptions,
+  ) => CodegenChild;
   readOutput: (outputPath: string) => string | null;
   discardOutput: (outputPath: string) => void;
   makeOutputPath: () => string;
@@ -310,12 +409,12 @@ export interface RecorderDeps {
 
 function defaultDeps(): RecorderDeps {
   return {
-    spawnCodegen: (outputPath, baseUrl) => {
-      const child: ChildProcess = spawn(
-        "npx",
-        ["playwright", "codegen", baseUrl, "--output", outputPath],
-        { stdio: "ignore", shell: process.platform === "win32" },
-      );
+    spawnCodegen: (outputPath, baseUrl, options) => {
+      const tail = buildCodegenArgs(baseUrl, outputPath, options, new Set(Object.keys(devices)));
+      const child: ChildProcess = spawn("npx", ["playwright", "codegen", ...tail], {
+        stdio: "ignore",
+        shell: process.platform === "win32",
+      });
       return { pid: child.pid, kill: (signal) => child.kill(signal as NodeJS.Signals) };
     },
     readOutput: (outputPath) => {
@@ -358,12 +457,12 @@ export class CodegenRecorder {
     return this.active?.pid ?? null;
   }
 
-  start(baseUrl: string): { pid: number } {
+  start(baseUrl: string, options: RecorderStartOptions = {}): { pid: number } {
     if (this.active !== null) {
       throw new RecorderAlreadyRunningError();
     }
     const outputPath = this.deps.makeOutputPath();
-    const child = this.deps.spawnCodegen(outputPath, baseUrl);
+    const child = this.deps.spawnCodegen(outputPath, baseUrl, options);
     if (child.pid === undefined) {
       throw new Error("failed to launch playwright codegen (no pid)");
     }

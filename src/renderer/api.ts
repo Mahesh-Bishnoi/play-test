@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { IpcChannel } from "../shared/ipc-contract.js";
+import type { RecorderStartOptions } from "../shared/ipc-contract.js";
 import { RunFinishedEvent, RunLogEvent, RunStepUpdateEvent } from "../shared/ipc-contract.js";
 import type {
   RunFinishedEvent as RunFinished,
@@ -198,9 +199,11 @@ export const api = {
   },
 
   // Recorder (WS4; handlers registered in main.ts, payloads frozen in v1).
-  startRecorder(baseUrl: string): Promise<{ pid: number }> {
-    return invoke("recorder:start", { baseUrl }, (raw) =>
-      z.object({ pid: z.number().int() }).parse(raw),
+  startRecorder(baseUrl: string, options?: RecorderStartOptions): Promise<{ pid: number }> {
+    return invoke(
+      "recorder:start",
+      options === undefined ? { baseUrl } : { baseUrl, ...options },
+      (raw) => z.object({ pid: z.number().int() }).parse(raw),
     );
   },
   stopRecorder(): Promise<{ steps: TestStep[]; raw: string }> {

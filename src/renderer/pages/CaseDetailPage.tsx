@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { RunMode } from "../../shared/schema.js";
+import type { RecorderStartOptions } from "../../shared/ipc-contract.js";
 import type { StepAction, StepStatus } from "../../shared/step-types.js";
 import type { TestStep } from "../../shared/step-types.js";
 import { STEP_ACTIONS } from "../../shared/step-types.js";
@@ -25,6 +26,83 @@ interface Props {
   onBack: () => void;
 }
 
+/** Last-used codegen emulation options (M9) — persisted across sessions. */
+interface RecordOptions {
+  viewportW: string;
+  viewportH: string;
+  device: string;
+  colorScheme: "" | "light" | "dark";
+  locale: string;
+  timezone: string;
+  storageStatePath: string;
+  saveStoragePath: string;
+}
+
+const DEFAULT_RECORD_OPTIONS: RecordOptions = {
+  viewportW: "",
+  viewportH: "",
+  device: "",
+  colorScheme: "",
+  locale: "",
+  timezone: "",
+  storageStatePath: "",
+  saveStoragePath: "",
+};
+
+const RECORDER_OPTIONS_KEY = "playtest.recorder.options";
+
+function loadRecordOptions(): RecordOptions {
+  try {
+    const raw = localStorage.getItem(RECORDER_OPTIONS_KEY);
+    if (raw === null) {
+      return DEFAULT_RECORD_OPTIONS;
+    }
+    const parsed = JSON.parse(raw) as Partial<RecordOptions>;
+    return {
+      viewportW: typeof parsed.viewportW === "string" ? parsed.viewportW : "",
+      viewportH: typeof parsed.viewportH === "string" ? parsed.viewportH : "",
+      device: typeof parsed.device === "string" ? parsed.device : "",
+      colorScheme:
+        parsed.colorScheme === "light" || parsed.colorScheme === "dark" ? parsed.colorScheme : "",
+      locale: typeof parsed.locale === "string" ? parsed.locale : "",
+      timezone: typeof parsed.timezone === "string" ? parsed.timezone : "",
+      storageStatePath: typeof parsed.storageStatePath === "string" ? parsed.storageStatePath : "",
+      saveStoragePath: typeof parsed.saveStoragePath === "string" ? parsed.saveStoragePath : "",
+    };
+  } catch {
+    return DEFAULT_RECORD_OPTIONS;
+  }
+}
+
+/** Form state → sparse `recorder:start` options (empty fields omitted). */
+function toRecorderOptions(form: RecordOptions): RecorderStartOptions {
+  const options: RecorderStartOptions = {};
+  const w = Number(form.viewportW);
+  const h = Number(form.viewportH);
+  if (form.viewportW.trim() !== "" && form.viewportH.trim() !== "") {
+    options.viewport = { width: w, height: h };
+  }
+  if (form.device.trim() !== "") {
+    options.device = form.device.trim();
+  }
+  if (form.colorScheme !== "") {
+    options.colorScheme = form.colorScheme;
+  }
+  if (form.locale.trim() !== "") {
+    options.locale = form.locale.trim();
+  }
+  if (form.timezone.trim() !== "") {
+    options.timezone = form.timezone.trim();
+  }
+  if (form.storageStatePath.trim() !== "") {
+    options.storageStatePath = form.storageStatePath.trim();
+  }
+  if (form.saveStoragePath.trim() !== "") {
+    options.saveStoragePath = form.saveStoragePath.trim();
+  }
+  return options;
+}
+
 /**
  * Workflow editor for one test case (WS3 / M3 + WS4 / M4 + WS5 / M5 + M6/M7,
  * PLAN §6–§8 + §10): linear step graph, click-to-edit panel, add/delete,
@@ -43,6 +121,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
   const [notice, setNotice] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordUrl, setRecordUrl] = useState("");
+  const [recordOpts, setRecordOpts] = useState<RecordOptions>(loadRecordOptions);
   const [preview, setPreview] = useState<{ steps: TestStep[]; raw: string } | null>(null);
   const [activeRun, setActiveRun] = useState<{
     suiteRunId: string;
@@ -206,10 +285,16 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
       setError("Enter a URL to record from (or set the case URL first).");
       return;
     }
+    const options = toRecorderOptions(recordOpts);
+    try {
+      localStorage.setItem(RECORDER_OPTIONS_KEY, JSON.stringify(recordOpts));
+    } catch {
+      // Persistence is best-effort — recording must still work.
+    }
     setBusy(true);
     setError(null);
     api
-      .startRecorder(baseUrl)
+      .startRecorder(baseUrl, options)
       .then(() => {
         setRecording(true);
         setNotice("Recording… interact with the codegen browser window, then Stop + import.");
@@ -699,6 +784,136 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                 {runFinished}
               </p>
             )}
+            <details className="pt-panel">
+              <summary>Record options (viewport, device, theme, locale, auth state)</summary>
+              <div className="pt-row pt-mb-10">
+                <label className="pt-label-inline">
+                  Viewport W
+                  <input
+                    aria-label="Record viewport width"
+                    className="pt-input pt-mono"
+                    inputMode="numeric"
+                    placeholder="1280"
+                    value={recordOpts.viewportW}
+                    disabled={busy || recording}
+                    onChange={(e) => {
+                      const viewportW = e.target.value;
+                      setRecordOpts((prev) => ({ ...prev, viewportW }));
+                    }}
+                  />
+                </label>
+                <label className="pt-label-inline">
+                  H
+                  <input
+                    aria-label="Record viewport height"
+                    className="pt-input pt-mono"
+                    inputMode="numeric"
+                    placeholder="720"
+                    value={recordOpts.viewportH}
+                    disabled={busy || recording}
+                    onChange={(e) => {
+                      const viewportH = e.target.value;
+                      setRecordOpts((prev) => ({ ...prev, viewportH }));
+                    }}
+                  />
+                </label>
+                <label className="pt-label-inline">
+                  Device
+                  <input
+                    aria-label="Record device"
+                    className="pt-input"
+                    placeholder="iPhone 11"
+                    value={recordOpts.device}
+                    disabled={busy || recording}
+                    onChange={(e) => {
+                      const device = e.target.value;
+                      setRecordOpts((prev) => ({ ...prev, device }));
+                    }}
+                  />
+                </label>
+                <label className="pt-label-inline">
+                  Theme
+                  <select
+                    aria-label="Record color scheme"
+                    className="pt-select"
+                    value={recordOpts.colorScheme}
+                    disabled={busy || recording}
+                    onChange={(e) => {
+                      const colorScheme = e.target.value as RecordOptions["colorScheme"];
+                      setRecordOpts((prev) => ({ ...prev, colorScheme }));
+                    }}
+                  >
+                    <option value="">Default</option>
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                  </select>
+                </label>
+              </div>
+              <div className="pt-row pt-mb-10">
+                <label className="pt-label-inline">
+                  Locale
+                  <input
+                    aria-label="Record locale"
+                    className="pt-input pt-mono"
+                    placeholder="en-GB"
+                    value={recordOpts.locale}
+                    disabled={busy || recording}
+                    onChange={(e) => {
+                      const locale = e.target.value;
+                      setRecordOpts((prev) => ({ ...prev, locale }));
+                    }}
+                  />
+                </label>
+                <label className="pt-label-inline">
+                  Timezone
+                  <input
+                    aria-label="Record timezone"
+                    className="pt-input pt-mono"
+                    placeholder="Europe/Rome"
+                    value={recordOpts.timezone}
+                    disabled={busy || recording}
+                    onChange={(e) => {
+                      const timezone = e.target.value;
+                      setRecordOpts((prev) => ({ ...prev, timezone }));
+                    }}
+                  />
+                </label>
+              </div>
+              <div className="pt-row">
+                <label className="pt-label-inline">
+                  Load storage state
+                  <input
+                    aria-label="Load storage state path"
+                    className="pt-input pt-mono"
+                    placeholder="/path/to/logged-in.json"
+                    value={recordOpts.storageStatePath}
+                    disabled={busy || recording}
+                    onChange={(e) => {
+                      const storageStatePath = e.target.value;
+                      setRecordOpts((prev) => ({ ...prev, storageStatePath }));
+                    }}
+                  />
+                </label>
+                <label className="pt-label-inline">
+                  Save storage state
+                  <input
+                    aria-label="Save storage state path"
+                    className="pt-input pt-mono"
+                    placeholder="/path/to/save-here.json"
+                    value={recordOpts.saveStoragePath}
+                    disabled={busy || recording}
+                    onChange={(e) => {
+                      const saveStoragePath = e.target.value;
+                      setRecordOpts((prev) => ({ ...prev, saveStoragePath }));
+                    }}
+                  />
+                </label>
+              </div>
+              <p className="pt-hint">
+                Record logged-in flows: log in once with Save set, then reuse the file via Load.
+                Invalid values are rejected before codegen launches.
+              </p>
+            </details>
           </div>
           {runLogs.length > 0 && (
             <details className="pt-panel">

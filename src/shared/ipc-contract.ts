@@ -161,8 +161,52 @@ export const TestDataSetPayload = z.object({
 
 // --- Recorder (WS4) ----------------------------------------------------------
 
+// M9 emulation + auth-state options (PLAN §18.2): all additive optionals.
+// Flag mapping verified against `npx playwright codegen --help`
+// (playwright@1.64.1): viewport → --viewport-size "W,H" (comma, NOT WxH),
+// device → --device, colorScheme → --color-scheme, locale → --lang
+// (there is no --locale flag), timezone → --timezone,
+// storageStatePath → --load-storage, saveStoragePath → --save-storage.
+// Values must never look like flags (no leading `-`): even though spawn
+// uses an argv array (no shell), minimist would still eat a `--foo` value
+// as a flag — so shape checks below reject them at the trust boundary.
+
+const noFlagPrefix = (label: string) =>
+  z
+    .string()
+    .min(1)
+    .max(1000)
+    .refine((s) => !s.startsWith("-") && !s.includes("\0"), `${label} must not start with '-'`);
+
+export const RecorderViewportPayload = z.object({
+  width: z.number().int().min(100).max(7680),
+  height: z.number().int().min(100).max(4320),
+});
+
 export const RecorderStartPayload = z.object({
   baseUrl: z.string().trim().min(1).max(2000),
+  viewport: RecorderViewportPayload.optional(),
+  device: z
+    .string()
+    .min(1)
+    .max(100)
+    .regex(/^(?![-])(?!.*--)[A-Za-z0-9 _.()/+-]+$/, "unsafe device name")
+    .optional(),
+  colorScheme: z.enum(["light", "dark"]).optional(),
+  locale: z
+    .string()
+    .min(2)
+    .max(20)
+    .regex(/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/, "locale must be BCP47-like, e.g. en-GB")
+    .optional(),
+  timezone: z
+    .string()
+    .min(1)
+    .max(100)
+    .regex(/^(?!.*\.\.)(?!-)[A-Za-z0-9_+/-]+$/, "timezone must be IANA-like, e.g. Europe/Rome")
+    .optional(),
+  storageStatePath: noFlagPrefix("storageStatePath").optional(),
+  saveStoragePath: noFlagPrefix("saveStoragePath").optional(),
 });
 
 export const RecorderStopPayload = z.object({});
@@ -352,6 +396,8 @@ export type StepReorderPayload = z.infer<typeof StepReorderPayload>;
 export type TestDataGetPayload = z.infer<typeof TestDataGetPayload>;
 export type TestDataSetPayload = z.infer<typeof TestDataSetPayload>;
 export type RecorderStartPayload = z.infer<typeof RecorderStartPayload>;
+/** Emulation/auth options for `recorder:start` — everything but the URL. */
+export type RecorderStartOptions = Omit<RecorderStartPayload, "baseUrl">;
 export type RecorderStopPayload = z.infer<typeof RecorderStopPayload>;
 export type RunnerRunSinglePayload = z.infer<typeof RunnerRunSinglePayload>;
 export type RunnerRunSuitePayload = z.infer<typeof RunnerRunSuitePayload>;
