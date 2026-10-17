@@ -22,6 +22,8 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
   const [baseUrl, setBaseUrl] = useState("");
   const [pendingDelete, setPendingDelete] = useState<Project | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -65,6 +67,40 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
       });
   };
 
+  const refreshProjects = (selectId?: string): void => {
+    api
+      .listProjects()
+      .then((rows) => {
+        const sorted = [...rows].sort((a, b) => a.name.localeCompare(b.name));
+        setProjects(sorted);
+        setSelectedId(selectId ?? sorted[0]?.id ?? null);
+      })
+      .catch((err: unknown) => {
+        setError(formatApiError(err));
+      });
+  };
+
+  const importProject = (): void => {
+    setError(null);
+    setNotice(null);
+    setImportBusy(true);
+    api
+      .importProject()
+      .then((outcome) => {
+        if (!outcome.imported || outcome.summary === undefined) {
+          return;
+        }
+        const { projectId, caseCount, stepCount } = outcome.summary;
+        setNotice(`Imported ${caseCount} cases (${stepCount} steps) as a new project.`);
+        refreshProjects(projectId);
+      })
+      .catch((err: unknown) => {
+        setError(formatApiError(err));
+      })
+      .finally(() => {
+        setImportBusy(false);
+      });
+  };
   const confirmDelete = (): void => {
     if (pendingDelete === null) {
       return;
@@ -164,6 +200,11 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
               {error}
             </p>
           )}
+          {notice !== null && (
+            <p role="status" className="pt-alert pt-alert-ok">
+              {notice}
+            </p>
+          )}
           <div className="pt-welcome-actions">
             <button
               type="button"
@@ -188,6 +229,15 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
                 Delete
               </button>
             )}
+            <button
+              type="button"
+              className="pt-btn"
+              disabled={importBusy}
+              onClick={importProject}
+              title="Import a project from a .playtest.json file (creates a new project with fresh ids)"
+            >
+              {importBusy ? "Importing…" : "Import project…"}
+            </button>
           </div>
           {selected !== null && (
             <dl className="pt-welcome-meta">

@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import started from "electron-squirrel-startup";
 
 import { createDatabase, defaultDbPath } from "./db.js";
@@ -10,6 +10,7 @@ import {
   registerReportHandlers,
   registerRunnerHandlers,
   registerSystemHandlers,
+  registerTransferHandlers,
 } from "./ipc-register.js";
 import { SingleCaseRunner, playwrightLauncher } from "./runner.js";
 import { SuiteRunner } from "./suite-runner.js";
@@ -93,6 +94,38 @@ void app.whenReady().then(() => {
     },
     handle.db,
     { artifactsRoot, renderPdf: renderPdfWithElectron },
+  );
+  registerTransferHandlers(
+    (channel, listener) => {
+      ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
+    },
+    handle.db,
+    {
+      async showSaveDialog(defaultFileName: string): Promise<string | null> {
+        const result = await dialog.showSaveDialog({
+          defaultPath: defaultFileName,
+          filters: [{ name: "PlayTest export", extensions: ["json"] }],
+        });
+        return result.canceled || result.filePath === undefined ? null : result.filePath;
+      },
+      async showOpenDialog(): Promise<string | null> {
+        const result = await dialog.showOpenDialog({
+          properties: ["openFile"],
+          filters: [{ name: "PlayTest export", extensions: ["json"] }],
+        });
+        return result.canceled || result.filePaths.length === 0
+          ? null
+          : (result.filePaths[0] as string);
+      },
+      async readTextFile(path: string): Promise<string> {
+        const { readFile } = await import("node:fs/promises");
+        return readFile(path, "utf8");
+      },
+      async writeTextFile(path: string, text: string): Promise<void> {
+        const { writeFile } = await import("node:fs/promises");
+        await writeFile(path, text, "utf8");
+      },
+    },
   );
   createWindow();
 

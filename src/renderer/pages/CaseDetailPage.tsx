@@ -349,6 +349,25 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
 
   const paused = activeRun !== null && activeRun.mode === "supervised" && failedOrder !== null;
 
+  const exportCaseFile = (): void => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    api
+      .exportCase(caseId)
+      .then((outcome) => {
+        if (outcome.saved) {
+          setNotice(`Case exported${outcome.path !== undefined ? ` to ${outcome.path}` : ""}.`);
+        }
+      })
+      .catch((err: unknown) => {
+        setError(formatApiError(err));
+      })
+      .finally(() => {
+        setBusy(false);
+      });
+  };
+
   const runBadge =
     activeRun !== null ? (
       <span className="pt-badge pt-badge-run">
@@ -374,6 +393,16 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
           <span className="pt-badge">{steps.length} steps</span>
         )}
         {runBadge}
+        <span className="pt-spacer" />
+        <button
+          type="button"
+          className="pt-btn pt-btn-ghost pt-btn-sm"
+          onClick={exportCaseFile}
+          disabled={busy}
+          title="Export this case (steps, test data) to a .playtest.json file"
+        >
+          Export case
+        </button>
       </div>
       {error !== null && (
         <p role="alert" className="pt-alert pt-alert-error">

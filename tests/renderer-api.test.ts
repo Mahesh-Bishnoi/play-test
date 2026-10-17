@@ -96,3 +96,47 @@ describe("renderer api browser-setup wrappers (M7, PLAN §11)", () => {
     await expect(api.browserStatus()).rejects.toThrow();
   });
 });
+
+describe("renderer api transfer wrappers", () => {
+  it("exports through transfer channels and parses save outcomes", async () => {
+    const calls = stubPlaytest((channel) => {
+      if (channel === "transfer:exportProject") {
+        return Promise.resolve({ saved: true, path: "/tmp/shop.project.playtest.json" });
+      }
+      return Promise.resolve({ saved: false });
+    });
+    await expect(api.exportProject("p1")).resolves.toEqual({
+      saved: true,
+      path: "/tmp/shop.project.playtest.json",
+    });
+    await expect(api.exportSuite("s1")).resolves.toEqual({ saved: false });
+    await expect(api.exportCase("c1")).resolves.toEqual({ saved: false });
+    expect(calls.map((c) => c.channel)).toEqual([
+      "transfer:exportProject",
+      "transfer:exportSuite",
+      "transfer:exportCase",
+    ]);
+  });
+
+  it("imports through transfer channels and parses summaries", async () => {
+    const calls = stubPlaytest((channel, payload) => {
+      if (channel === "transfer:importCase") {
+        expect(payload).toEqual({ projectId: "p1", suiteIds: ["s1"] });
+      }
+      return Promise.resolve({
+        imported: true,
+        summary: { projectId: "p1", suiteIds: ["s1"], caseIds: ["c2"], caseCount: 1, stepCount: 2 },
+      });
+    });
+    const outcome = await api.importCases("p1", ["s1"]);
+    expect(outcome.imported).toBe(true);
+    expect(outcome.summary?.caseCount).toBe(1);
+    await expect(api.importProject()).resolves.toMatchObject({ imported: true });
+    await expect(api.importSuite("p1")).resolves.toMatchObject({ imported: true });
+    expect(calls.map((c) => c.channel)).toEqual([
+      "transfer:importCase",
+      "transfer:importProject",
+      "transfer:importSuite",
+    ]);
+  });
+});

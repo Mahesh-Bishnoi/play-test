@@ -51,6 +51,7 @@ export default function SuiteDetailPage({
   const [pendingDeleteSuite, setPendingDeleteSuite] = useState<Suite | null>(null);
   const [pendingDeleteCase, setPendingDeleteCase] = useState<TestCase | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [transferBusy, setTransferBusy] = useState(false);
 
   useEffect(() => {
     setError(null);
@@ -259,6 +260,120 @@ export default function SuiteDetailPage({
   const selectedSuite = suites.find((s) => s.id === suiteId) ?? null;
   const selectedCases = cases.filter((c) => checked.has(c.id));
 
+  /** Re-list everything after an import (new ids everywhere) + notify sidebar. */
+  const reloadAfterTransfer = (keepSuiteId: string | null): void => {
+    api
+      .listSuites(projectId)
+      .then((rows) => {
+        const sorted = [...rows].sort((a, b) => a.name.localeCompare(b.name));
+        setSuites(sorted);
+        if (keepSuiteId !== null && sorted.some((s) => s.id === keepSuiteId)) {
+          loadMembership(keepSuiteId);
+        }
+      })
+      .catch((err: unknown) => {
+        setError(formatApiError(err));
+      });
+    api
+      .listCases(projectId)
+      .then((rows) => {
+        setCases([...rows].sort((a, b) => a.name.localeCompare(b.name)));
+      })
+      .catch((err: unknown) => {
+        setError(formatApiError(err));
+      });
+    onChanged?.();
+  };
+
+  const exportProject = (): void => {
+    setError(null);
+    setNotice(null);
+    setTransferBusy(true);
+    api
+      .exportProject(projectId)
+      .then((outcome) => {
+        if (outcome.saved) {
+          setNotice(`Project exported${outcome.path !== undefined ? ` to ${outcome.path}` : ""}.`);
+        }
+      })
+      .catch((err: unknown) => {
+        setError(formatApiError(err));
+      })
+      .finally(() => {
+        setTransferBusy(false);
+      });
+  };
+
+  const exportSelectedSuite = (): void => {
+    if (selectedSuite === null) {
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setTransferBusy(true);
+    api
+      .exportSuite(selectedSuite.id)
+      .then((outcome) => {
+        if (outcome.saved) {
+          setNotice(
+            `Suite “${selectedSuite.name}” exported${outcome.path !== undefined ? ` to ${outcome.path}` : ""}.`,
+          );
+        }
+      })
+      .catch((err: unknown) => {
+        setError(formatApiError(err));
+      })
+      .finally(() => {
+        setTransferBusy(false);
+      });
+  };
+
+  const importSuiteFile = (): void => {
+    setError(null);
+    setNotice(null);
+    setTransferBusy(true);
+    api
+      .importSuite(projectId)
+      .then((outcome) => {
+        if (outcome.imported && outcome.summary !== undefined) {
+          const { caseCount, stepCount } = outcome.summary;
+          setNotice(`Imported suite file: ${caseCount} case(s), ${stepCount} step(s).`);
+          reloadAfterTransfer(suiteId);
+        }
+      })
+      .catch((err: unknown) => {
+        setError(formatApiError(err));
+      })
+      .finally(() => {
+        setTransferBusy(false);
+      });
+  };
+
+  const importCaseFile = (): void => {
+    setError(null);
+    setNotice(null);
+    setTransferBusy(true);
+    api
+      .importCases(projectId, suiteId === null ? undefined : [suiteId])
+      .then((outcome) => {
+        if (outcome.imported && outcome.summary !== undefined) {
+          const { caseCount, stepCount } = outcome.summary;
+          setNotice(
+            suiteId === null
+              ? `Imported ${caseCount} case(s), ${stepCount} step(s) into the project.`
+              : `Imported ${caseCount} case(s), ${stepCount} step(s) into “${selectedSuite?.name ?? "suite"}”.`,
+          );
+          reloadAfterTransfer(suiteId);
+        }
+      })
+      .catch((err: unknown) => {
+        setError(formatApiError(err));
+      })
+      .finally(() => {
+        setTransferBusy(false);
+      });
+  };
+
   useEffect(() => {
     if (!runDialogOpen) {
       return;
@@ -308,6 +423,49 @@ export default function SuiteDetailPage({
           <span className="pt-badge pt-badge-run">{memberIds.length} selected</span>
         )}
         {dirty && <span className="pt-badge pt-badge-fail">unsaved changes</span>}
+        <span className="pt-spacer" />
+        <button
+          type="button"
+          className="pt-btn pt-btn-ghost pt-btn-sm"
+          onClick={exportProject}
+          disabled={transferBusy}
+          title="Export the whole project (suites, cases, steps, test data) to a .playtest.json file"
+        >
+          Export project
+        </button>
+        <button
+          type="button"
+          className="pt-btn pt-btn-ghost pt-btn-sm"
+          onClick={importSuiteFile}
+          disabled={transferBusy}
+          title="Import a suite file into this project (fresh ids, this project's base URL applies)"
+        >
+          Import suite…
+        </button>
+        <button
+          type="button"
+          className="pt-btn pt-btn-ghost pt-btn-sm"
+          onClick={importCaseFile}
+          disabled={transferBusy}
+          title={
+            selectedSuite === null
+              ? "Import a case file into this project"
+              : `Import a case file into this project and add it to “${selectedSuite.name}”`
+          }
+        >
+          Import cases…
+        </button>
+        {selectedSuite !== null && (
+          <button
+            type="button"
+            className="pt-btn pt-btn-ghost pt-btn-sm"
+            onClick={exportSelectedSuite}
+            disabled={transferBusy}
+            title={`Export suite “${selectedSuite.name}” (members, steps, test data) to a .playtest.json file`}
+          >
+            Export suite
+          </button>
+        )}
       </div>
       {error !== null && (
         <p role="alert" className="pt-alert pt-alert-error">

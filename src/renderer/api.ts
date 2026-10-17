@@ -37,6 +37,34 @@ export interface CaseDetail {
 
 const BrowserStatusSchema = z.object({ installed: z.boolean(), executablePath: z.string() });
 
+const ExportOutcomeSchema = z.object({ saved: z.boolean(), path: z.string().optional() });
+export interface ExportOutcome {
+  saved: boolean;
+  path?: string;
+}
+
+const ImportSummarySchema = z.object({
+  projectId: z.string(),
+  suiteIds: z.array(z.string()),
+  caseIds: z.array(z.string()),
+  caseCount: z.number().int(),
+  stepCount: z.number().int(),
+});
+const ImportOutcomeSchema = z.object({
+  imported: z.boolean(),
+  summary: ImportSummarySchema.optional(),
+});
+export interface ImportOutcome {
+  imported: boolean;
+  summary?: {
+    projectId: string;
+    suiteIds: string[];
+    caseIds: string[];
+    caseCount: number;
+    stepCount: number;
+  };
+}
+
 /** Shared renderer error formatter (single copy — pages/components import this). */
 export function formatApiError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -173,6 +201,30 @@ export const api = {
   },
   exportReportPdf(suiteRunId: string): Promise<string> {
     return invoke("report:exportPdf", { suiteRunId }, (raw) => z.string().parse(raw));
+  },
+
+  // Transfer (file import/export; copy semantics — fresh ids on import).
+  exportProject(id: string): Promise<ExportOutcome> {
+    return invoke("transfer:exportProject", { id }, (raw) => ExportOutcomeSchema.parse(raw));
+  },
+  exportSuite(id: string): Promise<ExportOutcome> {
+    return invoke("transfer:exportSuite", { id }, (raw) => ExportOutcomeSchema.parse(raw));
+  },
+  exportCase(id: string): Promise<ExportOutcome> {
+    return invoke("transfer:exportCase", { id }, (raw) => ExportOutcomeSchema.parse(raw));
+  },
+  importProject(): Promise<ImportOutcome> {
+    return invoke("transfer:importProject", {}, (raw) => ImportOutcomeSchema.parse(raw));
+  },
+  importSuite(projectId: string): Promise<ImportOutcome> {
+    return invoke("transfer:importSuite", { projectId }, (raw) => ImportOutcomeSchema.parse(raw));
+  },
+  importCases(projectId: string, suiteIds?: string[]): Promise<ImportOutcome> {
+    return invoke(
+      "transfer:importCase",
+      suiteIds === undefined ? { projectId } : { projectId, suiteIds },
+      (raw) => ImportOutcomeSchema.parse(raw),
+    );
   },
 
   // System (M7; first-run Chromium check + install, PLAN §11).

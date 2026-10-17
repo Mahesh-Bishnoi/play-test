@@ -43,6 +43,12 @@ export const IPC_CHANNELS = [
   "runner:cancel",
   "report:getHtml",
   "report:exportPdf",
+  "transfer:exportProject",
+  "transfer:exportSuite",
+  "transfer:exportCase",
+  "transfer:importProject",
+  "transfer:importSuite",
+  "transfer:importCase",
   "system:browserStatus",
   "system:installBrowser",
   "run:step-update",
@@ -191,6 +197,31 @@ export const ReportExportPdfPayload = z.object({
   suiteRunId: z.string().min(1).max(100),
 });
 
+// --- Transfer: file import/export (copy semantics — fresh ids on import) -------
+
+export const TransferExportProjectPayload = z.object({
+  id: z.string().min(1).max(100),
+});
+
+export const TransferExportSuitePayload = z.object({
+  id: z.string().min(1).max(100),
+});
+
+export const TransferExportCasePayload = z.object({
+  id: z.string().min(1).max(100),
+});
+
+export const TransferImportProjectPayload = z.object({});
+
+export const TransferImportSuitePayload = z.object({
+  projectId: z.string().min(1).max(100),
+});
+
+export const TransferImportCasePayload = z.object({
+  projectId: z.string().min(1).max(100),
+  suiteIds: z.array(z.string().min(1).max(100)).max(100).optional(),
+});
+
 // --- System (M7: first-run browser install, PLAN §11) -------------------------
 
 export const SystemBrowserStatusPayload = z.object({});
@@ -245,6 +276,12 @@ export type RunnerRerunFailedPayload = z.infer<typeof RunnerRerunFailedPayload>;
 export type RunnerCancelPayload = z.infer<typeof RunnerCancelPayload>;
 export type ReportGetHtmlPayload = z.infer<typeof ReportGetHtmlPayload>;
 export type ReportExportPdfPayload = z.infer<typeof ReportExportPdfPayload>;
+export type TransferExportProjectPayload = z.infer<typeof TransferExportProjectPayload>;
+export type TransferExportSuitePayload = z.infer<typeof TransferExportSuitePayload>;
+export type TransferExportCasePayload = z.infer<typeof TransferExportCasePayload>;
+export type TransferImportProjectPayload = z.infer<typeof TransferImportProjectPayload>;
+export type TransferImportSuitePayload = z.infer<typeof TransferImportSuitePayload>;
+export type TransferImportCasePayload = z.infer<typeof TransferImportCasePayload>;
 export type SystemBrowserStatusPayload = z.infer<typeof SystemBrowserStatusPayload>;
 export type SystemInstallBrowserPayload = z.infer<typeof SystemInstallBrowserPayload>;
 export type RunStepUpdateEvent = z.infer<typeof RunStepUpdateEvent>;
@@ -284,6 +321,12 @@ export const IPC_PAYLOADS: Record<string, z.ZodType> = {
   "runner:cancel": RunnerCancelPayload,
   "report:getHtml": ReportGetHtmlPayload,
   "report:exportPdf": ReportExportPdfPayload,
+  "transfer:exportProject": TransferExportProjectPayload,
+  "transfer:exportSuite": TransferExportSuitePayload,
+  "transfer:exportCase": TransferExportCasePayload,
+  "transfer:importProject": TransferImportProjectPayload,
+  "transfer:importSuite": TransferImportSuitePayload,
+  "transfer:importCase": TransferImportCasePayload,
   "system:browserStatus": SystemBrowserStatusPayload,
   "system:installBrowser": SystemInstallBrowserPayload,
 };

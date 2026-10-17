@@ -18,7 +18,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "PLAYTEST_E2E=1 npx vitest run tests/e2e-local-site.test.ts tests/e2e-dummy-tax-site.test.ts",
+    "test:e2e": "PLAYTEST_E2E=1 npx vitest run tests/e2e-local-site.test.ts tests/e2e-dummy-tax-site.test.ts tests/e2e-git-sync.test.ts tests/e2e-transfer.test.ts",
     "dummy:tax-site": "node dummy-tax-site/server.js --port 4137",
     "seed:dummy-tax": "node scripts/seed-dummy-tax.mjs",
     "verify": "npm run typecheck && npm run lint && npm run format && npm test"
