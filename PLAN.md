@@ -316,3 +316,15 @@ anything durable to `SPECS.md`.
   plumbing), `merge.ts` (pure three-way `mergeEntity`), `sync.ts` (public API:
   init/commit/push/pull/clone/status + conflict resolve). No behavior change; `npm test`
   + the git-sync/transfer e2e tests green. Phases 4–5 still to do.
+- **2026-10-17 — maintainability refactor, phase 4.** Renderer pages split by concern with
+  no visual or behavior change. `pages/CaseDetailPage.tsx` (1165 → ~380 lines) → the
+  `pages/case-detail/` folder: `profile-form.ts` (profile ⇄ `CaseProfileInput` mapping),
+  `use-record-options.ts` (debounced profile + case-URL form state), `use-case-run.ts`
+  (run state + `run:*` subscription), and the presentational `RecordOptionsPanel.tsx` /
+  `RunControls.tsx` / `StepTable.tsx`. `pages/SuiteDetailPage.tsx` (837 → ~215 lines) →
+  `pages/suite-detail/`: `use-suite-detail.ts` (membership, filtering, run/delete/transfer
+  actions) plus `SuiteListCard.tsx` / `CaseMembershipCard.tsx` / `RunSuiteDialog.tsx`.
+  Hook order and debounce semantics preserved. Watch out: `oxlint --type-aware`'s
+  `unbound-method` rule requires callback members in component interfaces be declared as
+  properties (`onSelect: (id: string) => void`), not method shorthand, because they are
+  passed as values. `npm run verify` green (283 passed). Phase 5 still to do.

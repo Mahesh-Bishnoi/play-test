@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { RecorderUnsupported } from "../../shared/ipc-contract.js";
-import type { CaseProfile, CaseProfileInput, RunMode } from "../../shared/schema.js";
+import type { TestCase } from "../../shared/schema.js";
 import type { StepAction, StepStatus } from "../../shared/step-types.js";
 import type { TestStep } from "../../shared/step-types.js";
 import { STEP_ACTIONS } from "../../shared/step-types.js";
@@ -13,119 +13,15 @@ import type { StepPatch } from "../components/StepEditorPanel.js";
 import { validatePastedLocator } from "../components/pick-locator.js";
 import StepGraph from "../components/StepGraph.js";
 import TestDataEditor from "../components/TestDataEditor.js";
-
-/** Pre-run pacing presets for supervised runs (ms between steps). */
-const SUPERVISED_SPEEDS = [
-  { label: "Instant", ms: 0 },
-  { label: "Normal (0.6s)", ms: 600 },
-  { label: "Slow (1.5s)", ms: 1500 },
-  { label: "Very slow (3s)", ms: 3000 },
-] as const;
-
-/** Debounce for persisting record-option edits to the case profile (M14). */
-const PROFILE_SAVE_DEBOUNCE_MS = 500;
-
-/** Debounce for persisting the per-case record-start URL (M14). */
-const CASE_URL_SAVE_DEBOUNCE_MS = 500;
-
-/** Case URL input → the `case:update` value (blank clears it to null). */
-function normalizeCaseUrl(value: string): string | null {
-  const trimmed = value.trim();
-  return trimmed === "" ? null : trimmed;
-}
+import RecordOptionsPanel from "./case-detail/RecordOptionsPanel.js";
+import RunControls from "./case-detail/RunControls.js";
+import StepTable from "./case-detail/StepTable.js";
+import { useCaseRun } from "./case-detail/use-case-run.js";
+import { useRecordOptions } from "./case-detail/use-record-options.js";
 
 interface Props {
   caseId: string;
   onBack: () => void;
-}
-
-/**
- * Record-options form (M14): mirrors the per-case `CaseProfileInput`. Values stay
- * as the raw strings the inputs hold so blanks can be omitted on save; viewport
- * width/height are parsed back to numbers.
- */
-interface ProfileForm {
-  viewportW: string;
-  viewportH: string;
-  device: string;
-  colorScheme: "" | "light" | "dark";
-  locale: string;
-  timezone: string;
-  /** Bare filenames resolved under `~/PlayTestData/<projectId>/auth/`. */
-  storageState: string;
-  saveStorageState: string;
-  /** Run-only: seeds `sessionStorage` before the first script (M17). */
-  sessionState: string;
-  dialogPolicy: "default" | "accept" | "dismiss";
-}
-
-const DEFAULT_PROFILE_FORM: ProfileForm = {
-  viewportW: "",
-  viewportH: "",
-  device: "",
-  colorScheme: "",
-  locale: "",
-  timezone: "",
-  storageState: "",
-  saveStorageState: "",
-  sessionState: "",
-  dialogPolicy: "default",
-};
-
-/** Persisted profile (or none) → form values. */
-function profileToForm(profile: CaseProfile | null): ProfileForm {
-  if (profile === null) {
-    return DEFAULT_PROFILE_FORM;
-  }
-  return {
-    viewportW: profile.viewportW !== undefined ? String(profile.viewportW) : "",
-    viewportH: profile.viewportH !== undefined ? String(profile.viewportH) : "",
-    device: profile.device ?? "",
-    colorScheme: profile.colorScheme ?? "",
-    locale: profile.locale ?? "",
-    timezone: profile.timezone ?? "",
-    storageState: profile.storageState ?? "",
-    saveStorageState: profile.saveStorageState ?? "",
-    sessionState: profile.sessionState ?? "",
-    dialogPolicy: profile.dialogPolicy ?? "default",
-  };
-}
-
-/** Form values → sparse `CaseProfileInput` (blank fields omitted). */
-function toProfileInput(form: ProfileForm): CaseProfileInput {
-  const profile: CaseProfileInput = {};
-  if (form.viewportW.trim() !== "") {
-    profile.viewportW = Number(form.viewportW);
-  }
-  if (form.viewportH.trim() !== "") {
-    profile.viewportH = Number(form.viewportH);
-  }
-  if (form.device.trim() !== "") {
-    profile.device = form.device.trim();
-  }
-  if (form.colorScheme !== "") {
-    profile.colorScheme = form.colorScheme;
-  }
-  if (form.locale.trim() !== "") {
-    profile.locale = form.locale.trim();
-  }
-  if (form.timezone.trim() !== "") {
-    profile.timezone = form.timezone.trim();
-  }
-  if (form.storageState.trim() !== "") {
-    profile.storageState = form.storageState.trim();
-  }
-  if (form.saveStorageState.trim() !== "") {
-    profile.saveStorageState = form.saveStorageState.trim();
-  }
-  if (form.sessionState.trim() !== "") {
-    profile.sessionState = form.sessionState.trim();
-  }
-  // "default" is Playwright's own behavior — equivalent to leaving it unset.
-  if (form.dialogPolicy !== "default") {
-    profile.dialogPolicy = form.dialogPolicy;
-  }
-  return profile;
 }
 
 /**
@@ -145,33 +41,29 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
-  const [profileForm, setProfileForm] = useState<ProfileForm>(DEFAULT_PROFILE_FORM);
-  // Serialized last-saved profile so a reload (or the empty default) never writes
-  // back what the server already has, and edits save once typing pauses.
-  const savedProfileRef = useRef<string>(JSON.stringify(toProfileInput(DEFAULT_PROFILE_FORM)));
-  // Per-case record-start URL (M14): prefilled from the loaded case, saved on a
-  // debounce. Same no-rewrite guard as the profile form; the case id the prefill
-  // last ran for keeps a later refresh from clobbering in-flight edits.
-  const [caseUrl, setCaseUrl] = useState("");
-  const savedCaseUrlRef = useRef<string>(JSON.stringify(normalizeCaseUrl("")));
-  const urlPrefilledForRef = useRef<string | null>(null);
   const [preview, setPreview] = useState<{
     steps: TestStep[];
     unsupported: RecorderUnsupported[];
     raw: string;
   } | null>(null);
-  const [activeRun, setActiveRun] = useState<{
-    suiteRunId: string;
-    caseRunId: string;
-    mode: RunMode;
-  } | null>(null);
   const [pasteLocator, setPasteLocator] = useState("");
-  const [statusByOrder, setStatusByOrder] = useState<Record<number, StepStatus>>({});
-  const [runLogs, setRunLogs] = useState<string[]>([]);
-  const [failedOrder, setFailedOrder] = useState<number | null>(null);
-  const [runFinished, setRunFinished] = useState<string | null>(null);
-  const [runBusy, setRunBusy] = useState(false);
-  const [runSpeedMs, setRunSpeedMs] = useState<number>(0);
+
+  // Keep the loaded case in sync when a URL save lands. Stable identity: the
+  // record-options hook depends on it, and an unstable one would restart the
+  // URL debounce on every render.
+  const handleCaseSaved = useCallback((updated: TestCase): void => {
+    setDetail((prev) => (prev === null ? prev : { ...prev, case: updated }));
+  }, []);
+
+  const recordOptions = useRecordOptions({
+    caseId,
+    loadedCase: detail?.case ?? null,
+    onError: setError,
+    onCaseSaved: handleCaseSaved,
+  });
+  const run = useCaseRun(caseId, { onError: setError, onNotice: setNotice });
+  const { profileForm, patchProfile, saveProfileNow, caseUrl, setCaseUrl, flushCaseUrl } =
+    recordOptions;
 
   const refresh = useCallback(() => {
     setBusy(true);
@@ -207,115 +99,8 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
     setDetail(null);
     setSelectedId(null);
     setNotice(null);
-    setActiveRun(null);
-    setStatusByOrder({});
-    setRunLogs([]);
-    setFailedOrder(null);
-    setRunFinished(null);
-    // Reset the URL form + saved ref synchronously so a debounced write from the
-    // previous case can never land under the new case id (M14).
-    setCaseUrl("");
-    savedCaseUrlRef.current = JSON.stringify(normalizeCaseUrl(""));
-    urlPrefilledForRef.current = null;
     refresh();
   }, [caseId, refresh]);
-
-  // Load the persisted profile whenever the selected case changes (M14). The
-  // form (and the saved ref) reset synchronously first so a debounced save from
-  // the previous case can never land under the new case id.
-  useEffect(() => {
-    const empty = JSON.stringify(toProfileInput(DEFAULT_PROFILE_FORM));
-    setProfileForm(DEFAULT_PROFILE_FORM);
-    savedProfileRef.current = empty;
-    api
-      .profileGet(caseId)
-      .then((profile) => {
-        const form = profileToForm(profile);
-        setProfileForm(form);
-        savedProfileRef.current = JSON.stringify(toProfileInput(form));
-      })
-      .catch((err: unknown) => {
-        setError(formatApiError(err));
-      });
-  }, [caseId]);
-
-  // Debounced persistence: write ~500 ms after the last edit (M14). Skipped when
-  // the form still matches what the server has.
-  useEffect(() => {
-    const input = toProfileInput(profileForm);
-    const serialized = JSON.stringify(input);
-    if (serialized === savedProfileRef.current) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      api
-        .profileSet(caseId, input)
-        .then(() => {
-          savedProfileRef.current = serialized;
-        })
-        .catch((err: unknown) => {
-          setError(formatApiError(err));
-        });
-    }, PROFILE_SAVE_DEBOUNCE_MS);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [caseId, profileForm]);
-
-  // Prefill the Case URL from the loaded case once per case (M14). Keyed on the
-  // loaded case id so refreshes after other mutations don't overwrite in-flight
-  // edits, while a switch back to a case re-reads its stored URL.
-  useEffect(() => {
-    if (detail === null || urlPrefilledForRef.current === detail.case.id) {
-      return;
-    }
-    urlPrefilledForRef.current = detail.case.id;
-    const url = detail.case.url ?? "";
-    setCaseUrl(url);
-    savedCaseUrlRef.current = JSON.stringify(normalizeCaseUrl(url));
-  }, [detail]);
-
-  // Debounced URL persistence: write ~500 ms after the last edit (most recent
-  // wins), skipped when the value still matches what the server has (M14).
-  useEffect(() => {
-    const normalized = normalizeCaseUrl(caseUrl);
-    const serialized = JSON.stringify(normalized);
-    if (serialized === savedCaseUrlRef.current) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      api
-        .updateCase(caseId, { url: normalized })
-        .then((updated) => {
-          savedCaseUrlRef.current = serialized;
-          setDetail((prev) => (prev === null ? prev : { ...prev, case: updated }));
-        })
-        .catch((err: unknown) => {
-          setError(formatApiError(err));
-        });
-    }, CASE_URL_SAVE_DEBOUNCE_MS);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [caseId, caseUrl]);
-
-  const patchProfile = (patch: Partial<ProfileForm>): void => {
-    setProfileForm((prev) => ({ ...prev, ...patch }));
-  };
-
-  // Persist the URL now, bypassing the debounce — used before the recorder starts
-  // so it begins from exactly what the field shows (M14).
-  const flushCaseUrl = (): Promise<void> => {
-    const normalized = normalizeCaseUrl(caseUrl);
-    const serialized = JSON.stringify(normalized);
-    if (serialized === savedCaseUrlRef.current) {
-      return Promise.resolve();
-    }
-    return api.updateCase(caseId, { url: normalized }).then((updated) => {
-      savedCaseUrlRef.current = serialized;
-      setDetail((prev) => (prev === null ? prev : { ...prev, case: updated }));
-    });
-  };
 
   const mutate = (task: Promise<unknown>, done: string): void => {
     setBusy(true);
@@ -337,47 +122,13 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
   const statusByStepId = useMemo<Record<string, StepStatus>>(() => {
     const map: Record<string, StepStatus> = {};
     for (const step of steps) {
-      const status = statusByOrder[step.order];
+      const status = run.statusByOrder[step.order];
       if (status !== undefined) {
         map[step.id] = status;
       }
     }
     return map;
-  }, [steps, statusByOrder]);
-
-  useEffect(() => {
-    if (activeRun === null) {
-      return;
-    }
-    const { caseRunId, suiteRunId } = activeRun;
-    const offStep = api.onRunStepUpdate((event) => {
-      if (event.caseRunId !== caseRunId) {
-        return;
-      }
-      setStatusByOrder((prev) => ({ ...prev, [event.order]: event.status }));
-      if (event.status === "fail") {
-        setFailedOrder(event.order);
-      }
-    });
-    const offLog = api.onRunLog((event) => {
-      setRunLogs((prev) => [...prev.slice(-29), `[${event.level}] ${event.msg}`]);
-    });
-    const offDone = api.onRunFinished((event) => {
-      if (event.suiteRunId !== suiteRunId) {
-        return;
-      }
-      const s = event.summary;
-      setRunFinished(
-        `Finished: ${s.passed} passed, ${s.failed} failed, ${s.skipped} skipped (of ${s.total}).`,
-      );
-      setActiveRun(null);
-    });
-    return () => {
-      offStep();
-      offLog();
-      offDone();
-    };
-  }, [activeRun]);
+  }, [steps, run.statusByOrder]);
 
   const addStep = (): void => {
     mutate(api.upsertStep(caseId, { order: steps.length, action: newAction }), "Step added.");
@@ -440,12 +191,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
     setError(null);
     // Persist the form before codegen launches so the recording environment is
     // exactly what is shown (M14) — main resolves baseUrl + the case profile.
-    const input = toProfileInput(profileForm);
-    api
-      .profileSet(caseId, input)
-      .then(() => {
-        savedProfileRef.current = JSON.stringify(input);
-      })
+    saveProfileNow()
       .then(() => flushCaseUrl())
       .then(() => api.startRecorder(caseId))
       .then(() => {
@@ -497,96 +243,6 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
       });
   };
 
-  const startRun = (mode: RunMode): void => {
-    setRunBusy(true);
-    setError(null);
-    // Speed pacing applies to supervised runs; unsupervised stays instant so
-    // parallel suites keep full throughput.
-    const actionDelayMs = mode === "supervised" ? runSpeedMs : undefined;
-    api
-      .runSingleCase(caseId, mode, actionDelayMs)
-      .then((ids) => {
-        setActiveRun({ ...ids, mode });
-        setStatusByOrder({});
-        setFailedOrder(null);
-        setRunFinished(null);
-        setRunLogs([]);
-        const speedNote =
-          mode === "supervised" && runSpeedMs > 0
-            ? ` at ${(runSpeedMs / 1000).toFixed(1)}s/step`
-            : "";
-        setNotice(`Run started (${mode}${speedNote}).`);
-      })
-      .catch((err: unknown) => {
-        setError(formatApiError(err));
-      })
-      .finally(() => {
-        setRunBusy(false);
-      });
-  };
-
-  const resumeRun = (): void => {
-    if (activeRun === null || failedOrder === null) {
-      return;
-    }
-    const { caseRunId } = activeRun;
-    const order = failedOrder;
-    setRunBusy(true);
-    setError(null);
-    api
-      .resumeFromStep(caseRunId, order)
-      .then(() => {
-        setFailedOrder(null);
-        setNotice(`Resumed from step ${order + 1} — edits made while paused apply.`);
-      })
-      .catch((err: unknown) => {
-        setError(formatApiError(err));
-      })
-      .finally(() => {
-        setRunBusy(false);
-      });
-  };
-
-  const cancelRun = (): void => {
-    if (activeRun === null) {
-      return;
-    }
-    const { suiteRunId } = activeRun;
-    setRunBusy(true);
-    api
-      .cancelRun(suiteRunId)
-      .then(() => {
-        setNotice("Cancel requested — remaining steps skip.");
-      })
-      .catch((err: unknown) => {
-        setError(formatApiError(err));
-      })
-      .finally(() => {
-        setRunBusy(false);
-      });
-  };
-
-  const fullRerun = (mode: RunMode): void => {
-    if (activeRun === null) {
-      startRun(mode);
-      return;
-    }
-    const { suiteRunId } = activeRun;
-    setRunBusy(true);
-    setError(null);
-    api
-      .cancelRun(suiteRunId)
-      .then(() => {
-        startRun(mode);
-      })
-      .catch((err: unknown) => {
-        setError(formatApiError(err));
-        setRunBusy(false);
-      });
-  };
-
-  const paused = activeRun !== null && activeRun.mode === "supervised" && failedOrder !== null;
-
   const exportCaseFile = (): void => {
     setBusy(true);
     setError(null);
@@ -605,6 +261,8 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
         setBusy(false);
       });
   };
+
+  const { activeRun, failedOrder, runFinished, paused } = run;
 
   const runBadge = paused ? (
     <span className="pt-badge pt-badge-warn">Paused</span>
@@ -700,97 +358,17 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                 Add step
               </button>
             </div>
-            {steps.length === 0 ? (
-              <p className="pt-empty">No steps yet — add the first one above.</p>
-            ) : (
-              <div className="pt-table-wrap">
-                <table className="pt-table">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>Action</th>
-                      <th>Selector</th>
-                      <th>Value</th>
-                      <th>Status</th>
-                      <th className="pt-text-end">Order</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {steps.map((step, index) => {
-                      const live = statusByStepId[step.id];
-                      return (
-                        <tr
-                          key={step.id}
-                          draggable
-                          onDragStart={() => {
-                            setDragId(step.id);
-                          }}
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                          }}
-                          onDrop={() => {
-                            dropReorder(step.id);
-                          }}
-                          onClick={() => {
-                            setSelectedId(step.id);
-                          }}
-                          className={
-                            step.id === selectedId ? "pt-drag-row pt-row-selected" : "pt-drag-row"
-                          }
-                          data-dragging={dragId === step.id}
-                        >
-                          <td>{index + 1}</td>
-                          <td>
-                            <span className="pt-badge">{step.action}</span>
-                          </td>
-                          <td className="pt-mono">{step.selector ?? "—"}</td>
-                          <td className="pt-mono">{step.value ?? "—"}</td>
-                          <td>
-                            {live === undefined ? (
-                              <span className="pt-badge pt-badge-mute">—</span>
-                            ) : live === "pass" ? (
-                              <span className="pt-badge pt-badge-pass">pass</span>
-                            ) : live === "fail" ? (
-                              <span className="pt-badge pt-badge-fail">fail</span>
-                            ) : live === "running" ? (
-                              <span className="pt-badge pt-badge-run">running</span>
-                            ) : (
-                              <span className="pt-badge pt-badge-mute">skipped</span>
-                            )}
-                          </td>
-                          <td className="pt-text-end pt-nowrap">
-                            <button
-                              type="button"
-                              aria-label={`Move step ${index + 1} up`}
-                              className="pt-btn pt-btn-ghost pt-btn-sm"
-                              disabled={busy || index === 0}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                moveStep(step.id, index - 1);
-                              }}
-                            >
-                              ↑
-                            </button>{" "}
-                            <button
-                              type="button"
-                              aria-label={`Move step ${index + 1} down`}
-                              className="pt-btn pt-btn-ghost pt-btn-sm"
-                              disabled={busy || index === steps.length - 1}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                moveStep(step.id, index + 1);
-                              }}
-                            >
-                              ↓
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <StepTable
+              steps={steps}
+              selectedId={selectedId}
+              dragId={dragId}
+              busy={busy}
+              statusByStepId={statusByStepId}
+              onSelect={setSelectedId}
+              onDragStart={setDragId}
+              onDrop={dropReorder}
+              onMove={moveStep}
+            />
           </div>
 
           <div className="pt-card">
@@ -887,90 +465,21 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                   Record…
                 </button>
               )}
-              {activeRun === null ? (
-                <>
-                  <label className="pt-label-inline">
-                    Speed
-                    <select
-                      aria-label="Supervised run speed"
-                      className="pt-select"
-                      value={runSpeedMs}
-                      disabled={busy || runBusy || recording || steps.length === 0}
-                      onChange={(e) => {
-                        setRunSpeedMs(Number(e.target.value));
-                      }}
-                      title="Delay between steps in supervised runs"
-                    >
-                      {SUPERVISED_SPEEDS.map((s) => (
-                        <option key={s.label} value={s.ms}>
-                          {s.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    className="pt-btn pt-btn-primary pt-btn-sm"
-                    onClick={() => {
-                      startRun("supervised");
-                    }}
-                    disabled={busy || runBusy || recording || steps.length === 0}
-                    title="Headed, pauses on failure — resume from the failed step"
-                  >
-                    Run supervised
-                  </button>
-                  <button
-                    type="button"
-                    className="pt-btn pt-btn-sm"
-                    onClick={() => {
-                      startRun("unsupervised");
-                    }}
-                    disabled={busy || runBusy || recording || steps.length === 0}
-                    title="Headless, never pauses"
-                  >
-                    Run unsupervised
-                  </button>
-                </>
-              ) : (
-                <>
-                  {paused && failedOrder !== null && (
-                    <>
-                      <button
-                        type="button"
-                        className="pt-btn pt-btn-primary pt-btn-sm"
-                        onClick={resumeRun}
-                        disabled={runBusy}
-                        title="Edit the failed step above, then continue in the same browser"
-                      >
-                        Resume from step {failedOrder + 1}
-                      </button>
-                      <button
-                        type="button"
-                        className="pt-btn pt-btn-sm"
-                        onClick={() => {
-                          fullRerun(activeRun.mode);
-                        }}
-                        disabled={runBusy}
-                      >
-                        Full re-run
-                      </button>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    className="pt-btn pt-btn-danger pt-btn-sm"
-                    onClick={cancelRun}
-                    disabled={runBusy}
-                  >
-                    Cancel run
-                  </button>
-                  <span className="pt-hint">
-                    {paused
-                      ? `Paused at step ${(failedOrder ?? 0) + 1} — edit the step, then Resume.`
-                      : `Running (${activeRun.mode})… steps color live in the graph.`}
-                  </span>
-                </>
-              )}
+              <RunControls
+                activeRun={activeRun}
+                paused={paused}
+                failedOrder={failedOrder}
+                runBusy={run.runBusy}
+                busy={busy}
+                recording={recording}
+                hasSteps={steps.length > 0}
+                runSpeedMs={run.runSpeedMs}
+                onSpeedChange={run.setRunSpeedMs}
+                onStart={run.startRun}
+                onResume={run.resumeRun}
+                onCancel={run.cancelRun}
+                onFullRerun={run.fullRerun}
+              />
             </div>
             <p className="pt-hint pt-mt-12">
               Recording starts from the Case URL; when it is empty the project base URL is used
@@ -981,169 +490,17 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                 {runFinished}
               </p>
             )}
-            <details className="pt-panel">
-              <summary>
-                Record options (viewport, device, theme, locale, auth state, dialogs)
-              </summary>
-              <div className="pt-row pt-mb-10">
-                <label className="pt-label-inline">
-                  Viewport W
-                  <input
-                    aria-label="Record viewport width"
-                    className="pt-input pt-mono"
-                    inputMode="numeric"
-                    placeholder="1280"
-                    value={profileForm.viewportW}
-                    disabled={busy || recording}
-                    onChange={(e) => {
-                      patchProfile({ viewportW: e.target.value });
-                    }}
-                  />
-                </label>
-                <label className="pt-label-inline">
-                  H
-                  <input
-                    aria-label="Record viewport height"
-                    className="pt-input pt-mono"
-                    inputMode="numeric"
-                    placeholder="720"
-                    value={profileForm.viewportH}
-                    disabled={busy || recording}
-                    onChange={(e) => {
-                      patchProfile({ viewportH: e.target.value });
-                    }}
-                  />
-                </label>
-                <label className="pt-label-inline">
-                  Device
-                  <input
-                    aria-label="Record device"
-                    className="pt-input"
-                    placeholder="iPhone 11"
-                    value={profileForm.device}
-                    disabled={busy || recording}
-                    onChange={(e) => {
-                      patchProfile({ device: e.target.value });
-                    }}
-                  />
-                </label>
-                <label className="pt-label-inline">
-                  Theme
-                  <select
-                    aria-label="Record color scheme"
-                    className="pt-select"
-                    value={profileForm.colorScheme}
-                    disabled={busy || recording}
-                    onChange={(e) => {
-                      patchProfile({ colorScheme: e.target.value as ProfileForm["colorScheme"] });
-                    }}
-                  >
-                    <option value="">Default</option>
-                    <option value="light">Light</option>
-                    <option value="dark">Dark</option>
-                  </select>
-                </label>
-              </div>
-              <div className="pt-row pt-mb-10">
-                <label className="pt-label-inline">
-                  Locale
-                  <input
-                    aria-label="Record locale"
-                    className="pt-input pt-mono"
-                    placeholder="en-GB"
-                    value={profileForm.locale}
-                    disabled={busy || recording}
-                    onChange={(e) => {
-                      patchProfile({ locale: e.target.value });
-                    }}
-                  />
-                </label>
-                <label className="pt-label-inline">
-                  Timezone
-                  <input
-                    aria-label="Record timezone"
-                    className="pt-input pt-mono"
-                    placeholder="Europe/Rome"
-                    value={profileForm.timezone}
-                    disabled={busy || recording}
-                    onChange={(e) => {
-                      patchProfile({ timezone: e.target.value });
-                    }}
-                  />
-                </label>
-                <label className="pt-label-inline">
-                  Dialogs
-                  <select
-                    aria-label="Dialog policy"
-                    className="pt-select"
-                    value={profileForm.dialogPolicy}
-                    disabled={busy || recording}
-                    onChange={(e) => {
-                      patchProfile({ dialogPolicy: e.target.value as ProfileForm["dialogPolicy"] });
-                    }}
-                    title="How native dialogs (alert/confirm/prompt) are handled while recording and running"
-                  >
-                    <option value="default">Default (unhandled stay open)</option>
-                    <option value="accept">Auto-accept</option>
-                    <option value="dismiss">Auto-dismiss</option>
-                  </select>
-                </label>
-              </div>
-              <div className="pt-row">
-                <label className="pt-label-inline">
-                  Load storage state
-                  <input
-                    aria-label="Load storage state filename"
-                    className="pt-input pt-mono"
-                    placeholder="login.json"
-                    value={profileForm.storageState}
-                    disabled={busy || recording}
-                    onChange={(e) => {
-                      patchProfile({ storageState: e.target.value });
-                    }}
-                  />
-                </label>
-                <label className="pt-label-inline">
-                  Save storage state
-                  <input
-                    aria-label="Save storage state filename"
-                    className="pt-input pt-mono"
-                    placeholder="login.json"
-                    value={profileForm.saveStorageState}
-                    disabled={busy || recording}
-                    onChange={(e) => {
-                      patchProfile({ saveStorageState: e.target.value });
-                    }}
-                  />
-                </label>
-                <label className="pt-label-inline">
-                  Session storage
-                  <input
-                    aria-label="Session storage filename"
-                    className="pt-input pt-mono"
-                    placeholder="session.json"
-                    value={profileForm.sessionState}
-                    disabled={busy || recording}
-                    onChange={(e) => {
-                      patchProfile({ sessionState: e.target.value });
-                    }}
-                  />
-                </label>
-              </div>
-              <p className="pt-hint">
-                Auth state takes a bare filename (e.g. login.json) kept in this project's auth
-                directory — log in once with Save set, then reuse the file via Load. Session storage
-                is runs-only (recording cannot seed it): save{" "}
-                <code>JSON.stringify(sessionStorage)</code> from DevTools into that file. An
-                explicit viewport overrides the device preset. The other options drive both
-                recording and runs.
-              </p>
-            </details>
+            <RecordOptionsPanel
+              form={profileForm}
+              busy={busy}
+              recording={recording}
+              onPatch={patchProfile}
+            />
           </div>
-          {runLogs.length > 0 && (
+          {run.runLogs.length > 0 && (
             <details className="pt-panel">
-              <summary>Run log ({runLogs.length})</summary>
-              <pre className="pt-runlog">{runLogs.join("\n")}</pre>
+              <summary>Run log ({run.runLogs.length})</summary>
+              <pre className="pt-runlog">{run.runLogs.join("\n")}</pre>
             </details>
           )}
           {preview !== null && (

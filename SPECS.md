@@ -125,6 +125,14 @@ src/
   renderer/
     api.ts / main.tsx / App.tsx / styles.css / theme.ts
     pages/WelcomeScreen, ProjectExplorer, SuiteDetailPage, CaseDetailPage, RunReportPage
+    pages/case-detail/            // case workflow page split by concern
+      profile-form.ts             //   profile form ⇄ CaseProfileInput mapping
+      use-record-options.ts       //   debounced profile + case-URL form state
+      use-case-run.ts             //   single-case run state + run:* subscription
+      RecordOptionsPanel.tsx / RunControls.tsx / StepTable.tsx
+    pages/suite-detail/           // suite detail page split by concern
+      use-suite-detail.ts         //   membership, filtering, run/delete/transfer state
+      SuiteListCard.tsx / CaseMembershipCard.tsx / RunSuiteDialog.tsx
     components/StepNode, StepGraph, StepEditorPanel, TestDataEditor,
       RecorderImportPreview, SyncPanel, BrowserBanner, ConfirmDialog,
       pick-locator.ts, suite-run-filter.ts, workflow-layout.ts
