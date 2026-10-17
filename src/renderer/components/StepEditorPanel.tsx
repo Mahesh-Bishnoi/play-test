@@ -144,6 +144,9 @@ export default function StepEditorPanel({
             placeholder="e.g. #login, text=Sign in"
           />
         </label>
+        <p className="pt-hint">
+          Tip: in the codegen window use Pick Locator → Copy, then paste the locator here.
+        </p>
         <label className="pt-label">
           Value
           <textarea

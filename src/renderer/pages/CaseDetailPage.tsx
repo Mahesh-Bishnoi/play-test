@@ -10,6 +10,7 @@ import type { CaseDetail } from "../api.js";
 import RecorderImportPreview from "../components/RecorderImportPreview.js";
 import StepEditorPanel from "../components/StepEditorPanel.js";
 import type { StepPatch } from "../components/StepEditorPanel.js";
+import { validatePastedLocator } from "../components/pick-locator.js";
 import StepGraph from "../components/StepGraph.js";
 import TestDataEditor from "../components/TestDataEditor.js";
 
@@ -128,6 +129,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
     caseRunId: string;
     mode: RunMode;
   } | null>(null);
+  const [pasteLocator, setPasteLocator] = useState("");
   const [statusByOrder, setStatusByOrder] = useState<Record<number, StepStatus>>({});
   const [runLogs, setRunLogs] = useState<string[]>([]);
   const [failedOrder, setFailedOrder] = useState<number | null>(null);
@@ -242,6 +244,23 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
 
   const addStep = (): void => {
     mutate(api.upsertStep(caseId, { order: steps.length, action: newAction }), "Step added.");
+  };
+
+  const addLocatorStep = (): void => {
+    const validated = validatePastedLocator(pasteLocator);
+    if (!validated.ok) {
+      setError(validated.error);
+      return;
+    }
+    setPasteLocator("");
+    mutate(
+      api.upsertStep(caseId, {
+        order: steps.length,
+        action: "click",
+        selector: validated.selector,
+      }),
+      "Locator step added (click — change the action in the editor if needed).",
+    );
   };
 
   const saveStep = (patch: StepPatch): void => {
@@ -639,6 +658,43 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                 </table>
               </div>
             )}
+          </div>
+
+          <div className="pt-card">
+            <div className="pt-section-head">
+              <h3>Add step from picked locator</h3>
+            </div>
+            <p className="pt-hint pt-mb-10">
+              In the codegen window: Record → Stop, then Pick Locator → Copy — paste below to insert
+              a click step. Plain CSS works too; anything else (e.g. page.evaluate) is rejected with
+              edit guidance and no step is created.
+            </p>
+            <div className="pt-row">
+              <input
+                aria-label="Pasted locator"
+                className="pt-input pt-mono"
+                placeholder="e.g. getByRole('button', { name: 'File' })"
+                value={pasteLocator}
+                disabled={busy}
+                onChange={(e) => {
+                  setPasteLocator(e.target.value);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addLocatorStep();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="pt-btn pt-btn-sm"
+                onClick={addLocatorStep}
+                disabled={busy || pasteLocator.trim() === ""}
+              >
+                Add locator step
+              </button>
+            </div>
           </div>
 
           <div className="pt-card">
