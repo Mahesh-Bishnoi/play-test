@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseCodegenOutput } from "../src/main/recorder";
+import { parseCodegenOutput } from "../src/main/recorder/codegen-output";
 import { executeStep } from "../src/main/runner/execute-step";
 import type { RunPage } from "../src/main/runner/seams";
 

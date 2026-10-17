@@ -7,8 +7,8 @@ import {
   registerProjectHandlers,
   registerRecorderHandlers,
 } from "../src/main/ipc-register.js";
-import { CodegenRecorder } from "../src/main/recorder.js";
-import type { CodegenChild, RecorderDeps } from "../src/main/recorder.js";
+import { CodegenRecorder } from "../src/main/recorder/codegen-shell.js";
+import type { CodegenChild, RecorderDeps } from "../src/main/recorder/codegen-shell.js";
 import { createCase } from "../src/main/ipc-cases.js";
 import { createProject } from "../src/main/ipc-projects.js";
 import { ProjectSchema } from "../src/shared/schema.js";

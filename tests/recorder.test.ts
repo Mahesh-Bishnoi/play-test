@@ -3,17 +3,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import type { CodegenChild, RecorderDeps } from "../src/main/recorder.js";
+import type { CodegenChild, RecorderDeps } from "../src/main/recorder/codegen-shell.js";
 import type { RecorderStartOptions } from "../src/shared/ipc-contract.js";
+import { CodegenRecorder } from "../src/main/recorder/codegen-shell.js";
+import { buildCodegenArgs } from "../src/main/recorder/codegen-args.js";
+import { parseCodegenOutput } from "../src/main/recorder/codegen-output.js";
 import {
-  CodegenRecorder,
   RecorderAlreadyRunningError,
   RecorderNotRunningError,
   RecorderStartError,
-  buildCodegenArgs,
-  parseCodegenOutput,
-} from "../src/main/recorder.js";
-import { UnknownRecorderDeviceError } from "../src/main/recorder.js";
+  UnknownRecorderDeviceError,
+} from "../src/main/recorder/errors.js";
 import { createDatabase } from "../src/main/db.js";
 import type { DatabaseHandle } from "../src/main/db.js";
 import { createCase, updateCase } from "../src/main/ipc-cases.js";

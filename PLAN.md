@@ -301,3 +301,10 @@ anything durable to `SPECS.md`.
   Next up in the same pass: `recorder.ts`, `git-sync.ts`, the renderer pages, then
   `suite-runner.ts` / `ipc-register.ts` / `reports.ts` / `transfer.ts` (extract only where
   the deletion test passes).
+- **2026-10-17 — maintainability refactor, phase 2.** Split the 1184-line
+  `src/main/recorder.ts` into `src/main/recorder/`: `errors.ts`, `literals.ts` (JS-literal
+  text helpers), `statement.ts` (statement → field extraction), `popup-download.ts` (M16
+  multi-line bookkeeping), `parse-line.ts` (one codegen line → step/unsupported),
+  `codegen-output.ts` (whole-output state machine), `codegen-args.ts` (CLI flag
+  validation), `codegen-shell.ts` (`CodegenRecorder` + `sharedRecorder`). Parser logic
+  unchanged; `npm test` green (283 passed). Phases 3–5 still to do.

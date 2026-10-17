@@ -23,8 +23,8 @@ import {
   RunnerRunSuitePayload,
 } from "../shared/ipc-contract.js";
 import { TestStepSchema } from "../shared/step-types.js";
-import { sharedRecorder } from "./recorder.js";
-import type { CodegenRecorder } from "./recorder.js";
+import { sharedRecorder } from "./recorder/codegen-shell.js";
+import type { CodegenRecorder } from "./recorder/codegen-shell.js";
 import { defaultBrowserSetupDeps, getBrowserStatus, installChromium } from "./browser-setup.js";
 import type { BrowserSetupDeps } from "./browser-setup.js";
 import { readSuiteHtmlReport, writeSuitePdfReport } from "./reports.js";

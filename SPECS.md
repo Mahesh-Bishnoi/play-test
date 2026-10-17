@@ -93,7 +93,15 @@ src/
     db.ts / schema.ts / artifacts.ts
     ipc-projects.ts / ipc-suites.ts / ipc-cases.ts / ipc-steps.ts
     ipc-register.ts / main.ts
-    recorder.ts / suite-runner.ts
+    suite-runner.ts
+    recorder/                     // Playwright codegen capture → parsed steps
+      errors.ts                   //   recorder error vocabulary
+      literals.ts / statement.ts  //   JS-literal + statement extraction
+      popup-download.ts           //   M16 multi-line popup/download bookkeeping
+      parse-line.ts               //   one codegen line → step or unsupported entry
+      codegen-output.ts           //   whole-output state machine
+      codegen-args.ts             //   codegen CLI argument validation
+      codegen-shell.ts            //   CodegenRecorder process shell + sharedRecorder
     runner/                       // single-case + suite execution, split by concern
       seams.ts / errors.ts        //   page/context interfaces · error vocabulary
       step-values.ts              //   value encodings + {{key}} substitution
