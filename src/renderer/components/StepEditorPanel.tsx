@@ -23,7 +23,8 @@ interface Props {
 
 const ACTION_HINTS: Record<StepAction, string> = {
   goto: "Navigates to a URL — put the URL in Value.",
-  click: "Needs a Selector. Value is optional: right, double, shift/ctrl/alt/meta, force, or JSON.",
+  click:
+    "Needs a Selector. Value is optional: right, double, shift/ctrl/alt/meta, force, popup, download, or JSON.",
   dblclick: "Needs a Selector (double-click).",
   fill: "Needs a Selector plus the text in Value.",
   type: "Needs a Selector plus the text in Value (typed char-by-char).",

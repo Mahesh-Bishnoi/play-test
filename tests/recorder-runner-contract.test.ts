@@ -72,3 +72,51 @@ describe("M15 recorder → runner contract", () => {
     }
   });
 });
+
+describe("M16 recorder → runner contract", () => {
+  it("turns a recorded popup flow into runnable steps that adopt the new page", async () => {
+    const codegen = [
+      "const page1Promise = page.waitForEvent('popup');",
+      "await page.getByRole('link', { name: 'Sign in' }).click();",
+      "const page1 = await page1Promise;",
+      "await page1.getByRole('textbox', { name: 'Password' }).fill('pw');",
+      "await page1.getByRole('button', { name: 'Sign in' }).click();",
+    ].join("\n");
+
+    const { steps, unsupported } = parseCodegenOutput(codegen);
+
+    // The two bookkeeping lines are boilerplate: no extra steps, no noise.
+    expect(unsupported).toEqual([]);
+    expect(steps.map((s) => s.action)).toEqual(["click", "fill", "click"]);
+
+    // The click that opens the popup carries the marker the runner adopts on.
+    expect(JSON.parse(steps[0]!.value ?? "{}")).toMatchObject({ popup: true });
+
+    // Subsequent steps recorded on the popup page (`page1.`) survive parsing and
+    // dispatch against the adopted page like any other step.
+    expect(steps[1]!.selector).toContain("getByRole('textbox'");
+    expect(steps[2]!.selector).toContain("getByRole('button'");
+
+    const { page } = recordingPage();
+    for (const step of steps) {
+      await expect(executeStep(page, step)).resolves.toBeUndefined();
+    }
+  });
+
+  it("marks a recorded download click and keeps the wait pattern out of the steps", async () => {
+    const codegen = [
+      "const downloadPromise = page.waitForEvent('download');",
+      "await page.getByRole('link', { name: 'Download' }).click();",
+      "const download = await downloadPromise;",
+    ].join("\n");
+
+    const { steps, unsupported } = parseCodegenOutput(codegen);
+
+    expect(unsupported).toEqual([]);
+    expect(steps.map((s) => s.action)).toEqual(["click"]);
+    expect(JSON.parse(steps[0]!.value ?? "{}")).toMatchObject({ download: true });
+
+    const { page } = recordingPage();
+    await expect(executeStep(page, steps[0]!)).resolves.toBeUndefined();
+  });
+});

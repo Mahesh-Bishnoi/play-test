@@ -158,6 +158,10 @@ class FakePage implements RunPage {
     mkdirSync(join(path, ".."), { recursive: true });
     writeFileSync(path, "fake-png");
   }
+  /** Pages in the context (M16 RunPage addition; suite runner never warns). */
+  pageCount(): number {
+    return 1;
+  }
 }
 
 class FakeContext implements RunContext {

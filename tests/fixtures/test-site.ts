@@ -8,14 +8,20 @@ import { once } from "node:events";
  * client JS, no external assets — so runs are hermetic and fast.
  *
  * Pages:
- * - `/`            home: nav (Home/Form/Products), hero, link to the form
+ * - `/`            home: nav (Home/Form/Products), hero, form link, popup + download links
  * - `/form`        order form: text input, select, checkbox, submit
  * - `/result`      echoes the submitted order in `#summary`
  * - `/products`    searchable list (`?q=` filters server-side)
  * - `/secure`      cookie-gated: `#welcome` only with a `session=ok` cookie
+ * - `/download`    attachment response (`report.txt`, body `report-body`) for M16
  */
 
 const PRODUCTS = ["Apple", "Banana", "Cherry", "Date", "Elderberry"];
+
+/** Body served as an attachment by `/download` (M16 download-token e2e). */
+const DOWNLOAD_BODY = "report-body";
+/** `content-disposition` the `/download` route advertises. */
+const DOWNLOAD_FILENAME = "report.txt";
 
 function escapeHtml(text: string): string {
   return text
@@ -45,6 +51,8 @@ function homePage(): string {
       "<h1>TestMart home</h1>",
       "<p>Your friendly fixture shop for end-to-end tests.</p>",
       '<a class="cta" href="/form">Order something</a>',
+      '<a id="open-tab" href="/form" target="_blank">Open the order form in a new tab</a>',
+      '<a id="download-link" href="/download">Download the report</a>',
     ].join("\n"),
   );
 }
@@ -134,6 +142,15 @@ export async function startTestSite(): Promise<TestSite> {
       case "/secure":
         body = securePage(req.headers.cookie);
         break;
+      case "/download":
+        // M16: clicking a `download` token expects Playwright to save this
+        // attachment as `<caseDir>/downloads/report.txt`.
+        res.writeHead(200, {
+          "content-type": "text/plain; charset=utf-8",
+          "content-disposition": `attachment; filename="${DOWNLOAD_FILENAME}"`,
+        });
+        res.end(DOWNLOAD_BODY);
+        return;
       default:
         status = 404;
         body = shell("Not found", "<h1>Not found</h1>");

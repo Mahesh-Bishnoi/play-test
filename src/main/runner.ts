@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { basename, join } from "node:path";
 
 import { eq } from "drizzle-orm";
 import { chromium, devices } from "playwright";
@@ -50,6 +51,10 @@ export interface ClickStepOptions {
   force?: boolean;
   /** Recorded `clickCount` (M15); `2` is normalised to the `double` path below. */
   clickCount?: number;
+  /** Adopt the page this click opens instead of leaving it in the background (M16). */
+  popup?: boolean;
+  /** Save the download this click starts to the case's downloads dir (M16). */
+  download?: boolean;
 }
 
 export interface RunPage {
@@ -95,6 +100,11 @@ export interface RunPage {
   drag(source: string, target: string, timeoutMs?: number): Promise<void>;
   waitForTimeout(ms: number): Promise<void>;
   screenshot(path: string): Promise<void>;
+  /**
+   * Pages currently open in the runner's browser context (M16). Drives the
+   * "a click opened a new tab" warning without reaching into Playwright.
+   */
+  pageCount(): number;
 }
 
 /** A launched browser context plus its teardown/artifact hooks. */
@@ -127,6 +137,12 @@ export interface RunContext {
 }
 
 /**
+ * Run-log severity, shared by both runners' `log` and the page's injected
+ * `onLog` (M16) so popup/download messages stream over `run:log`.
+ */
+export type RunLogLevel = "info" | "warn" | "error";
+
+/**
  * Everything a single browser context needs, resolved per case from its profile
  * (M14, SPECS §2). `videoDir`/`title` are per-case; the rest mirror Playwright's
  * `newContext` options. `baseURL` comes from the project, not the profile.
@@ -144,6 +160,10 @@ export interface ContextLaunchOptions {
   storageState?: string;
   baseURL?: string;
   dialogPolicy?: "default" | "accept" | "dismiss";
+  /** Where click downloads land (M16): `<videoDir>/downloads`. */
+  downloadsDir: string;
+  /** Sink for click popup/download progress (M16); the runner logs over IPC. */
+  onLog: (level: RunLogLevel, message: string) => void;
 }
 
 /** An open browser with a fresh-context factory (M14 launcher seam). */
@@ -174,10 +194,13 @@ export function contextLaunchOptionsFromProfile(input: {
   projectBaseUrl?: string;
   profile: CaseProfile | null;
   videoDir: string;
+  onLog: (level: RunLogLevel, message: string) => void;
 }): ContextLaunchOptions {
   const options: ContextLaunchOptions = {
     videoDir: input.videoDir,
     title: input.caseName,
+    downloadsDir: join(input.videoDir, "downloads"),
+    onLog: input.onLog,
   };
   if (input.projectBaseUrl !== undefined && input.projectBaseUrl !== "") {
     options.baseURL = input.projectBaseUrl;
@@ -281,8 +304,9 @@ export function substituteStepValue(
  * Click `value` encoding (no schema change): empty = plain left-click,
  * legacy `"dblclick"` = double-click, `"right"` / `"middle"` = button,
  * `"shift"` / `"ctrl"` / `"alt"` / `"meta"` (+ `-click` / `+`-joined forms) =
- * modifiers, `"force"` = force click, or a JSON object like
- * `{"button":"right","modifiers":["Shift"],"force":true}`.
+ * modifiers, `"force"` = force click, `"popup"` / `"download"` = adopt the
+ * opened page / save the triggered download (M16), or a JSON object like
+ * `{"button":"right","modifiers":["Shift"],"force":true,"popup":true}`.
  */
 export function parseClickValue(value: string | undefined): {
   double: boolean;
@@ -315,6 +339,12 @@ export function parseClickValue(value: string | undefined): {
       }
       if (parsed["force"] === true) {
         out.force = true;
+      }
+      if (parsed["popup"] === true) {
+        out.popup = true;
+      }
+      if (parsed["download"] === true) {
+        out.download = true;
       }
       const count = parsed["clickCount"];
       if (typeof count === "number" && Number.isInteger(count) && count >= 1) {
@@ -354,12 +384,26 @@ export function parseClickValue(value: string | undefined): {
       modifiers.add("Meta");
     } else if (token === "force") {
       options.force = true;
+    } else if (token === "popup") {
+      options.popup = true;
+    } else if (token === "download") {
+      options.download = true;
     }
   }
   if (modifiers.size > 0) {
     options.modifiers = [...modifiers];
   }
   return { double, options };
+}
+
+/**
+ * True when a click's `value` opts into the popup/download patterns (M16).
+ * Used to scope the "opened a new tab" warning to plain clicks: a click that
+ * already follows or saves the event needs no hint.
+ */
+function clickFollowsPageEvent(value: string | undefined): boolean {
+  const { options } = parseClickValue(value);
+  return options.popup === true || options.download === true;
 }
 
 /**
@@ -966,6 +1010,7 @@ export class SingleCaseRunner {
       projectBaseUrl: getProject(this.db, testCase.projectId).baseUrl,
       profile: getCaseProfile(this.db, parsed.caseId),
       videoDir: caseDir,
+      onLog: (level, msg) => this.log(level, msg),
     });
     insertRunRows();
     const session: LiveSession = {
@@ -1095,9 +1140,20 @@ export class SingleCaseRunner {
         // Substitution inside the try: data may change while paused, so a
         // deleted key fails this step (and pauses again) instead of aborting.
         const value = substituteStepValue(step.value, data);
+        // M16: a plain click that opens a tab leaves it in the background —
+        // snapshot the context's page count and hint at the `popup` token
+        // when it grew. Clicks that opt in (popup/download) are excluded.
+        const watchPopup = step.action === "click" && !clickFollowsPageEvent(value);
+        const pagesBefore = watchPopup ? context.page.pageCount() : 0;
         await runStepInTraceGroup(context, stepTraceLabel({ ...step, value }), () =>
           executeStep(context.page, { ...step, value }),
         );
+        if (watchPopup && context.page.pageCount() > pagesBefore) {
+          this.log(
+            "warn",
+            `step s${step.order} (click) opened a new page — add the "popup" token to value to follow it`,
+          );
+        }
         await this.captureScreenshot(context, screenshotPath);
         this.updateStepRun(caseRunId, step.id, "pass", null, screenshotPath, stepStarted);
         this.stepEvent(caseRunId, step.order, "pass");
@@ -2254,9 +2310,21 @@ function resolveLocatorOptions(
 const DEFAULT_ASSERT_TIMEOUT_MS = 30_000;
 
 class PlaywrightRunPage implements RunPage {
-  private readonly page: Page;
+  /**
+   * Mutable current page (M16): a `popup` click adopts the page it opened, so
+   * every following step drives that page instead of the original one.
+   */
+  private page: Page;
 
-  constructor(page: Page) {
+  constructor(
+    private readonly context: BrowserContext,
+    page: Page,
+    private readonly deps: {
+      downloadsDir: string;
+      onLog: (level: RunLogLevel, message: string) => void;
+      dialogPolicy?: "default" | "accept" | "dismiss";
+    },
+  ) {
     this.page = page;
   }
 
@@ -2269,8 +2337,45 @@ class PlaywrightRunPage implements RunPage {
     await this.page.goto(url, { timeout: timeoutMs });
   }
 
+  /**
+   * `popup` / `download` are runner-level patterns (M16), not Playwright click
+   * options — strip them before the click and arm the matching `waitForEvent`
+   * promise so the click and the event race together (Playwright's own
+   * `Promise.all([waitForEvent, click])` idiom).
+   */
   async click(selector: string, timeoutMs?: number, options?: ClickStepOptions): Promise<void> {
-    await this.loc(selector).click({ timeout: timeoutMs, ...options });
+    const { popup, download, ...clickOptions } = options ?? {};
+    const loc = this.loc(selector);
+    if (popup === true) {
+      const [next] = await Promise.all([
+        this.context.waitForEvent("page"),
+        loc.click({ timeout: timeoutMs, ...clickOptions }),
+      ]);
+      // Adopt the opened page: tracing is context-level, but the profile's
+      // dialog policy is attached per page, so re-attach it to the new one.
+      this.page = next;
+      if (this.deps.dialogPolicy !== undefined && this.deps.dialogPolicy !== "default") {
+        attachDialogPolicy(next, this.deps.dialogPolicy);
+      }
+      this.deps.onLog("info", `popup opened: ${next.url()}`);
+      return;
+    }
+    if (download === true) {
+      const [dl] = await Promise.all([
+        this.page.waitForEvent("download"),
+        loc.click({ timeout: timeoutMs, ...clickOptions }),
+      ]);
+      mkdirSync(this.deps.downloadsDir, { recursive: true });
+      const dest = join(this.deps.downloadsDir, sanitizeDownloadFilename(dl.suggestedFilename()));
+      await dl.saveAs(dest);
+      this.deps.onLog("info", `download saved: ${dest}`);
+      return;
+    }
+    await loc.click({ timeout: timeoutMs, ...clickOptions });
+  }
+
+  pageCount(): number {
+    return this.context.pages().length;
   }
 
   async dblclick(selector: string, timeoutMs?: number): Promise<void> {
@@ -2441,10 +2546,14 @@ class PlaywrightRunContext implements RunContext {
   readonly page: RunPage;
   private closed = false;
 
-  constructor(context: BrowserContext, page: Page) {
+  constructor(context: BrowserContext, page: Page, o: ContextLaunchOptions) {
     this.context = context;
     this.rawPage = page;
-    this.page = new PlaywrightRunPage(page);
+    this.page = new PlaywrightRunPage(context, page, {
+      downloadsDir: o.downloadsDir,
+      onLog: o.onLog,
+      dialogPolicy: o.dialogPolicy,
+    });
   }
 
   async saveVideo(dest: string): Promise<void> {
@@ -2509,6 +2618,22 @@ function attachDialogPolicy(page: Page, policy: ContextLaunchOptions["dialogPoli
 }
 
 /**
+ * Download destination filename (M16). `suggestedFilename()` is server-
+ * controlled, so keep only the basename and neutralise any leftover path
+ * separators / `..` before joining it under the case's downloads dir.
+ */
+function sanitizeDownloadFilename(suggested: string): string {
+  const base = basename(suggested)
+    .replace(/[\\/]+/g, "_")
+    .replace(/\.\./g, "_")
+    .trim();
+  if (base === "" || base === "." || base === "..") {
+    return "download";
+  }
+  return base;
+}
+
+/**
  * One Chromium (MVP locked decision) with a fresh-context factory. The context
  * maps the case profile onto Playwright's `newContext`: an explicit viewport
  * wins over the device preset (device fields spread first), tracing starts with
@@ -2539,7 +2664,7 @@ class PlaywrightBrowserHandle implements BrowserHandle {
       await context.tracing.start({ screenshots: true, snapshots: true, title: o.title });
       const page = await context.newPage();
       attachDialogPolicy(page, o.dialogPolicy);
-      return new PlaywrightRunContext(context, page);
+      return new PlaywrightRunContext(context, page, o);
     } catch (err) {
       await context.close();
       throw err;

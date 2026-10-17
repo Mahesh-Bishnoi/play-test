@@ -164,6 +164,180 @@ describe("parseCodegenOutput (PLAN §7, M15)", () => {
     });
   });
 
+  it("marks the click a popup wait was recorded for and drops the bookkeeping (M16)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "await page.goto('https://example.com/');",
+        "const page1Promise = page.waitForEvent('popup');",
+        "await page.getByRole('link', { name: 'Open in a new tab' }).click();",
+        "const page1 = await page1Promise;",
+      ].join("\n"),
+    );
+    expect(steps.map((s) => s.action)).toEqual(["goto", "click"]);
+    expect(steps[0]?.value).toBe("https://example.com/");
+    expect(steps[1]).toMatchObject({
+      selector: "getByRole('link', { name: 'Open in a new tab' })",
+      value: '{"popup":true}',
+    });
+    // The `waitForEvent`/`await …Promise` lines are neither steps nor unsupported.
+    expect(unsupported).toEqual([]);
+  });
+
+  it("marks the click a download wait was recorded for (M16)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "const downloadPromise = page.waitForEvent('download');",
+        "await page.getByRole('link', { name: 'Download' }).click();",
+        "const download = await downloadPromise;",
+      ].join("\n"),
+    );
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({
+      action: "click",
+      selector: "getByRole('link', { name: 'Download' })",
+      value: '{"download":true}',
+    });
+    expect(unsupported).toEqual([]);
+  });
+
+  it("merges the popup marker into an existing click-option JSON (M16)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "const page2Promise = page.waitForEvent('popup');",
+        "await page.getByRole('button').click({ button: 'right', modifiers: ['Shift'] });",
+        "const page2 = await page2Promise;",
+      ].join("\n"),
+    );
+    expect(steps).toHaveLength(1);
+    expect(steps[0]?.value).toBe('{"button":"right","modifiers":["Shift"],"popup":true}');
+    expect(unsupported).toEqual([]);
+  });
+
+  it("handles the inline single-line and multi-line Promise.all popup forms (M16)", () => {
+    const single = parseCodegenOutput(
+      "const [page1] = await Promise.all([page.waitForEvent('popup'), page.getByRole('link', { name: 'Open' }).click()]);",
+    );
+    expect(single.steps).toHaveLength(1);
+    expect(single.steps[0]).toMatchObject({
+      action: "click",
+      selector: "getByRole('link', { name: 'Open' })",
+      value: '{"popup":true}',
+    });
+    expect(single.unsupported).toEqual([]);
+
+    const multi = parseCodegenOutput(
+      [
+        "const [page1] = await Promise.all([",
+        "  page.waitForEvent('download'),",
+        "  page.getByRole('link', { name: 'Download' }).click()",
+        "]);",
+      ].join("\n"),
+    );
+    expect(multi.steps).toHaveLength(1);
+    expect(multi.steps[0]).toMatchObject({
+      action: "click",
+      selector: "getByRole('link', { name: 'Download' })",
+      value: '{"download":true}',
+    });
+    expect(multi.unsupported).toEqual([]);
+  });
+
+  it("leaves a plain click value-less and only marks the click a wait precedes (M16)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "const page1Promise = page.waitForEvent('popup');",
+        "await page.locator('#a').click();",
+        "const page1 = await page1Promise;",
+        "await page.locator('#b').click();",
+      ].join("\n"),
+    );
+    expect(steps).toHaveLength(2);
+    expect(steps[0]?.value).toBe('{"popup":true}');
+    expect(steps[1]?.value).toBeUndefined();
+    expect(unsupported).toEqual([]);
+  });
+
+  it("does not mark a click when the wait is followed by another step (M16)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "const page1Promise = page.waitForEvent('popup');",
+        "await page.locator('#a').fill('x');",
+        "await page.locator('#b').click();",
+      ].join("\n"),
+    );
+    expect(steps.map((s) => s.action)).toEqual(["fill", "click"]);
+    expect(steps[1]?.value).toBeUndefined();
+    expect(unsupported).toEqual([]);
+  });
+
+  it("records the popup page's later interactions after adopting the settled alias (M16)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "const page1Promise = page.waitForEvent('popup');",
+        "await page.getByRole('link', { name: 'Sign in' }).click();",
+        "const page1 = await page1Promise;",
+        "await page1.getByRole('textbox', { name: 'Password' }).fill('pw');",
+        "await page1.getByRole('button', { name: 'Sign in' }).click();",
+        "await expect(page1.getByRole('heading', { name: 'Welcome' })).toBeVisible();",
+      ].join("\n"),
+    );
+    // The two bookkeeping lines yield neither a step nor an unsupported entry.
+    expect(steps.map((s) => s.action)).toEqual(["click", "fill", "click", "assert-visible"]);
+    expect(steps.map((s) => s.order)).toEqual([0, 1, 2, 3]);
+    expect(steps[0]).toMatchObject({
+      action: "click",
+      selector: "getByRole('link', { name: 'Sign in' })",
+      value: '{"popup":true}',
+    });
+    expect(steps[1]).toMatchObject({
+      action: "fill",
+      selector: "getByRole('textbox', { name: 'Password' })",
+      value: "pw",
+    });
+    expect(steps[2]).toMatchObject({
+      action: "click",
+      selector: "getByRole('button', { name: 'Sign in' })",
+      value: undefined,
+    });
+    expect(steps[3]).toMatchObject({
+      action: "assert-visible",
+      selector: "getByRole('heading', { name: 'Welcome' })",
+    });
+    expect(unsupported).toEqual([]);
+  });
+
+  it("ignores a page-variable statement when no popup was booked (unchanged behaviour, M16)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "await page1.getByRole('button', { name: 'Sign in' }).click();",
+        "await page1.getByLabel('Email').fill('a@b.c');",
+      ].join("\n"),
+    );
+    // No alias adoption without a popup booking: `page1.` is not `page.`, so the
+    // gate in `parseLine` drops the lines silently (not reported as unsupported).
+    expect(steps).toEqual([]);
+    expect(unsupported).toEqual([]);
+  });
+
+  it("never adopts a download variable as a page alias (M16)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "const downloadPromise = page.waitForEvent('download');",
+        "await page.getByRole('link', { name: 'Download' }).click();",
+        "const download = await downloadPromise;",
+        "await download.suggestedFilename();",
+        "await download.getByRole('button', { name: 'Save' }).click();",
+      ].join("\n"),
+    );
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({
+      action: "click",
+      selector: "getByRole('link', { name: 'Download' })",
+      value: '{"download":true}',
+    });
+    expect(unsupported).toEqual([]);
+  });
+
   it("maps the M15 action vocabulary (text-exact/attribute/attached/nav/upload/drag/select-object)", () => {
     const { steps, unsupported } = parseCodegenOutput(
       [

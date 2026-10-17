@@ -366,6 +366,7 @@ export class SuiteRunner {
         projectBaseUrl: getProject(this.db, testCase.projectId).baseUrl,
         profile: getCaseProfile(this.db, caseId),
         videoDir: caseDir,
+        onLog: (level, msg) => this.log(level, `${prefix} ${msg}`),
       });
       const browser = await getBrowser();
       context = await browser.newContext(options);

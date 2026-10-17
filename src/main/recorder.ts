@@ -310,14 +310,18 @@ const CLICK_MODIFIERS: ReadonlySet<string> = new Set([
   "Shift",
 ]);
 
+/** Cross-line click marker for a recorded popup/download wait (M16). */
+type ClickEventMarker = "popup" | "download";
+
 /**
  * Click option encoding: a JSON object (`{"button":"right","modifiers":…,
  * "clickCount":2,"force":true}`) when any option is present, else undefined so
- * a plain `.click()` stays value-less (runner's `parseClickValue`).
+ * a plain `.click()` stays value-less (runner's `parseClickValue`). An `event`
+ * marker (M16) merges into the same object, e.g. `{"button":"right","popup":true}`.
  */
-function clickValueFrom(stmt: string): string | undefined {
-  const args = terminalArgs(stmt, "click");
-  if (args === undefined || !/button:|modifiers:|force:|clickCount:/.test(args)) {
+function clickValueFrom(stmt: string, event?: ClickEventMarker): string | undefined {
+  const args = terminalArgs(stmt, "click") ?? "";
+  if (event === undefined && !/button:|modifiers:|force:|clickCount:/.test(args)) {
     return undefined;
   }
   const options: Record<string, unknown> = {};
@@ -341,6 +345,9 @@ function clickValueFrom(stmt: string): string | undefined {
     if (valid.length > 0) {
       options["modifiers"] = valid;
     }
+  }
+  if (event !== undefined) {
+    options[event] = true;
   }
   return Object.keys(options).length === 0 ? undefined : JSON.stringify(options);
 }
@@ -438,14 +445,118 @@ type ParsedLine =
   | { kind: "step"; step: Omit<TestStep, "order"> }
   | { kind: "unsupported"; entry: RecorderUnsupported };
 
+/** `page.waitForEvent('popup')` / `('download')` — the codegen popup/download wait. */
+const WAIT_FOR_EVENT_RE = /\.waitForEvent\(\s*['"](popup|download)['"]\s*\)/;
+
+/** The popup/download marker a `waitForEvent(…)` line waits for, if any. */
+function eventMarkerFrom(stmt: string): ClickEventMarker | undefined {
+  const kind = WAIT_FOR_EVENT_RE.exec(stmt)?.[1];
+  return kind === "popup" || kind === "download" ? kind : undefined;
+}
+
+/**
+ * Promise bookkeeping that must not become a step (M16): the
+ * `const page1Promise = page.waitForEvent('popup');` line that precedes the
+ * click, and the `page.waitForEvent('popup'),` element of an inline
+ * `Promise.all`. Returns the promise variable to settle on (null when the line
+ * declares none, e.g. the inline element), or null when the line is not a wait.
+ */
+function pendingEventFrom(
+  line: string,
+): { promiseVar: string | null; marker: ClickEventMarker } | null {
+  const marker = eventMarkerFrom(line);
+  if (marker === undefined) {
+    return null;
+  }
+  const promiseVar =
+    /^\s*(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:await\s+)?/.exec(line)?.[1] ??
+    null;
+  return { promiseVar, marker };
+}
+
+/**
+ * `const page1 = await page1Promise;` → the assigned page variable plus the
+ * promise it settles (the one a `waitForEvent` booking armed).
+ */
+function settledPromise(line: string): { target: string; promiseVar: string } | undefined {
+  const match =
+    /^\s*(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*await\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*;?\s*$/.exec(
+      line,
+    );
+  const target = match?.[1];
+  const promiseVar = match?.[2];
+  return target === undefined || promiseVar === undefined ? undefined : { target, promiseVar };
+}
+
+/**
+ * Rewrite an adopted popup-page alias to the `page` run page (M16 item 2) in the
+ * only two positions codegen uses it as the statement subject: a line starting
+ * `[await ]<alias>.…` and one starting `[await ]expect(<alias>.…`. Every other
+ * occurrence — mid-statement, or a `download.` object — is left untouched.
+ */
+function rewriteAdoptedPage(line: string, aliases: ReadonlySet<string>): string {
+  if (aliases.size === 0) {
+    return line;
+  }
+  const trimmed = line.trim();
+  const awaitPrefix = /^await\s+/.exec(trimmed)?.[0] ?? "";
+  const stmt = trimmed.slice(awaitPrefix.length);
+  const expectPrefix = "expect(";
+  const isExpect = stmt.startsWith(expectPrefix);
+  const subject = isExpect ? stmt.slice(expectPrefix.length) : stmt;
+  for (const alias of aliases) {
+    if (!subject.startsWith(`${alias}.`)) {
+      continue;
+    }
+    const head = `${awaitPrefix}${isExpect ? expectPrefix : ""}`;
+    return `${head}page.${subject.slice(alias.length + 1)}`;
+  }
+  return line;
+}
+
+/**
+ * Single-line `const [page1] = await Promise.all([page.waitForEvent('popup'),
+ * page.getByRole(…).click()]);` → the marker plus the click sub-statement
+ * (re-parsed as an ordinary click). A `Promise.all` split over several lines is
+ * instead picked up by the per-line `waitForEvent` booking in
+ * {@link parseCodegenOutput}.
+ */
+function inlinePromiseAllClick(stmt: string): { marker: ClickEventMarker; click: string } | null {
+  const marker = "Promise.all(";
+  const idx = stmt.indexOf(marker);
+  if (idx === -1) {
+    return null;
+  }
+  const inner = balancedCallInner(stmt, idx + marker.length);
+  if (inner === undefined) {
+    return null;
+  }
+  const trimmed = inner.trim();
+  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
+    return null;
+  }
+  let event: ClickEventMarker | undefined;
+  let click: string | undefined;
+  for (const part of splitTopLevel(trimmed.slice(1, -1), ",")) {
+    event ??= eventMarkerFrom(part);
+    if (click === undefined && part.includes("page.") && /\.click\(/.test(part)) {
+      click = part.trim();
+    }
+  }
+  return event === undefined || click === undefined ? null : { marker: event, click };
+}
+
 /**
  * Parse one codegen statement. Distinguishes three cases (M15):
  *  (a) a recognised step → `{ kind: "step", step }`;
  *  (b) a `page.` / `expect(` statement no pattern matches →
  *      `{ kind: "unsupported", entry }` (reported, never silently converted);
  *  (c) boilerplate (imports, test scaffolding, braces, comments, blanks) → null.
+ *
+ * `event` (M16) is the pending popup/download marker, attached to the click it
+ * was recorded for.
  */
-function parseLine(line: string): ParsedLine | null {
+function parseLine(line: string, event?: ClickEventMarker): ParsedLine | null {
   const raw = line.trim();
   const stmt = raw.replace(/^await\s+/, "").replace(/;\s*$/, "");
   if (stmt === "" || stmt.startsWith("//")) {
@@ -549,7 +660,7 @@ function parseLine(line: string): ParsedLine | null {
     return asStep({
       action: "click",
       selector: locatorSource(stmt, "click"),
-      value: clickValueFrom(stmt),
+      value: clickValueFrom(stmt, event),
     });
   }
   // Explicit waits: page.waitForTimeout(500)
@@ -646,6 +757,18 @@ function parseLine(line: string): ParsedLine | null {
  * mapped to no step (PLAN §7 / M15). Pure: no IO. Orders are dense 0..n-1 in
  * file order; fields a pattern cannot fill are omitted (inner code treats
  * missing as unset).
+ *
+ * A popup/download wait (M16) spans lines, so the loop keeps one bit of state:
+ * `page.waitForEvent('popup'|'download')` arms a marker that the next click
+ * carries (merging into its value JSON), and the matching
+ * `const page = await pagePromise;` line disarms it. Both bookkeeping lines are
+ * neither steps nor `unsupported`.
+ *
+ * A settled *popup* promise also names the page variable codegen then records
+ * against (`const page1 = await page1Promise;`): the loop remembers it as an
+ * adopted-page alias and rewrites later `page1.…` subjects to `page.…`, since
+ * M16 item 2 adopts the new tab as the run page. Download variables are not
+ * pages, so they never become aliases.
  */
 export function parseCodegenOutput(code: string): {
   steps: TestStep[];
@@ -653,16 +776,62 @@ export function parseCodegenOutput(code: string): {
 } {
   const steps: TestStep[] = [];
   const unsupported: RecorderUnsupported[] = [];
+  let pending: { promiseVar: string | null; marker: ClickEventMarker } | null = null;
+  // A popup booking survives the click it marks, until its own settlement line
+  // names the adopted page variable.
+  let popupAwait: { promiseVar: string } | null = null;
+  const adoptedPages = new Set<string>();
   for (const line of code.split("\n")) {
-    const parsed = parseLine(line);
+    // Single-line inline form: `await Promise.all([page.waitForEvent(…), …click()])`.
+    const inline = inlinePromiseAllClick(line);
+    if (inline !== null) {
+      const parsed = parseLine(inline.click, inline.marker);
+      if (parsed?.kind === "step") {
+        steps.push({ ...parsed.step, order: steps.length });
+      } else if (parsed?.kind === "unsupported") {
+        unsupported.push(parsed.entry);
+      }
+      pending = null;
+      popupAwait = null;
+      continue;
+    }
+    // Bookkeeping: a `waitForEvent` wait arms the marker, its settlement clears it.
+    const booking = pendingEventFrom(line);
+    if (booking !== null) {
+      pending = booking;
+      popupAwait =
+        booking.marker === "popup" && booking.promiseVar !== null
+          ? { promiseVar: booking.promiseVar }
+          : null;
+      continue;
+    }
+    const settled = settledPromise(line);
+    if (settled !== undefined) {
+      if (popupAwait !== null && popupAwait.promiseVar === settled.promiseVar) {
+        adoptedPages.add(settled.target);
+        popupAwait = null;
+      }
+      if (pending !== null && pending.promiseVar === settled.promiseVar) {
+        pending = null;
+      }
+      continue;
+    }
+    const parsed = parseLine(rewriteAdoptedPage(line, adoptedPages), pending?.marker);
     if (parsed === null) {
       continue;
     }
     if (parsed.kind === "unsupported") {
       unsupported.push(parsed.entry);
+      pending = null;
+      popupAwait = null;
       continue;
     }
     steps.push({ ...parsed.step, order: steps.length });
+    // The marker rides the click it was armed for; any other step ends the pattern.
+    pending = null;
+    if (parsed.step.action !== "click") {
+      popupAwait = null;
+    }
   }
   return { steps, unsupported };
 }

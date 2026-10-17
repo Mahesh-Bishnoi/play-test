@@ -13,7 +13,7 @@
 | M13 — Playwright `expect` assertions + diagnostics | done | all items 1–7 landed |
 | M14 — Case profiles: recorded environment applied at run time | done | all items 1–9 landed |
 | M15 — Recorder & locator coverage + new actions | done 2026-10-17 | 6 items; 3 parallel workstreams; verify + e2e green |
-| M16 — Runtime parity: popups and downloads | not started | after M15 |
+| M16 — Runtime parity: popups and downloads | done 2026-10-17 | 4 items; 3 parallel workstreams; verify + e2e green |
 
 Completed: M1–M10, M12–M13; file transfer (import/export) and Phase-2 git-sync core;
 input/assertion parity (9 → 25 actions). M11 closed as wont-do (`SPECS.md` §2).
@@ -212,23 +212,31 @@ steps, and an unsupported assertion is visible before running rather than silent
 
 ## M16 — Runtime parity: popups and downloads
 
-Status: not started · Next: item 1 (click tokens + parser) — after M15
+Status: done (2026-10-17) · all 4 items landed. Click `popup`/`download` run-time support
+(`downloadsDir`/`onLog` on `ContextLaunchOptions`, `RunPage.pageCount()`) + recorder parity.
+Next: M13–M16 complete — the deferred items in `SPECS.md` §2 need a new re-plan.
 
 Goal: clicks that open a tab or start a download behave like Playwright's own patterns.
 
-- [ ] **1.** Click value tokens `popup` / `download` (same encoding as `force`/`right`; extend
+- [x] **1.** Click value tokens `popup` / `download` (same encoding as `force`/`right`; extend
       `parseClickValue`) and parser support for the codegen `waitForEvent('popup'|'download')`
-      promise pattern.
-- [ ] **2.** `RunPage.click` options gain `popup`/`download`; `PlaywrightRunPage`:
+      promise pattern — including steps codegen records on the adopted page variable
+      (`page1.getByRole(…)`, `expect(page1.…)`).
+- [x] **2.** `RunPage.click` options gain `popup`/`download`; `PlaywrightRunPage`:
       - popup → `Promise.all([context.waitForEvent('page'), click])`, adopt the new page for
         subsequent steps (dialog policy re-attached; tracing is context-level);
       - download → `Promise.all([page.waitForEvent('download'), click])`,
         `download.saveAs(<caseDir>/downloads/<sanitized suggestedFilename>)`, run-log the path.
-- [ ] **3.** After a click without the token: if `context.pages().length` grew, run-log a
+- [x] **3.** After a click without the token: if `context.pages().length` grew, run-log a
       warning suggesting the `popup` token (no auto-adoption).
-- [ ] **4.** Tests — parser tokens; runner fake simulating a second page and a download; new
+- [x] **4.** Tests — parser tokens; runner fake simulating a second page and a download; new
       `tests/e2e-popup-download.test.ts` against the local site (`target=_blank` + download
-      link); update the `test:e2e` list.
+      link); update the `test:e2e` list. Plus the `recorder-runner-contract.test.ts` popup/
+      download acceptance: parsed steps (marker + adopted-page steps) pass `executeStep`.
+
+Known limitation: the inline `Promise.all([page.waitForEvent('popup'), …click()])` recording
+gets the `popup` token on its click, but its destructured page variable is not adopted for
+later steps — the 3-line `const p = await pPromise;` shape is the supported one.
 
 **Done when:** a recorded OAuth-style popup flow and a download flow run end-to-end.
 

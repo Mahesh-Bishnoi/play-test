@@ -61,6 +61,10 @@ class FakePage implements RunPage {
   goBackResult = true;
   goForwardResult = true;
   gate: Promise<void> | null = null;
+  /** Simulated open pages in the context (M16 popup-growth warning). */
+  pages = 1;
+  /** When set, a click "opens a tab" (bumps `pages` to this value). */
+  pagesAfterClick: number | null = null;
   private gated = false;
 
   private async enter(method: string, args: unknown[]): Promise<void> {
@@ -79,6 +83,10 @@ class FakePage implements RunPage {
   }
   async click(selector: string, timeoutMs?: number, options?: unknown): Promise<void> {
     await this.enter("click", [selector, timeoutMs, options]);
+    if (this.pagesAfterClick !== null) {
+      this.pages = this.pagesAfterClick;
+      this.pagesAfterClick = null;
+    }
   }
   async dblclick(selector: string, timeoutMs?: number): Promise<void> {
     await this.enter("dblclick", [selector, timeoutMs]);
@@ -197,6 +205,9 @@ class FakePage implements RunPage {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, "fake-png");
     this.screenshots.push(path);
+  }
+  pageCount(): number {
+    return this.pages;
   }
 }
 
@@ -447,6 +458,15 @@ describe("executeStep mapping", () => {
     expect(page.calls[2]?.args[2]).toMatchObject({ modifiers: ["Shift"] });
   });
 
+  it("passes popup/download click options through to page.click (M16)", async () => {
+    const page = new FakePage();
+    await executeStep(page, { order: 0, action: "click", selector: "#p", value: "popup" });
+    await executeStep(page, { order: 1, action: "click", selector: "#d", value: "download" });
+    expect(page.calls.map((c) => c.method)).toEqual(["click", "click"]);
+    expect(page.calls[0]?.args).toEqual(["#p", undefined, { popup: true }]);
+    expect(page.calls[1]?.args).toEqual(["#d", undefined, { download: true }]);
+  });
+
   it("parses click values and select values", () => {
     expect(parseClickValue(undefined)).toEqual({ double: false, options: {} });
     expect(parseClickValue("dblclick").double).toBe(true);
@@ -463,6 +483,25 @@ describe("executeStep mapping", () => {
     });
     expect(parseSelectValue('["a", "b"]')).toEqual(["a", "b"]);
     expect(parseSelectValue("2025-26")).toBe("2025-26");
+  });
+
+  it("parses popup/download click tokens and JSON keys (M16)", () => {
+    expect(parseClickValue("popup")).toEqual({ double: false, options: { popup: true } });
+    expect(parseClickValue("download")).toEqual({ double: false, options: { download: true } });
+    // Tokens combine like force/right (order-independent, `+`-joined).
+    expect(parseClickValue("right popup")).toEqual({
+      double: false,
+      options: { button: "right", popup: true },
+    });
+    expect(parseClickValue('{"popup":true}')).toEqual({ double: false, options: { popup: true } });
+    expect(parseClickValue('{"download":true}')).toEqual({
+      double: false,
+      options: { download: true },
+    });
+    expect(parseClickValue('{"button":"right","popup":true}')).toEqual({
+      double: false,
+      options: { button: "right", popup: true },
+    });
   });
 
   it("encodes string lists as JSON arrays only when every element is a string", () => {
@@ -906,6 +945,44 @@ describe("runSingle (M5)", () => {
       fx.runner.runSingle({ caseId: fx.caseId, mode: "headed" as "supervised" }),
     ).toThrow();
     expect(fx.db.select().from(suiteRuns).all()).toHaveLength(0);
+  });
+});
+
+// --- Popup / download clicks (M16) ------------------------------------------------
+
+describe("popup / download clicks (M16)", () => {
+  function warnMessages(fx: Fixture): string[] {
+    return fx.events
+      .filter((e) => e.channel === "run:log")
+      .map((e) => e.payload as { level: string; msg: string })
+      .filter((p) => p.level === "warn")
+      .map((p) => p.msg);
+  }
+
+  it("warns that a plain click opened a new page — no auto-adoption", async () => {
+    const fx = track(makeFixture([{ action: "click", selector: "#go" }]));
+    fx.launcher.onCreate = (context) => {
+      context.page.pagesAfterClick = 2;
+    };
+    const started = fx.runner.runSingle({ caseId: fx.caseId, mode: "unsupervised" });
+    await started.done;
+    expect(warnMessages(fx).some((msg) => msg.includes("popup"))).toBe(true);
+  });
+
+  it("stays silent when the click opts into popup/download", async () => {
+    const fx = track(makeFixture([{ action: "click", selector: "#go", value: "popup" }]));
+    fx.launcher.onCreate = (context) => {
+      context.page.pagesAfterClick = 2;
+    };
+    const started = fx.runner.runSingle({ caseId: fx.caseId, mode: "unsupervised" });
+    await started.done;
+    expect(warnMessages(fx).some((msg) => msg.includes("popup"))).toBe(false);
+    const page = fx.launcher.contexts[0]?.page;
+    expect(page?.calls.find((c) => c.method === "click")?.args).toEqual([
+      "#go",
+      undefined,
+      { popup: true },
+    ]);
   });
 });
 
