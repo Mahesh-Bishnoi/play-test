@@ -33,9 +33,10 @@ self-contained HTML + PDF reports → re-run failures. Local-first, Chromium onl
   `playwright/test`'s `expect` matchers (no test runner — so no UI mode / sharding /
   multi-browser; see Non-goals). One Chromium per runner/suite worker, fresh context per case.
 - Assertions (M13): every `assert-*` step runs through Playwright web-first matchers. Strict
-  matching (no `.first()`; `assert-count` counts all matches). Plain URL/title strings use
-  Playwright's anchored glob semantics, `/pattern/flags` = RegExp; default timeout 30 s,
-  overridable per step via `timeoutMs`.
+  matching (no `.first()`; `assert-count` counts all matches). URL/title values go straight to
+  `toHaveURL`/`toHaveTitle`: a plain string is matched exactly (whitespace normalised), the way
+  Playwright 1.64 does it — no glob or substring expansion (`waitForURL` is the glob API) — and
+  `/pattern/flags` is a RegExp. Default timeout 30 s, overridable per step via `timeoutMs`.
 - Case profile (M14): one `case_profiles` row per case — device/viewport/colorScheme/locale/
   timezone, storage-state filenames, dialog policy — drives both `recorder:start` and every
   run. Auth state files live in `~/PlayTestData/<projectId>/auth/` and are never included in
@@ -185,8 +186,10 @@ files. Never copy dependency versions from memory — check live (`npm view`) be
 
 ## 9. Verification
 
-`npm run typecheck && npm test && npm run package -- --dir`, plus `npm run test:e2e` when
+`npm run typecheck && npm test && npm run package`, plus `npm run test:e2e` when
 runner/recorder/reports change (M13–M16 add e2e files — list them in the `test:e2e` script).
+`package` already stops at the unpacked `out/<app>-<platform>-<arch>/` dir; Forge 8 removed the
+`--dir` flag (the command in older notes fails with `unknown option '--dir'`).
 Manual smoke: record 3-step login → supervised run (pause/resume) → unsupervised suite of 2
 (parallel) → HTML+PDF+failure video exist. After M14: record a login with save-state, run a
 second case that loads the same state (must start logged in), and open an existing DB (new

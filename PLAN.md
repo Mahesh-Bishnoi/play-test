@@ -50,7 +50,7 @@ Playwright's full detail; failure evidence survives a supervised resume.
         (`toHaveURL` → `serializeExpectedTextValues`), plain strings are exact and no glob is
         expanded (`**/x` fails, substring fails). Glob semantics belong to `waitForURL`, not
         `toHaveURL`/`toHaveTitle`. User chose native passthrough (no hand-rolled glob shim);
-        `SPECS.md` §2 wording still says "anchored glob" — amendment proposed, needs approval.
+        `SPECS.md` §2 wording amended 2026-10-17 (user-approved) to the exact-match semantics.
         Existing e2e fixtures that relied on substring values were switched to `/regex/`.
       - Strict matching: no `.first()` — `assert-text` on a selector that resolves to several
         elements now fails with Playwright's "resolved to N elements" strict-mode error.
@@ -69,10 +69,10 @@ Playwright's full detail; failure evidence survives a supervised resume.
 - [ ] **6.** Video — extend `RunContext` with `saveVideo(dest)` / `discardVideo()` backed by
       `Video.saveAs()/delete()`; drop the rename/unlink helpers (path builders stay).
 - [ ] **7.** Tests — new `tests/e2e-assertions.test.ts` (real Chromium): strict violation
-      reports `resolved to N elements`; glob URL passes a wildcard path; title drift fails;
-      full call log is present in the step error; supervised failure writes `trace.zip` before
-      the pause. Update `tests/runner.test.ts` fakes for the `RunContext` additions; add the
-      e2e file to `test:e2e`.
+      reports `resolved to N elements`; a `/regex/` URL value patterns a dynamic path while a
+      plain string stays exact; title drift fails; full call log is present in the step error;
+      supervised failure writes `trace.zip` before the pause. Update `tests/runner.test.ts` fakes for
+      the `RunContext` additions; add the e2e file to `test:e2e`.
 
 **Done when:** no hand-rolled polling remains, error text shows Playwright's diff, and
 `npm run verify` + `npm run package` (Forge 8 dropped the old `--dir` flag; plain

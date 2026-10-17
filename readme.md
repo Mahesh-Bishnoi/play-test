@@ -57,7 +57,6 @@ Runtime data lives outside the repo in `~/PlayTestData/playtest.db` + artifact f
 | Command | Output | Platform |
 |---|---|---|
 | `npm run package` | `out/playtest-linux-x64/` (unpacked dir) | current OS, quick check |
-| `npm run package -- --dir` | unpacked dir only, no installer | current OS |
 | `npm run make` | installers per configured maker | current OS |
 
 Configured makers (`forge.config.ts`): Squirrel (Windows `.exe`), deb + rpm (Linux), zip (macOS). Build on the target OS for that OS's installer (or use CI runners per OS) — Electron installers are not cross-compiled.
