@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { eq } from "drizzle-orm";
@@ -134,13 +134,30 @@ class FakeContext implements RunContext {
   traceChunkPaths: string[] = [];
   traceGroups: string[] = [];
   traceGroupEnds = 0;
+  /** Raw recording assigned at launch (null = not recording). */
   videoFile: string | null = null;
+  /** Destination passed to `saveVideo` when a failure kept the recording. */
+  savedVideoPath: string | null = null;
+  /** True once `discardVideo` dropped a passing/cancelled recording. */
+  videoDiscarded = false;
 
   async close(): Promise<void> {
     this.closed = true;
   }
-  async recordedVideoPath(): Promise<string | null> {
-    return this.videoFile;
+  async saveVideo(dest: string): Promise<void> {
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, this.videoFile === null ? "" : "fake-video");
+    this.savedVideoPath = dest;
+  }
+  async discardVideo(): Promise<void> {
+    this.videoDiscarded = true;
+    if (this.videoFile !== null) {
+      try {
+        unlinkSync(this.videoFile);
+      } catch {
+        // Already gone — a leftover recording is harmless.
+      }
+    }
   }
   async saveTrace(path: string | null): Promise<void> {
     this.tracePath = path;
@@ -214,7 +231,7 @@ function mkRoot(): string {
 }
 
 function makeFixture(
-  cases: { steps: StepDef[]; data?: Record<string, string>; video?: boolean }[],
+  cases: { steps: StepDef[]; data?: Record<string, string> }[],
   opts?: {
     workerCount?: (n: number) => number;
     isSingleActive?: () => boolean;
@@ -244,9 +261,6 @@ function makeFixture(
     });
     if (c.data !== undefined) {
       setTestData(dbHandle.db, { caseId: testCase.id, data: c.data });
-    }
-    if (c.video === true) {
-      launcher.primeVideo(root);
     }
     return testCase.id;
   });
@@ -490,6 +504,7 @@ describe("runSuite (M6)", () => {
       .all()[0];
     expect(failedCase?.videoPath?.endsWith("failed.webm")).toBe(true);
     expect(existsSync(failedCase?.videoPath ?? "")).toBe(true);
+    expect(fx.launcher.contexts.some((c) => c.savedVideoPath === failedCase?.videoPath)).toBe(true);
     const failedSteps = fx.db
       .select()
       .from(stepRuns)

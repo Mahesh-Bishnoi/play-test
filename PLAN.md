@@ -10,7 +10,7 @@
 
 | Milestone | Status | Notes |
 | --- | --- | --- |
-| M13 — Playwright `expect` assertions + diagnostics | in progress | items 1–5 done; next item 6 |
+| M13 — Playwright `expect` assertions + diagnostics | in progress | items 1–6 done; next item 7 |
 | M14 — Case profiles: recorded environment applied at run time | not started | after M13 |
 | M15 — Recorder & locator coverage + new actions | not started | after M14 |
 | M16 — Runtime parity: popups and downloads | not started | after M15 |
@@ -29,7 +29,7 @@ against the current implementation.
 
 ## M13 — Playwright `expect` assertions + diagnostics
 
-Status: in progress · Next: item 6 (video `saveAs`/`delete`)
+Status: in progress · Next: item 7 (e2e assertions test)
 
 Goal: every `assert-*` step runs through Playwright web-first matchers; errors keep
 Playwright's full detail; failure evidence survives a supervised resume.
@@ -70,8 +70,12 @@ Playwright's full detail; failure evidence survives a supervised resume.
       paused (supervised) calls `stopChunk({ path: <caseDir>/trace.zip })` immediately, then
       `startChunk()` so a resume keeps tracing; resume-pass/cancel calls `stop()` without a
       path so the failure chunk stays; a later failure overwrites `trace.zip`.
-- [ ] **6.** Video — extend `RunContext` with `saveVideo(dest)` / `discardVideo()` backed by
-      `Video.saveAs()/delete()`; drop the rename/unlink helpers (path builders stay).
+- [x] **6.** Video — `RunContext.saveVideo(dest)` / `discardVideo()` back `Video.saveAs()` /
+      `Video.delete()`; `retainVideo` + `discardPath` dropped from `artifacts.ts` (path builders
+      stay). **Corrected 2026-10-17:** `saveAs`/`delete` throw "Target page, context or browser
+      has been closed" once `browser.close()` runs, so the video op now runs *before*
+      `RunContext.close()` and closes the context itself (Playwright finalizes the recording
+      then); `close()` is idempotent. Verified against Playwright 1.64.1 + the e2e legs.
 - [ ] **7.** Tests — new `tests/e2e-assertions.test.ts` (real Chromium): strict violation
       reports `resolved to N elements`; a `/regex/` URL value patterns a dynamic path while a
       plain string stays exact; title drift fails; full call log is present in the step error;

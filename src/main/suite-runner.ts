@@ -22,14 +22,7 @@ import type { StepRow } from "../shared/schema.js";
 import { MissingTestDataKeyError } from "../shared/step-types.js";
 import type { StepStatus } from "../shared/step-types.js";
 import type { AppDatabase } from "./db.js";
-import {
-  caseTracePath,
-  caseVideoPath,
-  discardPath,
-  ensureCaseDir,
-  retainVideo,
-  stepScreenshotPath,
-} from "./artifacts.js";
+import { caseTracePath, caseVideoPath, ensureCaseDir, stepScreenshotPath } from "./artifacts.js";
 import { getCase } from "./ipc-cases.js";
 import { getSuite, getSuiteCaseIds } from "./ipc-suites.js";
 import { getTestData, listSteps } from "./ipc-steps.js";
@@ -385,14 +378,15 @@ export class SuiteRunner {
         } catch {
           this.log("warn", `${prefix} failed to save trace`);
         }
-        await context.close();
-        const videoPath = retainVideo(
-          await this.safeRecordedVideo(context),
-          caseVideoPath(this.artifactsRoot, testCase.projectId, suiteRunId, caseId),
-        );
-        if (videoPath !== null) {
-          this.db.update(caseRuns).set({ videoPath }).where(eq(caseRuns.id, caseRunId)).run();
+        const videoDest = caseVideoPath(this.artifactsRoot, testCase.projectId, suiteRunId, caseId);
+        if (await this.safeSaveVideo(context, videoDest)) {
+          this.db
+            .update(caseRuns)
+            .set({ videoPath: videoDest })
+            .where(eq(caseRuns.id, caseRunId))
+            .run();
         }
+        await context.close();
         this.finishCase(caseRunId, "failed", startedAt);
         return;
       }
@@ -407,8 +401,8 @@ export class SuiteRunner {
     } catch {
       this.log("warn", `${prefix} failed to discard trace`);
     }
+    await this.safeDiscardVideo(context);
     await context.close();
-    discardPath(await this.safeRecordedVideo(context));
     this.finishCase(caseRunId, "passed", startedAt);
   }
 
@@ -522,11 +516,20 @@ export class SuiteRunner {
     await captureStepScreenshot(context.page, path, (message) => this.log("warn", message));
   }
 
-  private async safeRecordedVideo(context: RunContext): Promise<string | null> {
+  private async safeSaveVideo(context: RunContext, dest: string): Promise<boolean> {
     try {
-      return await context.recordedVideoPath();
+      await context.saveVideo(dest);
+      return true;
     } catch {
-      return null;
+      return false;
+    }
+  }
+
+  private async safeDiscardVideo(context: RunContext): Promise<void> {
+    try {
+      await context.discardVideo();
+    } catch {
+      // A leftover recording is harmless — the case still settles.
     }
   }
 
@@ -536,8 +539,8 @@ export class SuiteRunner {
     } catch {
       // Context may already be half-closed — cancellation still proceeds.
     }
+    await this.safeDiscardVideo(context);
     await context.close();
-    discardPath(await this.safeRecordedVideo(context));
   }
 }
 

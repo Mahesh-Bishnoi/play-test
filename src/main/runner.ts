@@ -24,14 +24,7 @@ import { CHAIN_METHODS, PAGE_FACTORY_METHODS, splitTopLevel } from "../shared/lo
 import { MissingTestDataKeyError, substituteTestDataValue } from "../shared/step-types.js";
 import type { StepStatus } from "../shared/step-types.js";
 import type { AppDatabase } from "./db.js";
-import {
-  caseTracePath,
-  caseVideoPath,
-  discardPath,
-  ensureCaseDir,
-  retainVideo,
-  stepScreenshotPath,
-} from "./artifacts.js";
+import { caseTracePath, caseVideoPath, ensureCaseDir, stepScreenshotPath } from "./artifacts.js";
 import { getCase } from "./ipc-cases.js";
 import { getTestData, listSteps } from "./ipc-steps.js";
 import { caseRuns, stepRuns, suiteRuns } from "./schema.js";
@@ -81,10 +74,19 @@ export interface RunPage {
 /** A launched browser context plus its teardown/artifact hooks. */
 export interface RunContext {
   page: RunPage;
-  /** Release browser + context. Call before reading the recorded video. */
+  /** Release browser + context. Call after `saveVideo`/`discardVideo`. */
   close(): Promise<void>;
-  /** Playwright-assigned video file, if recording (null in fakes). */
-  recordedVideoPath(): Promise<string | null>;
+  /**
+   * Persist the recording to `dest` (retain-on-failure). Closes the context so
+   * Playwright finalizes the video, then `Video.saveAs`. Playwright needs the
+   * browser still open, so call this before `close()`. No-op when not recording.
+   */
+  saveVideo(dest: string): Promise<void>;
+  /**
+   * Drop the recording (pass / cancel). Closes the context to finalize the
+   * video, then `Video.delete`. Call before `close()`.
+   */
+  discardVideo(): Promise<void>;
   /** Persist the trace to `path`; `null` discards it (pass / cancel). */
   saveTrace(path: string | null): Promise<void>;
   /**
@@ -100,8 +102,8 @@ export interface RunContext {
 
 export interface BrowserLauncher {
   /**
-   * `videoDir` receives Playwright's raw recording (renamed on failure);
-   * `title` is the trace's display name (the case name).
+   * `videoDir` receives Playwright's raw recording (moved to `failed.webm`
+   * via `saveVideo` on failure); `title` is the trace's display name.
    */
   launch(headless: boolean, videoDir: string, title: string): Promise<RunContext>;
 }
@@ -873,8 +875,8 @@ export class SingleCaseRunner {
       } catch {
         this.log("warn", "failed to discard trace");
       }
+      await this.safeDiscardVideo(context);
       await context.close();
-      discardPath(await this.safeRecordedVideo(context));
     }
     this.finishCase(session.caseRunId, "passed", startedAt);
     this.finishSuite(session.suiteRunId, "passed");
@@ -899,11 +901,16 @@ export class SingleCaseRunner {
       } catch {
         this.log("warn", "failed to save trace");
       }
-      await context.close();
-      videoPath = retainVideo(
-        await this.safeRecordedVideo(context),
-        caseVideoPath(this.artifactsRoot, session.projectId, session.suiteRunId, session.caseId),
+      const videoDest = caseVideoPath(
+        this.artifactsRoot,
+        session.projectId,
+        session.suiteRunId,
+        session.caseId,
       );
+      if (await this.safeSaveVideo(context, videoDest)) {
+        videoPath = videoDest;
+      }
+      await context.close();
     }
     if (videoPath !== null) {
       this.db.update(caseRuns).set({ videoPath }).where(eq(caseRuns.id, session.caseRunId)).run();
@@ -936,8 +943,8 @@ export class SingleCaseRunner {
       } catch {
         // Context may already be half-closed — cancellation still proceeds.
       }
+      await this.safeDiscardVideo(context);
       await context.close();
-      discardPath(await this.safeRecordedVideo(context));
     }
     this.finishCase(session.caseRunId, "cancelled", session.startedAt);
     this.finishSuite(session.suiteRunId, "cancelled");
@@ -1083,11 +1090,20 @@ export class SingleCaseRunner {
     await captureStepScreenshot(context.page, path, (message) => this.log("warn", message));
   }
 
-  private async safeRecordedVideo(context: RunContext): Promise<string | null> {
+  private async safeSaveVideo(context: RunContext, dest: string): Promise<boolean> {
     try {
-      return await context.recordedVideoPath();
+      await context.saveVideo(dest);
+      return true;
     } catch {
-      return null;
+      return false;
+    }
+  }
+
+  private async safeDiscardVideo(context: RunContext): Promise<void> {
+    try {
+      await context.discardVideo();
+    } catch {
+      // A leftover recording is harmless — the run still settles.
     }
   }
 }
@@ -1893,16 +1909,30 @@ class PlaywrightRunContext implements RunContext {
     this.page = new PlaywrightRunPage(page);
   }
 
-  async close(): Promise<void> {
+  async saveVideo(dest: string): Promise<void> {
+    // Finalize the recording first: Playwright's saveAs needs the browser
+    // connection (it dies in `close()`), and the artifact is only complete
+    // once the context closes. Read the Video via the held page — the object
+    // outlives the context.
     await this.context.close();
-    await this.browser.close();
+    const video = this.rawPage.video();
+    if (video !== null) {
+      await video.saveAs(dest);
+    }
   }
 
-  async recordedVideoPath(): Promise<string | null> {
-    // Read via the held page: context.pages() is empty after close(), but
-    // the Video object outlives the context — callers read this after close.
+  async discardVideo(): Promise<void> {
+    await this.context.close();
     const video = this.rawPage.video();
-    return video === null ? null : video.path();
+    if (video !== null) {
+      await video.delete();
+    }
+  }
+
+  async close(): Promise<void> {
+    // Idempotent: saveVideo/discardVideo already closed the context.
+    await this.context.close();
+    await this.browser.close();
   }
 
   async saveTrace(path: string | null): Promise<void> {

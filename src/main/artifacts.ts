@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -67,34 +67,6 @@ export function ensureCaseDir(
   const dir = caseArtifactsDir(root, projectId, suiteRunId, caseId);
   mkdirSync(dir, { recursive: true });
   return dir;
-}
-
-/**
- * Keep a recorded video as the case's `failed.webm` (retain-on-failure).
- * Returns the kept path, or null when there is nothing to keep.
- */
-export function retainVideo(recordedPath: string | null, destPath: string): string | null {
-  if (recordedPath === null || !existsSync(recordedPath)) {
-    return null;
-  }
-  try {
-    renameSync(recordedPath, destPath);
-    return destPath;
-  } catch {
-    return null;
-  }
-}
-
-/** Best-effort delete (passing runs discard their recording). Never throws. */
-export function discardPath(path: string | null): void {
-  if (path === null) {
-    return;
-  }
-  try {
-    unlinkSync(path);
-  } catch {
-    // Already gone — a leftover recording is harmless.
-  }
 }
 
 /**
