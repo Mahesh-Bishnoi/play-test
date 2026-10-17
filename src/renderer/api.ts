@@ -247,6 +247,11 @@ export const api = {
       z.object({ suiteRunId: z.string() }).parse(raw),
     );
   },
+  rerunLastFailed(suiteId: string): Promise<{ suiteRunId: string }> {
+    return invoke("runner:rerunLastFailed", { suiteId }, (raw) =>
+      z.object({ suiteRunId: z.string() }).parse(raw),
+    );
+  },
 
   // Reports (WS6/M6; per suite run, payloads frozen in v1).
   getReportHtml(suiteRunId: string): Promise<string> {

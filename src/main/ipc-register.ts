@@ -17,6 +17,7 @@ import {
   RunnerCancelPayload,
   RunnerResumePayload,
   RunnerRerunFailedPayload,
+  RunnerRerunLastFailedPayload,
   RunnerRunSinglePayload,
   RunnerRunSuitePayload,
 } from "../shared/ipc-contract.js";
@@ -144,6 +145,7 @@ const RUNNER_CHANNELS = [
   "runner:runSuite",
   "runner:resumeFromStep",
   "runner:rerunFailed",
+  "runner:rerunLastFailed",
   "runner:cancel",
 ] as const;
 
@@ -302,6 +304,11 @@ export function registerRunnerHandlers(
         case "runner:rerunFailed": {
           const payload = RunnerRerunFailedPayload.parse(rawPayload);
           const started = suite.rerunFailed(payload);
+          return { suiteRunId: started.suiteRunId };
+        }
+        case "runner:rerunLastFailed": {
+          const payload = RunnerRerunLastFailedPayload.parse(rawPayload);
+          const started = suite.rerunLastFailed(payload);
           return { suiteRunId: started.suiteRunId };
         }
         case "runner:cancel": {

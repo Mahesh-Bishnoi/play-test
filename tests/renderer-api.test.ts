@@ -73,6 +73,12 @@ describe("renderer api runner wrappers", () => {
       { channel: "runner:runSingle", payload: { caseId: "c1", mode: "unsupervised" } },
     ]);
   });
+
+  it("passes the suite id through for re-run-last-failed (M12)", async () => {
+    const calls = stubPlaytest(() => Promise.resolve({ suiteRunId: "s" }));
+    await expect(api.rerunLastFailed("suite-1")).resolves.toEqual({ suiteRunId: "s" });
+    expect(calls).toEqual([{ channel: "runner:rerunLastFailed", payload: { suiteId: "suite-1" } }]);
+  });
 });
 
 describe("renderer api browser-setup wrappers (M7, PLAN §11)", () => {

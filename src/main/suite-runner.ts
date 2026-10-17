@@ -1,11 +1,12 @@
 import { cpus } from "node:os";
 import { randomUUID } from "node:crypto";
 
-import { eq } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 
 import type {
   RunnerCancelPayload,
   RunnerRerunFailedPayload,
+  RunnerRerunLastFailedPayload,
   RunnerRunSuitePayload,
 } from "../shared/ipc-contract.js";
 import {
@@ -13,6 +14,7 @@ import {
   RunLogEvent,
   RunnerCancelPayload as RunnerCancelSchema,
   RunnerRerunFailedPayload as RunnerRerunFailedSchema,
+  RunnerRerunLastFailedPayload as RunnerRerunLastFailedSchema,
   RunnerRunSuitePayload as RunnerRunSuiteSchema,
   RunStepUpdateEvent,
 } from "../shared/ipc-contract.js";
@@ -70,6 +72,52 @@ export class NoFailedCasesError extends Error {
     super(`no failed cases to re-run for suite run: ${suiteRunId}`);
     this.name = "NoFailedCasesError";
   }
+}
+
+/** Latest finished run of a suite plus the failed case ids to retry (M12). */
+export interface LastFailedSelection {
+  suiteRunId: string;
+  suiteId: string;
+  mode: "unsupervised";
+  caseIds: string[];
+}
+
+/**
+ * Select the failed set of a suite's latest finished run (PLAN §18.5,
+ * `--last-failed` analogue). Still-running rows are skipped so a live run is
+ * never read mid-flight. Throws `NoFailedCasesError` when the latest
+ * finished run has nothing failed (same message as `rerunFailed`).
+ */
+export function selectLastFailedCaseIds(db: AppDatabase, suiteId: string): LastFailedSelection {
+  getSuite(db, suiteId);
+  const latest = db
+    .select()
+    .from(suiteRuns)
+    .where(and(eq(suiteRuns.suiteId, suiteId), ne(suiteRuns.status, "running")))
+    .orderBy(desc(suiteRuns.startedAt))
+    .all()[0];
+  if (latest === undefined) {
+    throw new NoFailedCasesError(`no finished run for suite: ${suiteId}`);
+  }
+  if (latest.suiteId === null) {
+    throw new Error(`suite run has no suite: ${latest.id}`);
+  }
+  const failedCaseIds = db
+    .select()
+    .from(caseRuns)
+    .where(eq(caseRuns.suiteRunId, latest.id))
+    .all()
+    .filter((r) => r.status === "failed")
+    .map((r) => r.caseId);
+  if (failedCaseIds.length === 0) {
+    throw new NoFailedCasesError(latest.id);
+  }
+  return {
+    suiteRunId: latest.id,
+    suiteId: latest.suiteId,
+    mode: latest.mode as "unsupervised",
+    caseIds: failedCaseIds,
+  };
 }
 
 /** Default pool size: `min(cpu/2, cases)`, at least 1 (PLAN §2). */
@@ -151,6 +199,19 @@ export class SuiteRunner {
       throw new NoFailedCasesError(parsed.suiteRunId);
     }
     return this.start(source.suiteId, failedCaseIds, source.mode as "unsupervised");
+  }
+
+  /**
+   * Re-run the failed cases of a suite's latest finished run (M12, PLAN
+   * §18.5). Same immutability as `rerunFailed` — the retry is a new row.
+   */
+  rerunLastFailed(input: RunnerRerunLastFailedPayload): StartedSuiteRun {
+    const parsed = RunnerRerunLastFailedSchema.parse(input);
+    if (this.activeSuiteRunId !== null || this.isSingleActive()) {
+      throw new RunAlreadyActiveError();
+    }
+    const selection = selectLastFailedCaseIds(this.db, parsed.suiteId);
+    return this.start(selection.suiteId, selection.caseIds, selection.mode);
   }
 
   /** Flag cancellation; workers settle between steps, then the suite settles. */

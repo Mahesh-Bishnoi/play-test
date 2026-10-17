@@ -55,6 +55,7 @@ describe("frozen IPC contract v1 (PLAN §5)", () => {
       "runner:runSuite",
       "runner:resumeFromStep",
       "runner:rerunFailed",
+      "runner:rerunLastFailed",
       "runner:cancel",
       "report:getHtml",
       "report:exportPdf",

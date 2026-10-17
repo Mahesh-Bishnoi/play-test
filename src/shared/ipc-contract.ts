@@ -40,6 +40,7 @@ export const IPC_CHANNELS = [
   "runner:runSuite",
   "runner:resumeFromStep",
   "runner:rerunFailed",
+  "runner:rerunLastFailed",
   "runner:cancel",
   "report:getHtml",
   "report:exportPdf",
@@ -236,6 +237,10 @@ export const RunnerRerunFailedPayload = z.object({
   suiteRunId: z.string().min(1).max(100),
 });
 
+export const RunnerRerunLastFailedPayload = z.object({
+  suiteId: z.string().min(1).max(100),
+});
+
 export const RunnerCancelPayload = z.object({
   suiteRunId: z.string().min(1).max(100),
 });
@@ -403,6 +408,7 @@ export type RunnerRunSinglePayload = z.infer<typeof RunnerRunSinglePayload>;
 export type RunnerRunSuitePayload = z.infer<typeof RunnerRunSuitePayload>;
 export type RunnerResumePayload = z.infer<typeof RunnerResumePayload>;
 export type RunnerRerunFailedPayload = z.infer<typeof RunnerRerunFailedPayload>;
+export type RunnerRerunLastFailedPayload = z.infer<typeof RunnerRerunLastFailedPayload>;
 export type RunnerCancelPayload = z.infer<typeof RunnerCancelPayload>;
 export type ReportGetHtmlPayload = z.infer<typeof ReportGetHtmlPayload>;
 export type ReportExportPdfPayload = z.infer<typeof ReportExportPdfPayload>;
@@ -457,6 +463,7 @@ export const IPC_PAYLOADS: Record<string, z.ZodType> = {
   "runner:runSuite": RunnerRunSuitePayload,
   "runner:resumeFromStep": RunnerResumePayload,
   "runner:rerunFailed": RunnerRerunFailedPayload,
+  "runner:rerunLastFailed": RunnerRerunLastFailedPayload,
   "runner:cancel": RunnerCancelPayload,
   "report:getHtml": ReportGetHtmlPayload,
   "report:exportPdf": ReportExportPdfPayload,

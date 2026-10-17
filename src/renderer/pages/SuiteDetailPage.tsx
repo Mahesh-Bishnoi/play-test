@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, formatApiError } from "../api.js";
 import type { Suite, TestCase } from "../../shared/schema.js";
 import ConfirmDialog from "../components/ConfirmDialog.js";
+import { filterCasesByKeyword } from "../components/suite-run-filter.js";
 
 interface Props {
   projectId: string;
@@ -47,6 +48,9 @@ export default function SuiteDetailPage({
   const [notice, setNotice] = useState<string | null>(null);
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [runBusy, setRunBusy] = useState(false);
+  const [rerunBusy, setRerunBusy] = useState(false);
+  /** Case ids snapshotted when the run dialog opens (all checked or filtered). */
+  const [runCaseIds, setRunCaseIds] = useState<string[] | null>(null);
   const [lastSuiteRunId, setLastSuiteRunId] = useState<string | null>(null);
   const [pendingDeleteSuite, setPendingDeleteSuite] = useState<Suite | null>(null);
   const [pendingDeleteCase, setPendingDeleteCase] = useState<TestCase | null>(null);
@@ -97,6 +101,7 @@ export default function SuiteDetailPage({
     setSuiteId(id);
     setNotice(null);
     setRunDialogOpen(false);
+    setRunCaseIds(null);
     if (onSuiteFocus !== undefined) {
       onSuiteFocus(id);
     }
@@ -199,13 +204,7 @@ export default function SuiteDetailPage({
       });
   };
 
-  const visibleCases = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (q === "") {
-      return cases;
-    }
-    return cases.filter((c) => c.name.toLowerCase().includes(q));
-  }, [cases, search]);
+  const visibleCases = useMemo(() => filterCasesByKeyword(cases, search), [cases, search]);
 
   const allVisibleChecked = visibleCases.length > 0 && visibleCases.every((c) => checked.has(c.id));
 
@@ -258,7 +257,10 @@ export default function SuiteDetailPage({
   };
 
   const selectedSuite = suites.find((s) => s.id === suiteId) ?? null;
-  const selectedCases = cases.filter((c) => checked.has(c.id));
+  const filterActive = search.trim() !== "";
+  const filteredChecked = visibleCases.filter((c) => checked.has(c.id));
+  const runCaseIdSet = useMemo(() => new Set(runCaseIds ?? []), [runCaseIds]);
+  const runDialogCases = cases.filter((c) => runCaseIdSet.has(c.id));
 
   /** Re-list everything after an import (new ids everywhere) + notify sidebar. */
   const reloadAfterTransfer = (keepSuiteId: string | null): void => {
@@ -389,24 +391,51 @@ export default function SuiteDetailPage({
     };
   }, [runDialogOpen, runBusy]);
 
+  const openRunDialog = (ids: string[]): void => {
+    setRunCaseIds(ids);
+    setRunDialogOpen(true);
+  };
+
   const confirmRunSuite = (): void => {
-    if (selectedSuite === null || checked.size === 0) {
+    if (selectedSuite === null || runCaseIds === null || runCaseIds.length === 0) {
       return;
     }
     setRunBusy(true);
     setNotice(null);
     api
-      .runSuite(selectedSuite.id, [...checked])
+      .runSuite(selectedSuite.id, runCaseIds)
       .then(({ suiteRunId: runId }) => {
         setLastSuiteRunId(runId);
         setRunDialogOpen(false);
-        setNotice(`Suite run started (${selectedCases.length} case(s)). Report: ${runId}`);
+        setRunCaseIds(null);
+        setNotice(`Suite run started (${runCaseIds.length} case(s)). Report: ${runId}`);
       })
       .catch((err: unknown) => {
         setError(formatApiError(err));
       })
       .finally(() => {
         setRunBusy(false);
+      });
+  };
+
+  const rerunLastFailed = (): void => {
+    if (selectedSuite === null || rerunBusy) {
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setRerunBusy(true);
+    api
+      .rerunLastFailed(selectedSuite.id)
+      .then(({ suiteRunId: runId }) => {
+        setLastSuiteRunId(runId);
+        setNotice(`Re-running failed cases from the last finished run. Report: ${runId}`);
+      })
+      .catch((err: unknown) => {
+        setError(formatApiError(err));
+      })
+      .finally(() => {
+        setRerunBusy(false);
       });
   };
 
@@ -576,11 +605,33 @@ export default function SuiteDetailPage({
                   type="button"
                   className="pt-btn pt-btn-sm"
                   onClick={() => {
-                    setRunDialogOpen(true);
+                    openRunDialog([...checked]);
                   }}
                   disabled={checked.size === 0}
                 >
                   Run suite…
+                </button>
+                {filterActive && (
+                  <button
+                    type="button"
+                    className="pt-btn pt-btn-sm"
+                    onClick={() => {
+                      openRunDialog(filteredChecked.map((c) => c.id));
+                    }}
+                    disabled={filteredChecked.length === 0}
+                    title="Run only the checked cases matching the current search filter"
+                  >
+                    Run filtered ({filteredChecked.length})…
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="pt-btn pt-btn-sm"
+                  onClick={rerunLastFailed}
+                  disabled={rerunBusy}
+                  title="Start a new run with the failed cases of this suite's latest finished run"
+                >
+                  {rerunBusy ? "Starting…" : "Re-run last failed"}
                 </button>
               </>
             )}
@@ -718,10 +769,10 @@ export default function SuiteDetailPage({
               <h3>Run suite (unsupervised only)</h3>
             </div>
             <p className="pt-sub">
-              Suite <strong>{selectedSuite.name}</strong> — {selectedCases.length} case(s)
+              Suite <strong>{selectedSuite.name}</strong> — {runDialogCases.length} case(s)
             </p>
             <ul>
-              {selectedCases.map((c) => (
+              {runDialogCases.map((c) => (
                 <li key={c.id}>{c.name}</li>
               ))}
             </ul>
@@ -746,7 +797,7 @@ export default function SuiteDetailPage({
                 onClick={confirmRunSuite}
                 disabled={runBusy}
               >
-                {runBusy ? "Starting…" : `Confirm (${selectedCases.length})`}
+                {runBusy ? "Starting…" : `Confirm (${runDialogCases.length})`}
               </button>
             </div>
           </div>

@@ -8,7 +8,12 @@ import { eq } from "drizzle-orm";
 import type { BrowserLauncher, RunContext, RunPage } from "../src/main/runner.js";
 import type { RunEventChannel } from "../src/main/runner.js";
 import { RunAlreadyActiveError, SingleCaseRunner } from "../src/main/runner.js";
-import { NoFailedCasesError, SuiteRunner, defaultWorkerCount } from "../src/main/suite-runner.js";
+import {
+  NoFailedCasesError,
+  SuiteRunner,
+  defaultWorkerCount,
+  selectLastFailedCaseIds,
+} from "../src/main/suite-runner.js";
 import { registerReportHandlers, registerRunnerHandlers } from "../src/main/ipc-register.js";
 import type { IpcHandleFn } from "../src/main/ipc-register.js";
 import { createDatabase } from "../src/main/db.js";
@@ -196,7 +201,11 @@ function mkRoot(): string {
 
 function makeFixture(
   cases: { steps: StepDef[]; data?: Record<string, string>; video?: boolean }[],
-  opts?: { workerCount?: (n: number) => number; isSingleActive?: () => boolean },
+  opts?: {
+    workerCount?: (n: number) => number;
+    isSingleActive?: () => boolean;
+    now?: () => number;
+  },
 ): Fixture {
   const dbHandle = createDatabase(":memory:");
   const root = mkRoot();
@@ -210,6 +219,7 @@ function makeFixture(
     artifactsRoot: root,
     workerCount: opts?.workerCount,
     isSingleActive: opts?.isSingleActive,
+    now: opts?.now,
   });
   const project = createProject(dbHandle.db, { name: "P" });
   const suiteRow = createSuite(dbHandle.db, { projectId: project.id, name: "S" });
@@ -767,6 +777,122 @@ describe("rerunFailed (M6)", () => {
   });
 });
 
+// --- Re-run last failed ----------------------------------------------------------
+
+describe("rerunLastFailed (M12)", () => {
+  function failingFixture(): Fixture {
+    return track(
+      makeFixture(
+        [
+          {
+            steps: [
+              { action: "goto", value: "https://x.test" },
+              { action: "click", selector: "#go" },
+            ],
+          },
+          { steps: [{ action: "goto", value: "https://y.test" }] },
+        ],
+        { workerCount: () => 2 },
+      ),
+    );
+  }
+
+  it("retries the failed set of the latest finished run as a new run", async () => {
+    const fx = failingFixture();
+    fx.launcher.failClicks = true;
+    const first = fx.suite.runSuite({
+      suiteId: fx.suiteId,
+      caseIds: fx.caseIds,
+      mode: "unsupervised",
+    });
+    await first.done;
+    expect(finishedSummary(fx, first.suiteRunId)).toEqual({
+      total: 2,
+      passed: 1,
+      failed: 1,
+      skipped: 0,
+    });
+
+    fx.launcher.failClicks = false;
+    const retry = fx.suite.rerunLastFailed({ suiteId: fx.suiteId });
+    await retry.done;
+    expect(retry.suiteRunId).not.toBe(first.suiteRunId);
+    expect(finishedSummary(fx, retry.suiteRunId)).toEqual({
+      total: 1,
+      passed: 1,
+      failed: 0,
+      skipped: 0,
+    });
+    expect(fx.caseRunIdsOf(retry.suiteRunId).map((r) => r.caseId)).toEqual([fx.caseIds[0]]);
+    // History is immutable — the original run still shows its failure.
+    expect(finishedSummary(fx, first.suiteRunId)).toEqual({
+      total: 2,
+      passed: 1,
+      failed: 1,
+      skipped: 0,
+    });
+  });
+
+  it("reads the latest finished run, not an older one", async () => {
+    const fx = failingFixture();
+    fx.launcher.failClicks = true;
+    const first = fx.suite.runSuite({
+      suiteId: fx.suiteId,
+      caseIds: fx.caseIds,
+      mode: "unsupervised",
+    });
+    await first.done;
+    fx.launcher.failClicks = false;
+    const second = fx.suite.runSuite({
+      suiteId: fx.suiteId,
+      caseIds: fx.caseIds,
+      mode: "unsupervised",
+    });
+    await second.done;
+    expect(finishedSummary(fx, second.suiteRunId)).toEqual({
+      total: 2,
+      passed: 2,
+      failed: 0,
+      skipped: 0,
+    });
+    // The latest finished run is clean, so there is nothing to retry even
+    // though the older run has a failure.
+    expect(() => fx.suite.rerunLastFailed({ suiteId: fx.suiteId })).toThrow(NoFailedCasesError);
+  });
+
+  it("skips still-running rows when selecting the latest finished run", async () => {
+    const fx = failingFixture();
+    fx.launcher.failClicks = true;
+    const first = fx.suite.runSuite({
+      suiteId: fx.suiteId,
+      caseIds: fx.caseIds,
+      mode: "unsupervised",
+    });
+    await first.done;
+    // A live run row sorts newer but must never be read mid-flight.
+    fx.db
+      .insert(suiteRuns)
+      .values({
+        id: "live-run",
+        suiteId: fx.suiteId,
+        mode: "unsupervised",
+        status: "running",
+        startedAt: Date.now() + 60_000,
+      })
+      .run();
+    const selection = selectLastFailedCaseIds(fx.db, fx.suiteId);
+    expect(selection.suiteRunId).toBe(first.suiteRunId);
+    expect(selection.mode).toBe("unsupervised");
+    expect(selection.caseIds).toEqual([fx.caseIds[0]]);
+  });
+
+  it("throws for unknown suites and suites with no finished runs", () => {
+    const fx = track(makeFixture([{ steps: [{ action: "goto", value: "https://x.test" }] }]));
+    expect(() => fx.suite.rerunLastFailed({ suiteId: "ghost" })).toThrow(/suite not found/);
+    expect(() => fx.suite.rerunLastFailed({ suiteId: fx.suiteId })).toThrow(/no finished run/);
+  });
+});
+
 // --- IPC + report handlers ---------------------------------------------------------
 
 describe("runner + report IPC (M6)", () => {
@@ -828,6 +954,12 @@ describe("runner + report IPC (M6)", () => {
     expect(() => fx.listeners.get("runner:rerunFailed")?.({ suiteRunId })).toThrow(
       NoFailedCasesError,
     );
+    // rerunLastFailed rides the same delegation path (M12) — the passing run
+    // above is the latest finished, so there is nothing to retry.
+    expect(() => fx.listeners.get("runner:rerunLastFailed")?.({ suiteId: fx.suiteId })).toThrow(
+      NoFailedCasesError,
+    );
+    expect(() => fx.listeners.get("runner:rerunLastFailed")?.({})).toThrow();
     await expect(
       fx.listeners.get("runner:cancel")?.({ suiteRunId }) as Promise<null>,
     ).resolves.toBeNull();
