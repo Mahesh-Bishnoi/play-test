@@ -10,12 +10,12 @@
 
 | Milestone | Status | Notes |
 | --- | --- | --- |
-| M13 — Playwright `expect` assertions + diagnostics | in progress | items 1–6 done; next item 7 |
+| M13 — Playwright `expect` assertions + diagnostics | done | all items 1–7 landed |
 | M14 — Case profiles: recorded environment applied at run time | not started | after M13 |
 | M15 — Recorder & locator coverage + new actions | not started | after M14 |
 | M16 — Runtime parity: popups and downloads | not started | after M15 |
 
-Completed: M1–M10, M12; file transfer (import/export) and Phase-2 git-sync core;
+Completed: M1–M10, M12–M13; file transfer (import/export) and Phase-2 git-sync core;
 input/assertion parity (9 → 25 actions). M11 closed as wont-do (`SPECS.md` §2).
 
 Order M13 → M14 → M15 → M16; each milestone leaves `npm run verify` green. New files
@@ -29,7 +29,7 @@ against the current implementation.
 
 ## M13 — Playwright `expect` assertions + diagnostics
 
-Status: in progress · Next: item 7 (e2e assertions test)
+Status: done 2026-10-17 · Next milestone: M14 item 1 (`case_profiles` DDL)
 
 Goal: every `assert-*` step runs through Playwright web-first matchers; errors keep
 Playwright's full detail; failure evidence survives a supervised resume.
@@ -76,11 +76,11 @@ Playwright's full detail; failure evidence survives a supervised resume.
       has been closed" once `browser.close()` runs, so the video op now runs *before*
       `RunContext.close()` and closes the context itself (Playwright finalizes the recording
       then); `close()` is idempotent. Verified against Playwright 1.64.1 + the e2e legs.
-- [ ] **7.** Tests — new `tests/e2e-assertions.test.ts` (real Chromium): strict violation
+- [x] **7.** Tests — new `tests/e2e-assertions.test.ts` (real Chromium): strict violation
       reports `resolved to N elements`; a `/regex/` URL value patterns a dynamic path while a
       plain string stays exact; title drift fails; full call log is present in the step error;
-      supervised failure writes `trace.zip` before the pause. Update `tests/runner.test.ts` fakes for
-      the `RunContext` additions; add the e2e file to `test:e2e`.
+      supervised failure writes `trace.zip` before the pause; file added to `test:e2e` (the
+      `RunContext` fakes landed with items 4–6).
 
 **Done when:** no hand-rolled polling remains, error text shows Playwright's diff, and
 `npm run verify` + `npm run package` (Forge 8 dropped the old `--dir` flag; plain
@@ -88,7 +88,7 @@ Playwright's full detail; failure evidence survives a supervised resume.
 
 ## M14 — Case profiles: recorded environment applied at run time
 
-Status: not started · Next: item 1 (`case_profiles` DDL) — after M13
+Status: not started · Next: item 1 (`case_profiles` DDL)
 
 Goal: recording environment == run environment; one persisted profile per case; one browser
 per suite worker with a fresh context per case.

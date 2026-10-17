@@ -4,7 +4,7 @@
 > Status, next actions, and the active milestone plan live in `PLAN.md`.
 > `src/shared/*` is the source of truth for types and IPC — if this file conflicts
 > with code on behavior, code wins; on intent, §2 wins (needs user approval to change).
-> Tags in parentheses (`M13`–`M16`) mark approved changes specified here but not yet
+> Tags in parentheses (`M14`–`M16`) mark approved changes specified here but not yet
 > implemented; the milestone detail lives in `PLAN.md`.
 
 ## 1. Vision
@@ -32,7 +32,7 @@ self-contained HTML + PDF reports → re-run failures. Local-first, Chromium onl
 - Execution: suite-parallel (`workers = min(cpu/2, cases)`); direct `playwright` library plus
   `playwright/test`'s `expect` matchers (no test runner — so no UI mode / sharding /
   multi-browser; see Non-goals). One Chromium per runner/suite worker, fresh context per case.
-- Assertions (M13): every `assert-*` step runs through Playwright web-first matchers. Strict
+- Assertions: every `assert-*` step runs through Playwright web-first matchers. Strict
   matching (no `.first()`; `assert-count` counts all matches). URL/title values go straight to
   `toHaveURL`/`toHaveTitle`: a plain string is matched exactly (whitespace normalised), the way
   Playwright 1.64 does it — no glob or substring expansion (`waitForURL` is the glob API) — and
@@ -48,7 +48,7 @@ self-contained HTML + PDF reports → re-run failures. Local-first, Chromium onl
   Unsupervised = single or suite, headless, never pauses.
 - Artifacts: screenshot after every step (bounded retry, animations disabled); video + trace
   retained on failure only; supervised failures persist a trace chunk at the moment of failure
-  so evidence survives a later resume (M13). Downloads land in
+  so evidence survives a later resume. Downloads land in
   `<case dir>/downloads/` (M16).
 - Reports: self-contained single-file HTML + PDF export per suite run. Trace opens via
   `playwright show-trace` (button only when `trace.zip` exists).
@@ -158,7 +158,7 @@ Artifacts: `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/step-<NN>.png, fail
 
 ## 7. Behavior Notes (current, not history)
 
-The approved M13–M16 changes live in `PLAN.md`. Where that plan conflicts with §6–§7 the
+The approved M14–M16 changes live in `PLAN.md`. Where that plan conflicts with §6–§7 the
 plan wins until the milestone lands; this section describes the code as it is today.
 
 - Recorder: argv-only flag builder (`buildCodegenArgs`, allowlisted; viewport `"W,H"` comma,
@@ -188,7 +188,7 @@ files. Never copy dependency versions from memory — check live (`npm view`) be
 ## 9. Verification
 
 `npm run typecheck && npm test && npm run package`, plus `npm run test:e2e` when
-runner/recorder/reports change (M13–M16 add e2e files — list them in the `test:e2e` script).
+runner/recorder/reports change (M14–M16 add e2e files — list them in the `test:e2e` script).
 `package` already stops at the unpacked `out/<app>-<platform>-<arch>/` dir; Forge 8 removed the
 `--dir` flag (the command in older notes fails with `unknown option '--dir'`).
 Manual smoke: record 3-step login → supervised run (pause/resume) → unsupervised suite of 2
