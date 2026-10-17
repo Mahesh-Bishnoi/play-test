@@ -13,22 +13,15 @@
 
 import { randomUUID } from "node:crypto";
 
-import { eq } from "drizzle-orm";
-
-import type { StepStatus } from "../../shared/step-types.js";
-import { MissingTestDataKeyError } from "../../shared/step-types.js";
 import type {
   RunnerCancelPayload,
   RunnerResumePayload,
   RunnerRunSinglePayload,
 } from "../../shared/ipc-contract.js";
 import {
-  RunFinishedEvent,
-  RunLogEvent,
   RunnerCancelPayload as RunnerCancelSchema,
   RunnerResumePayload as RunnerResumeSchema,
   RunnerRunSinglePayload as RunnerRunSingleSchema,
-  RunStepUpdateEvent,
 } from "../../shared/ipc-contract.js";
 import type { RunMode, StepRow } from "../../shared/schema.js";
 import { caseTracePath, caseVideoPath, ensureCaseDir, stepScreenshotPath } from "../artifacts.js";
@@ -37,14 +30,13 @@ import { getCase } from "../ipc-cases.js";
 import { getCaseProfile } from "../ipc-profiles.js";
 import { getProject } from "../ipc-projects.js";
 import { getTestData, listSteps } from "../ipc-steps.js";
-import { tryWriteSuiteHtmlReport } from "../reports.js";
-import { caseRuns, stepRuns, suiteRuns } from "../schema.js";
 import { ContextClosedError, RunAlreadyActiveError, formatStepError } from "./errors.js";
 import { executeStep } from "./execute-step.js";
 import { contextLaunchOptionsFromProfile } from "./launcher.js";
+import { RunWriter } from "./run-writer.js";
 import type { BrowserHandle, BrowserLauncher, EmitRunEvent, RunContext } from "./seams.js";
-import { captureStepScreenshot, runStepInTraceGroup, stepTraceLabel } from "./step-evidence.js";
-import { clickFollowsPageEvent, substituteStepValue } from "./step-values.js";
+import { runStepInTraceGroup, stepTraceLabel } from "./step-evidence.js";
+import { clickFollowsPageEvent, firstMissingKey, substituteStepValue } from "./step-values.js";
 
 interface LiveSession {
   suiteRunId: string;
@@ -91,23 +83,23 @@ export interface RunnerDeps {
 export class SingleCaseRunner {
   private readonly db: AppDatabase;
   private readonly launchBrowser: BrowserLauncher;
-  private readonly emit: EmitRunEvent;
   private readonly artifactsRoot: string;
   private readonly generateId: () => string;
   private readonly now: () => number;
   private readonly delay: (ms: number) => Promise<void>;
   private readonly isSuiteActive: () => boolean;
+  private readonly runs: RunWriter;
   private session: LiveSession | null = null;
 
   constructor(db: AppDatabase, deps: RunnerDeps) {
     this.db = db;
     this.launchBrowser = deps.launchBrowser;
-    this.emit = deps.emit;
     this.artifactsRoot = deps.artifactsRoot;
     this.generateId = deps.generateId ?? randomUUID;
     this.now = deps.now ?? Date.now;
     this.delay = deps.delay ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.isSuiteActive = deps.isSuiteActive ?? (() => false);
+    this.runs = new RunWriter(db, { emit: deps.emit, generateId: this.generateId, now: this.now });
   }
 
   /** True while a single-case session (live or paused) holds its context. */
@@ -129,16 +121,25 @@ export class SingleCaseRunner {
     const suiteRunId = this.generateId();
     const caseRunId = this.generateId();
     const insertRunRows = (): void => {
-      this.insertSuiteRun(suiteRunId, parsed.mode, startedAt);
-      this.insertCaseRun(caseRunId, suiteRunId, parsed.caseId);
+      this.runs.createSuiteRun({
+        id: suiteRunId,
+        suiteId: null,
+        mode: parsed.mode,
+        startedAt,
+      });
+      this.runs.createCaseRun({ id: caseRunId, suiteRunId, caseId: parsed.caseId });
     };
 
     if (steps.length === 0) {
       insertRunRows();
-      this.finishSuite(suiteRunId, "passed");
-      this.finishCase(caseRunId, "passed", startedAt);
-      this.log("warn", "no steps — nothing to execute");
-      this.finish(suiteRunId, { total: 1, passed: 1, failed: 0, skipped: 0 });
+      this.runs.finishSuiteRun(suiteRunId, "passed");
+      this.runs.finishCaseRun(caseRunId, "passed", startedAt);
+      this.runs.log("warn", "no steps — nothing to execute");
+      this.runs.finishRun(
+        suiteRunId,
+        { total: 1, passed: 1, failed: 0, skipped: 0 },
+        this.artifactsRoot,
+      );
       return { suiteRunId, caseRunId, done: Promise.resolve() };
     }
 
@@ -147,7 +148,7 @@ export class SingleCaseRunner {
     const missingKey = firstMissingKey(steps, data);
     if (missingKey !== null) {
       insertRunRows();
-      this.createStepRun(
+      this.runs.createStepRun(
         caseRunId,
         missingKey.stepId,
         missingKey.order,
@@ -156,14 +157,18 @@ export class SingleCaseRunner {
       );
       for (const step of steps) {
         if (step.order !== missingKey.order) {
-          this.createStepRun(caseRunId, step.id, step.order, "skipped", null);
+          this.runs.createStepRun(caseRunId, step.id, step.order, "skipped", null);
         }
       }
-      this.stepEvent(caseRunId, missingKey.order, "fail");
-      this.log("error", `missing test-data key: ${missingKey.key}`);
-      this.finishCase(caseRunId, "failed", startedAt);
-      this.finishSuite(suiteRunId, "failed");
-      this.finish(suiteRunId, { total: 1, passed: 0, failed: 1, skipped: 0 });
+      this.runs.emitStep(caseRunId, missingKey.order, "fail");
+      this.runs.log("error", `missing test-data key: ${missingKey.key}`);
+      this.runs.finishCaseRun(caseRunId, "failed", startedAt);
+      this.runs.finishSuiteRun(suiteRunId, "failed");
+      this.runs.finishRun(
+        suiteRunId,
+        { total: 1, passed: 0, failed: 1, skipped: 0 },
+        this.artifactsRoot,
+      );
       return { suiteRunId, caseRunId, done: Promise.resolve() };
     }
 
@@ -183,7 +188,7 @@ export class SingleCaseRunner {
       projectBaseUrl: getProject(this.db, testCase.projectId).baseUrl,
       profile: getCaseProfile(this.db, parsed.caseId),
       videoDir: caseDir,
-      onLog: (level, msg) => this.log(level, msg),
+      onLog: (level, msg) => this.runs.log(level, msg),
     });
     insertRunRows();
     const session: LiveSession = {
@@ -235,7 +240,7 @@ export class SingleCaseRunner {
       throw new ContextClosedError();
     }
     const data = getTestData(this.db, { caseId: session.caseId });
-    this.clearStepRunsFrom(session.caseRunId, parsed.fromOrder);
+    this.runs.clearStepRunsFrom(session.caseRunId, parsed.fromOrder);
     session.busy = true;
     session.cancelled = false;
     session.pausedSteps = undefined;
@@ -306,8 +311,8 @@ export class SingleCaseRunner {
         session.caseId,
         step.order,
       );
-      this.createStepRun(caseRunId, step.id, step.order, "running", null);
-      this.stepEvent(caseRunId, step.order, "running");
+      this.runs.createStepRun(caseRunId, step.id, step.order, "running", null);
+      this.runs.emitStep(caseRunId, step.order, "running");
       const stepStarted = this.now();
       try {
         // Substitution inside the try: data may change while paused, so a
@@ -322,20 +327,20 @@ export class SingleCaseRunner {
           executeStep(context.page, { ...step, value }),
         );
         if (watchPopup && context.page.pageCount() > pagesBefore) {
-          this.log(
+          this.runs.log(
             "warn",
             `step s${step.order} (click) opened a new page — add the "popup" token to value to follow it`,
           );
         }
-        await this.captureScreenshot(context, screenshotPath);
-        this.updateStepRun(caseRunId, step.id, "pass", null, screenshotPath, stepStarted);
-        this.stepEvent(caseRunId, step.order, "pass");
+        await this.runs.captureScreenshot(context, screenshotPath);
+        this.runs.updateStepRun(caseRunId, step.id, "pass", null, screenshotPath, stepStarted);
+        this.runs.emitStep(caseRunId, step.order, "pass");
       } catch (err) {
         const message = formatStepError(err);
-        await this.captureScreenshot(context, screenshotPath);
-        this.updateStepRun(caseRunId, step.id, "fail", message, screenshotPath, stepStarted);
-        this.stepEvent(caseRunId, step.order, "fail");
-        this.log("error", `step s${step.order} (${step.action}) failed: ${message}`);
+        await this.runs.captureScreenshot(context, screenshotPath);
+        this.runs.updateStepRun(caseRunId, step.id, "fail", message, screenshotPath, stepStarted);
+        this.runs.emitStep(caseRunId, step.order, "fail");
+        this.runs.log("error", `step s${step.order} (${step.action}) failed: ${message}`);
         if (session.mode === "supervised") {
           session.busy = false;
           session.pausedSteps = steps;
@@ -347,12 +352,15 @@ export class SingleCaseRunner {
               caseTracePath(this.artifactsRoot, session.projectId, suiteRunId, session.caseId),
             );
           } catch {
-            this.log("warn", "failed to save trace");
+            this.runs.log("warn", "failed to save trace");
           }
-          this.log("warn", `paused at step ${step.order} — edit the step and resume, or re-run`);
+          this.runs.log(
+            "warn",
+            `paused at step ${step.order} — edit the step and resume, or re-run`,
+          );
           return;
         }
-        this.markSkippedFrom(caseRunId, steps, index + 1);
+        this.runs.markSkippedFrom(caseRunId, steps, index + 1);
         await this.settleFailure(session, startedAt);
         return;
       }
@@ -370,14 +378,18 @@ export class SingleCaseRunner {
       try {
         await context.saveTrace(null);
       } catch {
-        this.log("warn", "failed to discard trace");
+        this.runs.log("warn", "failed to discard trace");
       }
-      await this.safeDiscardVideo(context);
+      await this.runs.discardVideoQuietly(context);
     }
     await this.closeSessionResources(session);
-    this.finishCase(session.caseRunId, "passed", startedAt);
-    this.finishSuite(session.suiteRunId, "passed");
-    this.finish(session.suiteRunId, { total: 1, passed: 1, failed: 0, skipped: 0 });
+    this.runs.finishCaseRun(session.caseRunId, "passed", startedAt);
+    this.runs.finishSuiteRun(session.suiteRunId, "passed");
+    this.runs.finishRun(
+      session.suiteRunId,
+      { total: 1, passed: 1, failed: 0, skipped: 0 },
+      this.artifactsRoot,
+    );
     if (this.session === session) {
       this.session = null;
     }
@@ -396,7 +408,7 @@ export class SingleCaseRunner {
       try {
         await context.saveTrace(traceDest);
       } catch {
-        this.log("warn", "failed to save trace");
+        this.runs.log("warn", "failed to save trace");
       }
       const videoDest = caseVideoPath(
         this.artifactsRoot,
@@ -404,17 +416,21 @@ export class SingleCaseRunner {
         session.suiteRunId,
         session.caseId,
       );
-      if (await this.safeSaveVideo(context, videoDest)) {
+      if (await this.runs.saveVideoQuietly(context, videoDest)) {
         videoPath = videoDest;
       }
     }
     await this.closeSessionResources(session);
     if (videoPath !== null) {
-      this.db.update(caseRuns).set({ videoPath }).where(eq(caseRuns.id, session.caseRunId)).run();
+      this.runs.setCaseVideoPath(session.caseRunId, videoPath);
     }
-    this.finishCase(session.caseRunId, "failed", startedAt);
-    this.finishSuite(session.suiteRunId, "failed");
-    this.finish(session.suiteRunId, { total: 1, passed: 0, failed: 1, skipped: 0 });
+    this.runs.finishCaseRun(session.caseRunId, "failed", startedAt);
+    this.runs.finishSuiteRun(session.suiteRunId, "failed");
+    this.runs.finishRun(
+      session.suiteRunId,
+      { total: 1, passed: 0, failed: 1, skipped: 0 },
+      this.artifactsRoot,
+    );
     if (this.session === session) {
       this.session = null;
     }
@@ -431,7 +447,7 @@ export class SingleCaseRunner {
     }
     session.settled = true;
     if (steps !== undefined && fromIndex !== undefined) {
-      this.markSkippedFrom(session.caseRunId, steps, fromIndex);
+      this.runs.markSkippedFrom(session.caseRunId, steps, fromIndex);
     }
     const context = session.context;
     if (context !== null) {
@@ -440,14 +456,18 @@ export class SingleCaseRunner {
       } catch {
         // Context may already be half-closed — cancellation still proceeds.
       }
-      await this.safeDiscardVideo(context);
+      await this.runs.discardVideoQuietly(context);
     }
     await this.closeSessionResources(session);
-    this.finishCase(session.caseRunId, "cancelled", session.startedAt);
-    this.finishSuite(session.suiteRunId, "cancelled");
+    this.runs.finishCaseRun(session.caseRunId, "cancelled", session.startedAt);
+    this.runs.finishSuiteRun(session.suiteRunId, "cancelled");
     // Contract has no cancelled bucket — cancellation counts as skipped.
-    this.finish(session.suiteRunId, { total: 1, passed: 0, failed: 0, skipped: 1 });
-    this.log("warn", "run cancelled — remaining steps skipped");
+    this.runs.finishRun(
+      session.suiteRunId,
+      { total: 1, passed: 0, failed: 0, skipped: 1 },
+      this.artifactsRoot,
+    );
+    this.runs.log("warn", "run cancelled — remaining steps skipped");
     if (this.session === session) {
       this.session = null;
     }
@@ -485,177 +505,24 @@ export class SingleCaseRunner {
       return;
     }
     try {
-      const rows = this.db
-        .select()
-        .from(stepRuns)
-        .where(eq(stepRuns.caseRunId, session.caseRunId))
-        .all();
+      const rows = this.runs.listStepRuns(session.caseRunId);
       if (rows.length === 0) {
         for (const step of steps) {
-          this.createStepRun(session.caseRunId, step.id, step.order, "skipped", null);
+          this.runs.createStepRun(session.caseRunId, step.id, step.order, "skipped", null);
         }
       }
-      this.log("error", message);
-      this.finishCase(session.caseRunId, "failed", this.now());
-      this.finishSuite(session.suiteRunId, "failed");
-      this.finish(session.suiteRunId, { total: 1, passed: 0, failed: 1, skipped: 0 });
+      this.runs.log("error", message);
+      this.runs.finishCaseRun(session.caseRunId, "failed", this.now());
+      this.runs.finishSuiteRun(session.suiteRunId, "failed");
+      this.runs.finishRun(
+        session.suiteRunId,
+        { total: 1, passed: 0, failed: 1, skipped: 0 },
+        this.artifactsRoot,
+      );
     } catch {
-      this.log("error", message);
+      this.runs.log("error", message);
     } finally {
       this.session = null;
     }
   }
-
-  // --- Small persistence / emit helpers (one effect per line) ------------------
-
-  private insertSuiteRun(suiteRunId: string, mode: RunMode, startedAt: number): void {
-    this.db
-      .insert(suiteRuns)
-      .values({ id: suiteRunId, suiteId: null, mode, status: "running", startedAt })
-      .run();
-  }
-
-  private insertCaseRun(caseRunId: string, suiteRunId: string, caseId: string): void {
-    this.db.insert(caseRuns).values({ id: caseRunId, suiteRunId, caseId, status: "running" }).run();
-  }
-
-  private createStepRun(
-    caseRunId: string,
-    stepId: string,
-    order: number,
-    status: StepStatus,
-    error: string | null,
-  ): void {
-    this.db
-      .insert(stepRuns)
-      .values({ id: this.generateId(), caseRunId, stepId, order, status, error })
-      .run();
-  }
-
-  private updateStepRun(
-    caseRunId: string,
-    stepId: string,
-    status: StepStatus,
-    error: string | null,
-    screenshotPath: string,
-    stepStarted: number,
-  ): void {
-    const rows = this.db.select().from(stepRuns).where(eq(stepRuns.caseRunId, caseRunId)).all();
-    const row = rows.find((r) => r.stepId === stepId);
-    if (row === undefined) {
-      return;
-    }
-    this.db
-      .update(stepRuns)
-      .set({
-        status,
-        error,
-        screenshotPath,
-        durationMs: this.now() - stepStarted,
-      })
-      .where(eq(stepRuns.id, row.id))
-      .run();
-  }
-
-  private clearStepRunsFrom(caseRunId: string, fromOrder: number): void {
-    const rows = this.db.select().from(stepRuns).where(eq(stepRuns.caseRunId, caseRunId)).all();
-    for (const row of rows) {
-      if (row.order >= fromOrder) {
-        this.db.delete(stepRuns).where(eq(stepRuns.id, row.id)).run();
-      }
-    }
-  }
-
-  private markSkippedFrom(caseRunId: string, steps: StepRow[], fromIndex: number): void {
-    for (let index = fromIndex; index < steps.length; index++) {
-      const step = steps[index];
-      if (step === undefined) {
-        break;
-      }
-      this.createStepRun(caseRunId, step.id, step.order, "skipped", null);
-      this.stepEvent(caseRunId, step.order, "skipped");
-    }
-  }
-
-  private finishCase(
-    caseRunId: string,
-    status: "passed" | "failed" | "cancelled",
-    startedAt: number,
-  ): void {
-    this.db
-      .update(caseRuns)
-      .set({ status, durationMs: this.now() - startedAt })
-      .where(eq(caseRuns.id, caseRunId))
-      .run();
-  }
-
-  private finishSuite(suiteRunId: string, status: "passed" | "failed" | "cancelled"): void {
-    this.db
-      .update(suiteRuns)
-      .set({ status, endedAt: this.now() })
-      .where(eq(suiteRuns.id, suiteRunId))
-      .run();
-  }
-
-  private stepEvent(caseRunId: string, order: number, status: StepStatus): void {
-    this.emit("run:step-update", RunStepUpdateEvent.parse({ caseRunId, order, status }));
-  }
-
-  private log(level: "info" | "warn" | "error", msg: string): void {
-    this.emit("run:log", RunLogEvent.parse({ level, msg }));
-  }
-
-  private finish(
-    suiteRunId: string,
-    summary: { total: number; passed: number; failed: number; skipped: number },
-  ): void {
-    // Report write is evidence, not verdict: best-effort before the finished
-    // event so the report page can link it immediately; a write failure warns.
-    tryWriteSuiteHtmlReport(this.db, this.artifactsRoot, suiteRunId, (msg) => {
-      this.log("warn", msg);
-    });
-    this.emit("run:finished", RunFinishedEvent.parse({ suiteRunId, summary }));
-  }
-
-  // Screenshots are evidence, not verdicts: a failed capture warns, never
-  // flips the step result. Awaited (not fire-and-forget) so artifacts exist
-  // before the run settles — important for tests and the report page.
-  private async captureScreenshot(context: RunContext, path: string): Promise<void> {
-    await captureStepScreenshot(context.page, path, (message) => this.log("warn", message));
-  }
-
-  private async safeSaveVideo(context: RunContext, dest: string): Promise<boolean> {
-    try {
-      await context.saveVideo(dest);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  private async safeDiscardVideo(context: RunContext): Promise<void> {
-    try {
-      await context.discardVideo();
-    } catch {
-      // A leftover recording is harmless — the run still settles.
-    }
-  }
-}
-
-/** First step whose `{{key}}` has no test-data entry (fail-fast pre-scan). */
-function firstMissingKey(
-  steps: StepRow[],
-  data: Record<string, string>,
-): { stepId: string; order: number; key: string } | null {
-  for (const step of steps) {
-    try {
-      substituteStepValue(step.value, data);
-    } catch (err) {
-      if (err instanceof MissingTestDataKeyError) {
-        return { stepId: step.id, order: step.order, key: err.key };
-      }
-      throw err;
-    }
-  }
-  return null;
 }

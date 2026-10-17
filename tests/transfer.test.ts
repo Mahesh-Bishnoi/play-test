@@ -2,23 +2,23 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createDatabase } from "../src/main/db.js";
 import type { DatabaseHandle } from "../src/main/db.js";
-import type { IpcHandleFn } from "../src/main/ipc-register.js";
-import { registerTransferHandlers } from "../src/main/ipc-register.js";
+import type { IpcHandleFn } from "../src/main/ipc/handle.js";
+import { registerTransferHandlers } from "../src/main/ipc/transfer.js";
 import { createCase, getCase, listCases } from "../src/main/ipc-cases.js";
 import { getCaseProfile, setCaseProfile } from "../src/main/ipc-profiles.js";
 import { createProject, getProject, listProjects } from "../src/main/ipc-projects.js";
 import { getTestData, listSteps, setTestData, upsertStep } from "../src/main/ipc-steps.js";
 import { createSuite, getSuiteCaseIds, listSuites, setSuiteCases } from "../src/main/ipc-suites.js";
 import {
-  ExportScopeMismatchError,
   buildCaseExport,
   buildProjectExport,
   buildSuiteExport,
   importCaseBundle,
   importProjectBundle,
   importSuiteBundle,
-} from "../src/main/transfer.js";
-import type { TransferIoDeps } from "../src/main/transfer.js";
+} from "../src/main/transfer/bundles.js";
+import { ExportScopeMismatchError } from "../src/main/transfer/types.js";
+import type { TransferIoDeps } from "../src/main/transfer/types.js";
 import { exportFileName, parseExportText, type ExportFile } from "../src/shared/export-format.js";
 
 function fakeIpc(): { handle: IpcHandleFn; call: (channel: string, payload: unknown) => unknown } {

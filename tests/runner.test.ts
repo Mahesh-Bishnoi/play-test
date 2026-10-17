@@ -31,13 +31,13 @@ import {
 import { captureStepScreenshot, stepTraceLabel } from "../src/main/runner/step-evidence.js";
 import { executeStep } from "../src/main/runner/execute-step.js";
 import { SingleCaseRunner } from "../src/main/runner/single-runner.js";
-import { SuiteRunner } from "../src/main/suite-runner.js";
+import { SuiteRunner } from "../src/main/suite-runner/suite-runner.js";
 import { caseArtifactsDir, caseVideoPath, stepScreenshotPath } from "../src/main/artifacts.js";
 import { createDatabase } from "../src/main/db.js";
 import type { DatabaseHandle } from "../src/main/db.js";
 import type { AppDatabase } from "../src/main/db.js";
-import { registerRunnerHandlers } from "../src/main/ipc-register.js";
-import type { IpcHandleFn } from "../src/main/ipc-register.js";
+import { registerRunnerHandlers } from "../src/main/ipc/runner.js";
+import type { IpcHandleFn } from "../src/main/ipc/handle.js";
 import { createCase } from "../src/main/ipc-cases.js";
 import { authStateDir, MissingAuthStateError, setCaseProfile } from "../src/main/ipc-profiles.js";
 import { createProject } from "../src/main/ipc-projects.js";

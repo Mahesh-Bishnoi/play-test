@@ -12,19 +12,19 @@ import { createSuite } from "../src/main/ipc-suites.js";
 import { caseRuns, stepRuns, suiteRuns } from "../src/main/schema.js";
 import {
   SuiteRunNotFoundError,
-  ensureSuiteHtmlPath,
-  escapeHtml,
-  formatStepDetail,
   getSuiteReport,
-  readSuiteHtmlReport,
-  renderSuiteHtml,
-  reportFileExists,
   resolveReportProjectId,
+} from "../src/main/reports/data.js";
+import { escapeHtml, formatStepDetail, renderSuiteHtml } from "../src/main/reports/html.js";
+import {
+  ensureSuiteHtmlPath,
+  readSuiteHtmlReport,
+  reportFileExists,
   suiteReportPaths,
   tryWriteSuiteHtmlReport,
   writeSuiteHtmlReport,
   writeSuitePdfReport,
-} from "../src/main/reports.js";
+} from "../src/main/reports/files.js";
 
 let openHandles: DatabaseHandle[] = [];
 afterEach(() => {

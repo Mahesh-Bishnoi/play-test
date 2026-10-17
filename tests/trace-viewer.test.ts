@@ -8,9 +8,11 @@ import type { DatabaseHandle } from "../src/main/db.js";
 import { createCase } from "../src/main/ipc-cases.js";
 import { createProject } from "../src/main/ipc-projects.js";
 import { upsertStep } from "../src/main/ipc-steps.js";
-import { registerReportHandlers } from "../src/main/ipc-register.js";
+import { registerReportHandlers } from "../src/main/ipc/report.js";
 import { caseRuns, stepRuns, suiteRuns } from "../src/main/schema.js";
-import { getSuiteReport, renderSuiteHtml, writeSuiteHtmlReport } from "../src/main/reports.js";
+import { getSuiteReport } from "../src/main/reports/data.js";
+import { renderSuiteHtml } from "../src/main/reports/html.js";
+import { writeSuiteHtmlReport } from "../src/main/reports/files.js";
 import {
   CaseRunNotFoundError,
   TraceViewerError,

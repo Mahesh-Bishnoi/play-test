@@ -317,14 +317,30 @@ anything durable to `SPECS.md`.
   init/commit/push/pull/clone/status + conflict resolve). No behavior change; `npm test`
   + the git-sync/transfer e2e tests green. Phases 4–5 still to do.
 - **2026-10-17 — maintainability refactor, phase 4.** Renderer pages split by concern with
-  no visual or behavior change. `pages/CaseDetailPage.tsx` (1165 → ~380 lines) → the
+  no visual or behavior change. `pages/CaseDetailPage.tsx` (1165 → ~520 lines) → the
   `pages/case-detail/` folder: `profile-form.ts` (profile ⇄ `CaseProfileInput` mapping),
   `use-record-options.ts` (debounced profile + case-URL form state), `use-case-run.ts`
   (run state + `run:*` subscription), and the presentational `RecordOptionsPanel.tsx` /
-  `RunControls.tsx` / `StepTable.tsx`. `pages/SuiteDetailPage.tsx` (837 → ~215 lines) →
+  `RunControls.tsx` / `StepTable.tsx`. `pages/SuiteDetailPage.tsx` (837 → ~196 lines) →
   `pages/suite-detail/`: `use-suite-detail.ts` (membership, filtering, run/delete/transfer
   actions) plus `SuiteListCard.tsx` / `CaseMembershipCard.tsx` / `RunSuiteDialog.tsx`.
   Hook order and debounce semantics preserved. Watch out: `oxlint --type-aware`'s
   `unbound-method` rule requires callback members in component interfaces be declared as
   properties (`onSelect: (id: string) => void`), not method shorthand, because they are
-  passed as values. `npm run verify` green (283 passed). Phase 5 still to do.
+  passed as values. `npm run verify` green (283 passed).
+- **2026-10-17 — maintainability refactor, phase 5 (last).** Split the remaining four big
+  main-process files, extracting only where the deletion test passes.
+  `src/main/suite-runner.ts` (607) → `src/main/suite-runner/`: `suite-runner.ts` (validation
+  + settle), `pool.ts` (worker pool), `case-execution.ts` (one case end to end),
+  `last-failed.ts`. `src/main/reports.ts` (483) → `src/main/reports/`: `data.ts` (report
+  shape from the DB), `html.ts` (markup + inline CSS), `files.ts` (paths, HTML/PDF write,
+  best-effort write). `src/main/transfer.ts` (368) → `src/main/transfer/`: `types.ts`,
+  `io.ts` (file dialogs), `bundles.ts` (build/import project·suite·case bundles).
+  `src/main/ipc-register.ts` (645) → `src/main/ipc/`, one file per area: `handle.ts`
+  (`IpcHandleFn` + `payloadSchema`), `crud.ts`, `runner.ts`, `recorder.ts`, `transfer.ts`,
+  `sync.ts`, `report.ts`, `system.ts`. Also de-duplicated the runners' near-identical
+  persistence/emit helpers into `src/main/runner/run-writer.ts` (`class RunWriter`) and moved
+  `firstMissingKey` into `runner/step-values.ts`; `SingleCaseRunner` and `SuiteRunner` now
+  delegate to it. Zero behavior change (all 6 suite run-log strings verified byte-identical,
+  no stale imports). Checks: `npm run verify` + `npm run test:e2e` (8 files / 31 tests) green,
+  283 unit tests passed.

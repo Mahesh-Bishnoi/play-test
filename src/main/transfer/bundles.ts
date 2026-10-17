@@ -1,89 +1,25 @@
-import type { AppDatabase } from "./db.js";
+import type { AppDatabase } from "../db.js";
 import {
   EXPORT_FORMAT,
   EXPORT_VERSION,
-  exportFileName,
-  parseExportText,
   type ExportCase,
   type ExportFile,
-  type ExportScope,
   type ExportStep,
-} from "../shared/export-format.js";
-import { CaseProfileInputSchema } from "../shared/schema.js";
-import { getCaseProfile, setCaseProfile } from "./ipc-profiles.js";
-import { getProject } from "./ipc-projects.js";
-import { createProject, deleteProject } from "./ipc-projects.js";
-import { getCase, createCase, deleteCase, listCases, listCasesByIds } from "./ipc-cases.js";
-import { getSuite, createSuite, deleteSuite, getSuiteCaseIds } from "./ipc-suites.js";
-import { listSuites, setSuiteCases } from "./ipc-suites.js";
-import { getTestData, listSteps, setTestData, upsertStep } from "./ipc-steps.js";
-
-/** Thrown when a file's scope doesn't match the import channel used. */
-export class ExportScopeMismatchError extends Error {
-  constructor(expected: string, actual: string) {
-    super(`expected a ${expected} export, got ${actual}`);
-    this.name = "ExportScopeMismatchError";
-  }
-}
-
-/**
- * File + dialog surface for import/export. The composition root (main.ts)
- * injects the real Electron dialogs + fs; tests inject fakes — transfer.ts
- * itself never imports Electron.
- */
-export interface TransferIoDeps {
-  showSaveDialog(defaultFileName: string): Promise<string | null>;
-  showOpenDialog(): Promise<string | null>;
-  readTextFile(path: string): Promise<string>;
-  writeTextFile(path: string, text: string): Promise<void>;
-}
-
-export interface ExportResult {
-  saved: boolean;
-  path?: string;
-}
-
-export interface ImportResult {
-  imported: boolean;
-  summary?: ImportSummary;
-}
-
-/** Save-dialog flow for one built export file. */
-export async function saveExportFile(
-  io: TransferIoDeps,
-  baseName: string,
-  scope: ExportScope,
-  file: ExportFile,
-): Promise<ExportResult> {
-  const chosen = await io.showSaveDialog(exportFileName(baseName, scope));
-  if (chosen === null) {
-    return { saved: false };
-  }
-  await io.writeTextFile(chosen, JSON.stringify(file, null, 2));
-  return { saved: true, path: chosen };
-}
-
-/** Open-dialog flow: read a file, parse + validate, run the importer. */
-export async function loadImportFile(
-  io: TransferIoDeps,
-  run: (file: ExportFile) => ImportSummary,
-): Promise<ImportResult> {
-  const chosen = await io.showOpenDialog();
-  if (chosen === null) {
-    return { imported: false };
-  }
-  const text = await io.readTextFile(chosen);
-  const summary = run(parseExportText(text));
-  return { imported: true, summary };
-}
-
-export interface ImportSummary {
-  projectId: string;
-  suiteIds: string[];
-  caseIds: string[];
-  caseCount: number;
-  stepCount: number;
-}
+} from "../../shared/export-format.js";
+import { CaseProfileInputSchema } from "../../shared/schema.js";
+import { getCaseProfile, setCaseProfile } from "../ipc-profiles.js";
+import { createProject, deleteProject, getProject } from "../ipc-projects.js";
+import { createCase, deleteCase, getCase, listCases, listCasesByIds } from "../ipc-cases.js";
+import {
+  createSuite,
+  deleteSuite,
+  getSuite,
+  getSuiteCaseIds,
+  listSuites,
+  setSuiteCases,
+} from "../ipc-suites.js";
+import { getTestData, listSteps, setTestData, upsertStep } from "../ipc-steps.js";
+import { ExportScopeMismatchError, type ImportSummary } from "./types.js";
 
 function toExportSteps(
   rows: Array<{

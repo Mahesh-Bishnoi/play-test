@@ -5,7 +5,8 @@
  * in one place. Pure functions, unit-tested directly.
  */
 
-import { substituteTestDataValue } from "../../shared/step-types.js";
+import { MissingTestDataKeyError, substituteTestDataValue } from "../../shared/step-types.js";
+import type { StepRow } from "../../shared/schema.js";
 import type { ClickStepOptions, SelectOptionInput, SelectOptionValue } from "./seams.js";
 
 /** `{{key}}` substitution applies to step `value` only (PLAN §10). */
@@ -252,8 +253,7 @@ export function parseSelectValue(value: string): SelectOptionInput {
   return value;
 }
 
-/**
- * `/pattern/flags` → RegExp; anything else is the literal string the matcher
+/** `/pattern/flags` → RegExp; anything else is the literal string the matcher
  * compares against. Playwright 1.64 matches plain URL/title strings exactly
  * (no glob expansion) — patterns need the `/…/flags` form.
  */
@@ -267,4 +267,22 @@ export function parseAssertMatcher(value: string): string | RegExp {
     }
   }
   return value;
+}
+
+/** First step whose `{{key}}` has no test-data entry (fail-fast pre-scan). */
+export function firstMissingKey(
+  steps: StepRow[],
+  data: Record<string, string>,
+): { stepId: string; order: number; key: string } | null {
+  for (const step of steps) {
+    try {
+      substituteStepValue(step.value, data);
+    } catch (err) {
+      if (err instanceof MissingTestDataKeyError) {
+        return { stepId: step.id, order: step.order, key: err.key };
+      }
+      throw err;
+    }
+  }
+  return null;
 }

@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { createDatabase } from "../src/main/db.js";
-import type { IpcHandleFn } from "../src/main/ipc-register.js";
-import {
-  registerProfileHandlers,
-  registerProjectHandlers,
-  registerRecorderHandlers,
-} from "../src/main/ipc-register.js";
+import type { IpcHandleFn } from "../src/main/ipc/handle.js";
+import { registerProfileHandlers, registerProjectHandlers } from "../src/main/ipc/crud.js";
+import { registerRecorderHandlers } from "../src/main/ipc/recorder.js";
 import { CodegenRecorder } from "../src/main/recorder/codegen-shell.js";
 import type { CodegenChild, RecorderDeps } from "../src/main/recorder/codegen-shell.js";
 import { createCase } from "../src/main/ipc-cases.js";

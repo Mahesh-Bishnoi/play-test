@@ -5,18 +5,16 @@ import started from "electron-squirrel-startup";
 
 import { createDatabase, defaultDbPath } from "./db.js";
 import { ExportValidationError, MAX_EXPORT_BYTES } from "../shared/export-format.js";
-import {
-  registerCrudHandlers,
-  registerRecorderHandlers,
-  registerReportHandlers,
-  registerRunnerHandlers,
-  registerSystemHandlers,
-  registerTransferHandlers,
-  registerSyncHandlers,
-} from "./ipc-register.js";
+import { registerCrudHandlers } from "./ipc/crud.js";
+import { registerRecorderHandlers } from "./ipc/recorder.js";
+import { registerReportHandlers } from "./ipc/report.js";
+import { registerRunnerHandlers } from "./ipc/runner.js";
+import { registerSystemHandlers } from "./ipc/system.js";
+import { registerTransferHandlers } from "./ipc/transfer.js";
+import { registerSyncHandlers } from "./ipc/sync.js";
 import { SingleCaseRunner } from "./runner/single-runner.js";
 import { playwrightLauncher } from "./runner/launcher.js";
-import { SuiteRunner } from "./suite-runner.js";
+import { SuiteRunner } from "./suite-runner/suite-runner.js";
 import { defaultArtifactsRoot } from "./artifacts.js";
 
 // Forge's vite plugin injects these globals at build/dev time.

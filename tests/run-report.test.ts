@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { renderSuiteHtml, type SuiteReport } from "../src/main/reports.js";
+import { renderSuiteHtml } from "../src/main/reports/html.js";
+import type { SuiteReport } from "../src/main/reports/data.js";
 import { reportHasFailures } from "../src/renderer/pages/RunReportPage.js";
 
 function makeReport(failed: number): SuiteReport {

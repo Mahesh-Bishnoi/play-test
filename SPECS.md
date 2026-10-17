@@ -92,8 +92,15 @@ src/
   main/
     db.ts / schema.ts / artifacts.ts
     ipc-projects.ts / ipc-suites.ts / ipc-cases.ts / ipc-steps.ts
-    ipc-register.ts / main.ts
-    suite-runner.ts
+    ipc-profiles.ts / main.ts
+    ipc/                          // Electron-agnostic handler registration, one file per area
+      handle.ts / crud.ts         //   IpcHandleFn + payloadSchema · project/suite/case/step/testdata/profile
+      runner.ts / recorder.ts     //   run + codegen handlers
+      transfer.ts / sync.ts / report.ts / system.ts
+    suite-runner/                 // parallel suite execution (unsupervised only)
+      suite-runner.ts             //   class SuiteRunner (validation + settle)
+      pool.ts / case-execution.ts //   worker pool · one case end to end
+      last-failed.ts              //   "re-run last failed" selection
     recorder/                     // Playwright codegen capture → parsed steps
       errors.ts                   //   recorder error vocabulary
       literals.ts / statement.ts  //   JS-literal + statement extraction
@@ -109,9 +116,13 @@ src/
       execute-step.ts             //   the 35-action switch
       locator-literals.ts / locator-resolve.ts   //   safe recorder-chain parsing
       single-runner.ts            //   SingleCaseRunner (supervised + unsupervised)
+      run-writer.ts               //   shared run-row writes + run:* events (both runners)
       playwright-page.ts / playwright-context.ts / launcher.ts   // production adapters
-    reports.ts / trace-viewer.ts / browser-setup.ts
-    transfer.ts
+    reports/                      // suite report: DB rows → HTML/PDF files
+      data.ts / html.ts / files.ts
+    transfer/                     // .playtest.json export/import bundles
+      types.ts / io.ts / bundles.ts
+    trace-viewer.ts / browser-setup.ts
     git-sync/                     // per-project local-git sync (snapshot only, no runs)
       types.ts / snapshot.ts      //   sync result types · snapshot schema + hash
       snapshot-db.ts / snapshot-tree.ts   //   DB <-> snapshot · reading a git tree
@@ -119,7 +130,6 @@ src/
       repo.ts                     //   local-repo/remote-ref plumbing
       merge.ts                    //   pure entity three-way merge
       sync.ts                     //   public API (init/commit/push/pull/clone/status)
-    ipc-profiles.ts
     playwright-cli.ts             // shared CLI resolve/spawn (recorder + trace viewer)
   preload/preload.ts            // allowlisted invoke + run:* subscribe only
   renderer/

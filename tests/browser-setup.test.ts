@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { BrowserSetupError, getBrowserStatus, installChromium } from "../src/main/browser-setup.js";
 import type { BrowserSetupDeps } from "../src/main/browser-setup.js";
-import type { IpcHandleFn } from "../src/main/ipc-register.js";
-import { registerSystemHandlers } from "../src/main/ipc-register.js";
+import type { IpcHandleFn } from "../src/main/ipc/handle.js";
+import { registerSystemHandlers } from "../src/main/ipc/system.js";
 
 function fakeDeps(overrides: Partial<BrowserSetupDeps> = {}): BrowserSetupDeps {
   return {

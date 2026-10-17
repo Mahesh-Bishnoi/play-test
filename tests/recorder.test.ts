@@ -17,7 +17,7 @@ import {
 import { createDatabase } from "../src/main/db.js";
 import type { DatabaseHandle } from "../src/main/db.js";
 import { createCase, updateCase } from "../src/main/ipc-cases.js";
-import type { IpcHandleFn } from "../src/main/ipc-register.js";
+import type { IpcHandleFn } from "../src/main/ipc/handle.js";
 import { MissingAuthStateError, authStateDir, setCaseProfile } from "../src/main/ipc-profiles.js";
 import { createProject } from "../src/main/ipc-projects.js";
 
@@ -633,7 +633,7 @@ function fakeIpc(): {
 
 describe("registerRecorderHandlers", () => {
   it("resolves baseUrl + the case profile and returns parsed steps through the fake IPC surface", async () => {
-    const { registerRecorderHandlers } = await import("../src/main/ipc-register.js");
+    const { registerRecorderHandlers } = await import("../src/main/ipc/recorder.js");
     const fx = recorderFixture();
     try {
       const ipc = fakeIpc();
@@ -795,7 +795,7 @@ describe("registerRecorderHandlers profile resolution (M14)", () => {
   }
 
   it("maps the profile onto the recorder options and reaches the codegen spawn", async () => {
-    const { registerRecorderHandlers } = await import("../src/main/ipc-register.js");
+    const { registerRecorderHandlers } = await import("../src/main/ipc/recorder.js");
     const fx = recorderFixture();
     try {
       const authDir = authStateDir(fx.root, fx.projectId);
@@ -841,7 +841,7 @@ describe("registerRecorderHandlers profile resolution (M14)", () => {
   });
 
   it("throws MissingAuthStateError before spawning when the auth file is gone", async () => {
-    const { registerRecorderHandlers } = await import("../src/main/ipc-register.js");
+    const { registerRecorderHandlers } = await import("../src/main/ipc/recorder.js");
     const fx = recorderFixture();
     try {
       setCaseProfile(fx.handle.db, fx.caseId, { storageState: "ghost.json" });
@@ -864,7 +864,7 @@ describe("registerRecorderHandlers profile resolution (M14)", () => {
   });
 
   it("rejects when neither the case nor the project has a URL", async () => {
-    const { registerRecorderHandlers } = await import("../src/main/ipc-register.js");
+    const { registerRecorderHandlers } = await import("../src/main/ipc/recorder.js");
     const handle = createDatabase(":memory:");
     try {
       const root = mkdtempSync(join(tmpdir(), "playtest-recorder-"));
@@ -882,7 +882,7 @@ describe("registerRecorderHandlers profile resolution (M14)", () => {
   });
 
   it("treats a half-filled viewport as unset and validates the caseId payload", async () => {
-    const { registerRecorderHandlers } = await import("../src/main/ipc-register.js");
+    const { registerRecorderHandlers } = await import("../src/main/ipc/recorder.js");
     const fx = recorderFixture();
     try {
       const seen: RecorderStartOptions[] = [];
@@ -913,7 +913,7 @@ describe("registerRecorderHandlers profile resolution (M14)", () => {
 
 describe("resolveRecorderStartOptions URL precedence (M14)", () => {
   it("prefers the case url over the project baseUrl (both trimmed)", async () => {
-    const { resolveRecorderStartOptions } = await import("../src/main/ipc-register.js");
+    const { resolveRecorderStartOptions } = await import("../src/main/ipc/recorder.js");
     const handle = createDatabase(":memory:");
     try {
       const root = mkdtempSync(join(tmpdir(), "playtest-recorder-"));
@@ -932,7 +932,7 @@ describe("resolveRecorderStartOptions URL precedence (M14)", () => {
   });
 
   it("falls back to the project baseUrl when the case url is null or empty", async () => {
-    const { resolveRecorderStartOptions } = await import("../src/main/ipc-register.js");
+    const { resolveRecorderStartOptions } = await import("../src/main/ipc/recorder.js");
     const handle = createDatabase(":memory:");
     try {
       const root = mkdtempSync(join(tmpdir(), "playtest-recorder-"));
@@ -953,7 +953,7 @@ describe("resolveRecorderStartOptions URL precedence (M14)", () => {
   });
 
   it("throws when neither the case nor the project has a URL", async () => {
-    const { resolveRecorderStartOptions } = await import("../src/main/ipc-register.js");
+    const { resolveRecorderStartOptions } = await import("../src/main/ipc/recorder.js");
     const handle = createDatabase(":memory:");
     try {
       const root = mkdtempSync(join(tmpdir(), "playtest-recorder-"));

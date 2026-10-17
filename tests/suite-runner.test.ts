@@ -15,14 +15,15 @@ import type {
 import type { RunEventChannel } from "../src/main/runner/seams.js";
 import { RunAlreadyActiveError } from "../src/main/runner/errors.js";
 import { SingleCaseRunner } from "../src/main/runner/single-runner.js";
+import { SuiteRunner } from "../src/main/suite-runner/suite-runner.js";
 import {
   NoFailedCasesError,
-  SuiteRunner,
-  defaultWorkerCount,
   selectLastFailedCaseIds,
-} from "../src/main/suite-runner.js";
-import { registerReportHandlers, registerRunnerHandlers } from "../src/main/ipc-register.js";
-import type { IpcHandleFn } from "../src/main/ipc-register.js";
+} from "../src/main/suite-runner/last-failed.js";
+import { defaultWorkerCount } from "../src/main/suite-runner/pool.js";
+import { registerReportHandlers } from "../src/main/ipc/report.js";
+import { registerRunnerHandlers } from "../src/main/ipc/runner.js";
+import type { IpcHandleFn } from "../src/main/ipc/handle.js";
 import { createDatabase } from "../src/main/db.js";
 import type { AppDatabase, DatabaseHandle } from "../src/main/db.js";
 import { createCase } from "../src/main/ipc-cases.js";

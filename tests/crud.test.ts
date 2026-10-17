@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createDatabase } from "../src/main/db.js";
 import type { DatabaseHandle } from "../src/main/db.js";
-import type { IpcHandleFn } from "../src/main/ipc-register.js";
-import { registerCrudHandlers } from "../src/main/ipc-register.js";
+import type { IpcHandleFn } from "../src/main/ipc/handle.js";
+import { registerCrudHandlers } from "../src/main/ipc/crud.js";
 import { createCase, deleteCase, getCase, listCases } from "../src/main/ipc-cases.js";
 import { getCaseProfile, setCaseProfile } from "../src/main/ipc-profiles.js";
 import { createProject } from "../src/main/ipc-projects.js";
