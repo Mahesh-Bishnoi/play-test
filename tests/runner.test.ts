@@ -12,8 +12,10 @@ import {
   SingleCaseRunner,
   StepExecutionError,
   executeStep,
+  parseAssertMatcher,
   parseClickValue,
   parseSelectValue,
+  parseStringList,
   substituteStepValue,
 } from "../src/main/runner.js";
 import { SuiteRunner } from "../src/main/suite-runner.js";
@@ -341,6 +343,39 @@ describe("executeStep mapping", () => {
     });
     expect(parseSelectValue('["a", "b"]')).toEqual(["a", "b"]);
     expect(parseSelectValue("2025-26")).toBe("2025-26");
+  });
+
+  it("encodes string lists as JSON arrays only when every element is a string", () => {
+    expect(parseStringList('["a", "b"]')).toEqual(["a", "b"]);
+    expect(parseStringList("2025-26")).toBe("2025-26");
+    // Surrounding whitespace is ignored for the array form…
+    expect(parseStringList('  ["a"]  ')).toEqual(["a"]);
+    // …but a JSON array of non-strings is not a value list — keep the raw text.
+    expect(parseStringList("[1, 2]")).toBe("[1, 2]");
+    // Malformed JSON falls back to the raw string.
+    expect(parseStringList("[unterminated")).toBe("[unterminated");
+  });
+
+  it("parses url/title asserts as /regex/flags, else an exact string", () => {
+    // Plain strings (even a leading-slash path) match exactly, never as regex.
+    expect(parseAssertMatcher("/dashboard")).toBe("/dashboard");
+    expect(parseAssertMatcher("https://example.test/")).toBe("https://example.test/");
+
+    const regex = parseAssertMatcher("/\\/login$/");
+    expect(regex).toBeInstanceOf(RegExp);
+    expect((regex as RegExp).test("https://example.test/login")).toBe(true);
+    expect((regex as RegExp).test("https://example.test/dashboard")).toBe(false);
+
+    // Flags after the final slash are honoured.
+    const flagged = parseAssertMatcher("/login/i");
+    expect((flagged as RegExp).flags).toBe("i");
+    expect((flagged as RegExp).test("LOGIN")).toBe(true);
+
+    // The last slash delimits flags, so a pattern containing slashes still parses.
+    expect((parseAssertMatcher("/a/b/") as RegExp).test("x/a/b")).toBe(true);
+
+    // An invalid pattern source falls back to the literal string.
+    expect(parseAssertMatcher("/a(/")).toBe("/a(/");
   });
 
   it("drives new assertion actions with the right page calls", async () => {

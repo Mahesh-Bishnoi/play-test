@@ -1824,7 +1824,7 @@ class PlaywrightRunContext implements RunContext {
  * compares against. Playwright 1.64 matches plain URL/title strings exactly
  * (no glob expansion) — patterns need the `/…/flags` form.
  */
-function parseAssertMatcher(value: string): string | RegExp {
+export function parseAssertMatcher(value: string): string | RegExp {
   if (value.length >= 2 && value.startsWith("/") && value.lastIndexOf("/") > 0) {
     const lastSlash = value.lastIndexOf("/");
     try {
