@@ -315,13 +315,14 @@ type ClickEventMarker = "popup" | "download";
 
 /**
  * Click option encoding: a JSON object (`{"button":"right","modifiers":…,
- * "clickCount":2,"force":true}`) when any option is present, else undefined so
- * a plain `.click()` stays value-less (runner's `parseClickValue`). An `event`
- * marker (M16) merges into the same object, e.g. `{"button":"right","popup":true}`.
+ * "clickCount":2,"force":true,"position":{"x":10,"y":20}}`) when any option is
+ * present, else undefined so a plain `.click()` stays value-less (runner's
+ * `parseClickValue`). An `event` marker (M16) merges into the same object, e.g.
+ * `{"button":"right","popup":true}`.
  */
 function clickValueFrom(stmt: string, event?: ClickEventMarker): string | undefined {
   const args = terminalArgs(stmt, "click") ?? "";
-  if (event === undefined && !/button:|modifiers:|force:|clickCount:/.test(args)) {
+  if (event === undefined && !/button:|modifiers:|force:|clickCount:|position:/.test(args)) {
     return undefined;
   }
   const options: Record<string, unknown> = {};
@@ -331,6 +332,12 @@ function clickValueFrom(stmt: string, event?: ClickEventMarker): string | undefi
   }
   if (/force:\s*true/.test(args)) {
     options["force"] = true;
+  }
+  const position = /position:\s*\{\s*x:\s*(-?\d+(?:\.\d+)?)\s*,\s*y:\s*(-?\d+(?:\.\d+)?)\s*\}/.exec(
+    args,
+  );
+  if (position !== null) {
+    options["position"] = { x: Number(position[1]), y: Number(position[2]) };
   }
   const count = /clickCount:\s*(\d+)/.exec(args)?.[1];
   if (count !== undefined && Number(count) >= 1) {
@@ -378,6 +385,19 @@ function textValueFrom(stmt: string, terminal: string): string | undefined {
     return JSON.stringify(list);
   }
   return terminalStringArg(stmt, terminal);
+}
+
+/**
+ * `type` value: `{"text":"…","delay":N}` when a per-keystroke `delay` option is
+ * recorded, else the plain string (runner's `parseTypeValue`).
+ */
+function typeValueFrom(stmt: string, terminal: string): string | undefined {
+  const text = terminalStringArg(stmt, terminal);
+  if (text === undefined) {
+    return undefined;
+  }
+  const delay = /delay:\s*(\d+)/.exec(terminalArgs(stmt, terminal) ?? "")?.[1];
+  return delay === undefined ? text : JSON.stringify({ text, delay: Number(delay) });
 }
 
 /** Upload value: a path, or a JSON array of paths (`setInputFiles`). */
@@ -611,6 +631,11 @@ function parseLine(line: string, event?: ClickEventMarker): ParsedLine | null {
   if (/\.goto\(/.test(stmt)) {
     return asStep({ action: "goto", value: terminalStringArg(stmt, "goto") });
   }
+  // URL wait: page.waitForURL('**/login' | /re/) — glob or regex (M17).
+  if (/\.waitForURL\(/.test(stmt)) {
+    const raw = splitTopLevel(terminalArgs(stmt, "waitForURL") ?? "", ",")[0]?.trim() ?? "";
+    return asStep({ action: "wait-url", value: raw === "" ? undefined : literalText(raw) });
+  }
   if (/\.reload\(/.test(stmt)) {
     return asStep({ action: "reload" });
   }
@@ -669,7 +694,7 @@ function parseLine(line: string, event?: ClickEventMarker): ParsedLine | null {
     return asStep({
       action: "type",
       selector: locatorSource(stmt, terminal),
-      value: terminalStringArg(stmt, terminal),
+      value: typeValueFrom(stmt, terminal),
     });
   }
   // Hover / focus
@@ -678,6 +703,13 @@ function parseLine(line: string, event?: ClickEventMarker): ParsedLine | null {
   }
   if (/\.focus\(/.test(stmt)) {
     return asStep({ action: "focus", selector: locatorSource(stmt, "focus") });
+  }
+  // Scroll: locator.scrollIntoViewIfNeeded() — lazy-load lists, framing (M17).
+  if (/\.scrollIntoViewIfNeeded\(/.test(stmt)) {
+    return asStep({
+      action: "scroll-into-view",
+      selector: locatorSource(stmt, "scrollIntoViewIfNeeded"),
+    });
   }
   // Drag: sourceLocator.dragTo(targetLocator) — source selector, target value.
   if (/\.dragTo\(/.test(stmt)) {

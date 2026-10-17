@@ -54,6 +54,8 @@ interface ProfileForm {
   /** Bare filenames resolved under `~/PlayTestData/<projectId>/auth/`. */
   storageState: string;
   saveStorageState: string;
+  /** Run-only: seeds `sessionStorage` before the first script (M17). */
+  sessionState: string;
   dialogPolicy: "default" | "accept" | "dismiss";
 }
 
@@ -66,6 +68,7 @@ const DEFAULT_PROFILE_FORM: ProfileForm = {
   timezone: "",
   storageState: "",
   saveStorageState: "",
+  sessionState: "",
   dialogPolicy: "default",
 };
 
@@ -83,6 +86,7 @@ function profileToForm(profile: CaseProfile | null): ProfileForm {
     timezone: profile.timezone ?? "",
     storageState: profile.storageState ?? "",
     saveStorageState: profile.saveStorageState ?? "",
+    sessionState: profile.sessionState ?? "",
     dialogPolicy: profile.dialogPolicy ?? "default",
   };
 }
@@ -113,6 +117,9 @@ function toProfileInput(form: ProfileForm): CaseProfileInput {
   }
   if (form.saveStorageState.trim() !== "") {
     profile.saveStorageState = form.saveStorageState.trim();
+  }
+  if (form.sessionState.trim() !== "") {
+    profile.sessionState = form.sessionState.trim();
   }
   // "default" is Playwright's own behavior — equivalent to leaving it unset.
   if (form.dialogPolicy !== "default") {
@@ -1109,11 +1116,27 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                     }}
                   />
                 </label>
+                <label className="pt-label-inline">
+                  Session storage
+                  <input
+                    aria-label="Session storage filename"
+                    className="pt-input pt-mono"
+                    placeholder="session.json"
+                    value={profileForm.sessionState}
+                    disabled={busy || recording}
+                    onChange={(e) => {
+                      patchProfile({ sessionState: e.target.value });
+                    }}
+                  />
+                </label>
               </div>
               <p className="pt-hint">
                 Auth state takes a bare filename (e.g. login.json) kept in this project's auth
-                directory — log in once with Save set, then reuse the file via Load. An explicit
-                viewport overrides the device preset. These options drive both recording and runs.
+                directory — log in once with Save set, then reuse the file via Load. Session storage
+                is runs-only (recording cannot seed it): save{" "}
+                <code>JSON.stringify(sessionStorage)</code> from DevTools into that file. An
+                explicit viewport overrides the device preset. The other options drive both
+                recording and runs.
               </p>
             </details>
           </div>

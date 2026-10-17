@@ -150,6 +150,12 @@ class FakePage implements RunPage {
   async drag(): Promise<void> {
     await this.enter("drag");
   }
+  async waitForUrl(): Promise<void> {
+    await this.enter("waitForUrl");
+  }
+  async scrollIntoView(): Promise<void> {
+    await this.enter("scrollIntoView");
+  }
   async waitForTimeout(): Promise<void> {
     await this.enter("waitForTimeout");
   }

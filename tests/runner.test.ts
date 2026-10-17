@@ -26,6 +26,7 @@ import {
   parseClickValue,
   parseSelectValue,
   parseStringList,
+  parseTypeValue,
   stepTraceLabel,
   substituteStepValue,
 } from "../src/main/runner.js";
@@ -94,8 +95,14 @@ class FakePage implements RunPage {
   async fill(selector: string, value: string, timeoutMs?: number): Promise<void> {
     await this.enter("fill", [selector, value, timeoutMs]);
   }
-  async type(selector: string, value: string, timeoutMs?: number): Promise<void> {
-    await this.enter("type", [selector, value, timeoutMs]);
+  async type(selector: string, value: string, timeoutMs?: number, delayMs?: number): Promise<void> {
+    await this.enter("type", [selector, value, timeoutMs, delayMs]);
+  }
+  async waitForUrl(value: string, timeoutMs?: number): Promise<void> {
+    await this.enter("waitForUrl", [value, timeoutMs]);
+  }
+  async scrollIntoView(selector: string, timeoutMs?: number): Promise<void> {
+    await this.enter("scrollIntoView", [selector, timeoutMs]);
   }
   async selectOption(
     selector: string,
@@ -443,7 +450,7 @@ describe("executeStep mapping", () => {
       "type",
       "selectOption",
     ]);
-    expect(page.calls[4]).toMatchObject({ args: ["#t", "hi", undefined] });
+    expect(page.calls[4]).toMatchObject({ args: ["#t", "hi", undefined, undefined] });
     expect(page.calls[5]).toMatchObject({ args: ["#s", ["a", "b"], undefined] });
   });
 
@@ -502,6 +509,50 @@ describe("executeStep mapping", () => {
       double: false,
       options: { button: "right", popup: true },
     });
+  });
+
+  it("parses click position and the type text/delay encodings (M17)", () => {
+    expect(parseClickValue('{"position":{"x":10,"y":20}}')).toEqual({
+      double: false,
+      options: { position: { x: 10, y: 20 } },
+    });
+    // A non-numeric position is ignored rather than fatal.
+    expect(parseClickValue('{"position":{"x":"a","y":2}}')).toEqual({
+      double: false,
+      options: {},
+    });
+    expect(parseTypeValue(undefined)).toEqual({ text: "" });
+    expect(parseTypeValue("plain text")).toEqual({ text: "plain text" });
+    expect(parseTypeValue('{"text":"hi","delay":50}')).toEqual({ text: "hi", delayMs: 50 });
+    expect(parseTypeValue('{"text":"hi"}')).toEqual({ text: "hi" });
+    // Malformed JSON falls back to the literal string.
+    expect(parseTypeValue('{"text":')).toEqual({ text: '{"text":' });
+  });
+
+  it("runs type/wait-url/scroll-into-view steps (M17)", async () => {
+    const page = new FakePage();
+    await executeStep(page, {
+      order: 0,
+      action: "type",
+      selector: "#t",
+      value: '{"text":"hi","delay":50}',
+    });
+    await executeStep(page, { order: 1, action: "wait-url", value: "**/login" });
+    await executeStep(page, { order: 2, action: "scroll-into-view", selector: "#s" });
+    expect(page.calls.map((c) => c.method)).toEqual(["type", "waitForUrl", "scrollIntoView"]);
+    expect(page.calls[0]?.args).toEqual(["#t", "hi", undefined, 50]);
+    expect(page.calls[1]?.args).toEqual(["**/login", undefined]);
+    expect(page.calls[2]?.args).toEqual(["#s", undefined]);
+  });
+
+  it("rejects wait-url without a value and scroll-into-view without a selector (M17)", async () => {
+    const page = new FakePage();
+    await expect(executeStep(page, { order: 0, action: "wait-url" })).rejects.toThrow(
+      /needs a URL glob or \/regex\/ in value/,
+    );
+    await expect(executeStep(page, { order: 1, action: "scroll-into-view" })).rejects.toThrow(
+      /needs a selector/,
+    );
   });
 
   it("encodes string lists as JSON arrays only when every element is a string", () => {

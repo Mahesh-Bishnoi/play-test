@@ -37,6 +37,9 @@ export const STEP_ACTIONS = [
   "go-forward",
   "upload",
   "drag",
+  // M17 additions (33 → 35): glob navigation wait and manual scroll.
+  "wait-url",
+  "scroll-into-view",
 ] as const;
 
 export const StepActionSchema = z.enum(STEP_ACTIONS);

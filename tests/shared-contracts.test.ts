@@ -42,8 +42,8 @@ describe("step-types substitution (PLAN §10)", () => {
     expect(() => TestStepSchema.parse({ order: 0, action: "drag-and-drop" })).toThrow();
   });
 
-  it("lists 33 actions including the M15 vocabulary", () => {
-    expect(STEP_ACTIONS).toHaveLength(33);
+  it("lists 35 actions including the M15 and M17 vocabulary", () => {
+    expect(STEP_ACTIONS).toHaveLength(35);
     for (const action of [
       "assert-text-exact",
       "assert-attribute",
@@ -53,6 +53,8 @@ describe("step-types substitution (PLAN §10)", () => {
       "go-forward",
       "upload",
       "drag",
+      "wait-url",
+      "scroll-into-view",
     ] as const) {
       expect(STEP_ACTIONS).toContain(action);
     }

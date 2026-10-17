@@ -14,6 +14,9 @@ import { once } from "node:events";
  * - `/products`    searchable list (`?q=` filters server-side)
  * - `/secure`      cookie-gated: `#welcome` only with a `session=ok` cookie
  * - `/download`    attachment response (`report.txt`, body `report-body`) for M16
+ * - `/session`     prints `sessionStorage.token` into `#sess` (M17 sessionState
+ *                  seed) and has a tall spacer so `scroll-into-view` has work
+ *                  to do — the only page with client JS, by design.
  */
 
 const PRODUCTS = ["Apple", "Banana", "Cherry", "Date", "Elderberry"];
@@ -116,6 +119,28 @@ function securePage(cookieHeader: string | undefined): string {
   return shell("Sign in", '<h1 id="signin">Sign in</h1><p>Please log in to continue.</p>');
 }
 
+/**
+ * sessionStorage echo page (M17): prints what a profile `sessionState` seed put
+ * in `sessionStorage`, and its tall spacer gives `scroll-into-view` a real
+ * target. This is the fixture's only page with client JS — a server-rendered
+ * page cannot observe `sessionStorage`.
+ */
+function sessionPage(): string {
+  return shell(
+    "Session",
+    [
+      "<h1>Session</h1>",
+      '<p id="sess"></p>',
+      '<div style="height: 3000px"></div>',
+      '<p id="footer">Footer</p>',
+      "<script>",
+      "  document.getElementById('sess').textContent =",
+      "    sessionStorage.getItem('token') ?? 'none';",
+      "</script>",
+    ].join("\n"),
+  );
+}
+
 export interface TestSite {
   baseUrl: string;
   close: () => Promise<void>;
@@ -141,6 +166,9 @@ export async function startTestSite(): Promise<TestSite> {
         break;
       case "/secure":
         body = securePage(req.headers.cookie);
+        break;
+      case "/session":
+        body = sessionPage();
         break;
       case "/download":
         // M16: clicking a `download` token expects Playwright to save this

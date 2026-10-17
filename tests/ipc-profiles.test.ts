@@ -73,6 +73,16 @@ describe("case profile service (M14)", () => {
     expect(getCaseProfile(db, caseId)?.viewportW).toBe(800);
   });
 
+  it("round-trips the run-only sessionState filename (M17)", () => {
+    const { db, caseId } = open();
+    expect(setCaseProfile(db, caseId, { sessionState: "session.json" })?.sessionState).toBe(
+      "session.json",
+    );
+    expect(getCaseProfile(db, caseId)?.sessionState).toBe("session.json");
+    // A later write without it clears the column to NULL.
+    expect(setCaseProfile(db, caseId, { dialogPolicy: "accept" })?.sessionState).toBeUndefined();
+  });
+
   it("rejects invalid viewports, filenames, devices, locales and policies", () => {
     const { db, caseId } = open();
     expect(() => setCaseProfile(db, caseId, { viewportW: 5, viewportH: 600 })).toThrow();
@@ -81,6 +91,8 @@ describe("case profile service (M14)", () => {
     expect(() => setCaseProfile(db, caseId, { storageState: "../secret.json" })).toThrow();
     expect(() => setCaseProfile(db, caseId, { storageState: "sub/dir.json" })).toThrow();
     expect(() => setCaseProfile(db, caseId, { saveStorageState: "" })).toThrow();
+    expect(() => setCaseProfile(db, caseId, { sessionState: "../secret.json" })).toThrow();
+    expect(() => setCaseProfile(db, caseId, { sessionState: "sub/dir.json" })).toThrow();
     expect(() => setCaseProfile(db, caseId, { device: "--output /evil" })).toThrow();
     expect(() => setCaseProfile(db, caseId, { locale: "not a locale!!" })).toThrow();
     expect(() => setCaseProfile(db, caseId, { colorScheme: "sepia" })).toThrow();

@@ -24,10 +24,10 @@ interface Props {
 const ACTION_HINTS: Record<StepAction, string> = {
   goto: "Navigates to a URL — put the URL in Value.",
   click:
-    "Needs a Selector. Value is optional: right, double, shift/ctrl/alt/meta, force, popup, download, or JSON.",
+    'Needs a Selector. Value is optional: right, double, shift/ctrl/alt/meta, force, popup, download, or JSON (e.g. {"position":{"x":10,"y":20}}).',
   dblclick: "Needs a Selector (double-click).",
   fill: "Needs a Selector plus the text in Value.",
-  type: "Needs a Selector plus the text in Value (typed char-by-char).",
+  type: 'Needs a Selector plus the text in Value (typed char-by-char). Use {"text":"…","delay":50} to slow the keystrokes.',
   select: "Needs a Selector plus the option in Value (JSON array for multi-select).",
   check: "Needs a Selector (checkbox / radio).",
   uncheck: "Needs a Selector (checkbox).",
@@ -57,6 +57,10 @@ const ACTION_HINTS: Record<StepAction, string> = {
   upload: "Needs a Selector plus one file path in Value (JSON array uploads several).",
   drag: "Needs a Selector (source) plus the target locator in Value.",
   wait: "Value = milliseconds to sleep, or a Selector to wait for.",
+  "wait-url":
+    "Value = a glob like **/login, or /regex/ — waits until the page URL matches (assert-url checks immediately instead).",
+  "scroll-into-view":
+    "Needs a Selector to scroll into view (lazy-load lists, screenshot positioning).",
 };
 
 /**

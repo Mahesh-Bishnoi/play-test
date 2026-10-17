@@ -164,6 +164,56 @@ describe("parseCodegenOutput (PLAN §7, M15)", () => {
     });
   });
 
+  it("encodes click position alongside button/modifiers/force/clickCount (M17)", () => {
+    const { steps } = parseCodegenOutput(
+      [
+        "await page.locator('#a').click();",
+        "await page.locator('#b').click({ button: 'middle' });",
+        "await page.locator('#c').click({ modifiers: ['Shift', 'Control'] });",
+        "await page.locator('#d').click({ clickCount: 2 });",
+        "await page.locator('#e').click({ force: true, modifiers: ['ControlOrMeta'] });",
+        "await page.locator('#f').click({ position: { x: 10, y: 20 } });",
+      ].join("\n"),
+    );
+    expect(steps[0]?.value).toBeUndefined();
+    expect(steps[1]?.value).toBe('{"button":"middle"}');
+    expect(JSON.parse(steps[2]?.value ?? "{}")).toEqual({ modifiers: ["Shift", "Control"] });
+    expect(JSON.parse(steps[3]?.value ?? "{}")).toEqual({ clickCount: 2 });
+    expect(JSON.parse(steps[4]?.value ?? "{}")).toEqual({
+      force: true,
+      modifiers: ["ControlOrMeta"],
+    });
+    expect(JSON.parse(steps[5]?.value ?? "{}")).toEqual({ position: { x: 10, y: 20 } });
+  });
+
+  it("encodes a pressSequentially delay and keeps the plain text otherwise (M17)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "await page.locator('#t').pressSequentially('hi');",
+        "await page.locator('#t').pressSequentially('slow', { delay: 50 });",
+      ].join("\n"),
+    );
+    expect(steps.map((s) => s.action)).toEqual(["type", "type"]);
+    expect(steps[0]?.value).toBe("hi");
+    expect(JSON.parse(steps[1]?.value ?? "{}")).toEqual({ text: "slow", delay: 50 });
+    expect(unsupported).toEqual([]);
+  });
+
+  it("maps waitForURL (glob or regex) and scrollIntoViewIfNeeded (M17)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "await page.waitForURL('**/login');",
+        "await page.waitForURL(/dashboard/);",
+        "await page.locator('#lazy').scrollIntoViewIfNeeded();",
+      ].join("\n"),
+    );
+    expect(steps.map((s) => s.action)).toEqual(["wait-url", "wait-url", "scroll-into-view"]);
+    expect(steps[0]?.value).toBe("**/login");
+    expect(steps[1]?.value).toBe("/dashboard/");
+    expect(steps[2]?.selector).toBe("locator('#lazy')");
+    expect(unsupported).toEqual([]);
+  });
+
   it("marks the click a popup wait was recorded for and drops the bookkeeping (M16)", () => {
     const { steps, unsupported } = parseCodegenOutput(
       [

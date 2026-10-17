@@ -74,6 +74,7 @@ export const caseProfiles = sqliteTable("case_profiles", {
   timezone: text("timezone"),
   storageState: text("storage_state"),
   saveStorageState: text("save_storage_state"),
+  sessionState: text("session_state"),
   dialogPolicy: text("dialog_policy"),
   updatedAt: integer("updated_at").notNull(),
 });

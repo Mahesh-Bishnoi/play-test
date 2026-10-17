@@ -21,9 +21,11 @@ export function defaultDbPath(): string {
   return join(homedir(), "PlayTestData", "playtest.db");
 }
 
-// Bootstrap DDL kept in sync with src/main/schema.ts. Fresh installs and
-// upgrades get CREATE TABLE / CREATE INDEX IF NOT EXISTS here — there is no
-// migration runner (Drizzle is the query builder only). One place owns DDL.
+// Bootstrap DDL kept in sync with src/main/schema.ts. Fresh installs get
+// CREATE TABLE / CREATE INDEX IF NOT EXISTS here — there is no migration runner
+// (Drizzle is the query builder only). One place owns DDL. A column added here
+// (e.g. case_profiles.session_state, M17) only reaches fresh databases; an
+// existing DB must be deleted and re-seeded (no ALTER support, SPECS §2).
 const BOOTSTRAP_DDL = [
   `CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
@@ -78,6 +80,7 @@ const BOOTSTRAP_DDL = [
     timezone TEXT,
     storage_state TEXT,
     save_storage_state TEXT,
+    session_state TEXT,
     dialog_policy TEXT,
     updated_at INTEGER NOT NULL
   )`,

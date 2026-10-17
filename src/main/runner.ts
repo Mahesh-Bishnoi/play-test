@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { eq } from "drizzle-orm";
@@ -55,6 +55,8 @@ export interface ClickStepOptions {
   popup?: boolean;
   /** Save the download this click starts to the case's downloads dir (M16). */
   download?: boolean;
+  /** Click at this offset inside the element instead of its centre (M17). */
+  position?: { x: number; y: number };
 }
 
 export interface RunPage {
@@ -62,7 +64,8 @@ export interface RunPage {
   click(selector: string, timeoutMs?: number, options?: ClickStepOptions): Promise<void>;
   dblclick(selector: string, timeoutMs?: number): Promise<void>;
   fill(selector: string, value: string, timeoutMs?: number): Promise<void>;
-  type(selector: string, value: string, timeoutMs?: number): Promise<void>;
+  /** `delayMs` slows the keystrokes (M17); `undefined` uses Playwright's default. */
+  type(selector: string, text: string, timeoutMs?: number, delayMs?: number): Promise<void>;
   selectOption(selector: string, value: SelectOptionInput, timeoutMs?: number): Promise<void>;
   check(selector: string, timeoutMs?: number): Promise<void>;
   uncheck(selector: string, timeoutMs?: number): Promise<void>;
@@ -81,6 +84,8 @@ export interface RunPage {
   assertFocused(selector: string, timeoutMs?: number): Promise<void>;
   assertCount(selector: string, expected: number, timeoutMs?: number): Promise<void>;
   assertUrl(value: string, timeoutMs?: number): Promise<void>;
+  /** Waits until the page URL matches `value` — a glob (`**` + `/login`) or `/regex/` (M17). */
+  waitForUrl(value: string, timeoutMs?: number): Promise<void>;
   assertTitle(value: string, timeoutMs?: number): Promise<void>;
   /** Exact text match — a list matches several elements (M15). */
   assertTextExact(selector: string, value: string | string[], timeoutMs?: number): Promise<void>;
@@ -98,6 +103,8 @@ export interface RunPage {
   goForward(timeoutMs?: number): Promise<boolean>;
   upload(selector: string, files: string | string[], timeoutMs?: number): Promise<void>;
   drag(source: string, target: string, timeoutMs?: number): Promise<void>;
+  /** Scroll the element into view — lazy-loading lists, screenshot framing (M17). */
+  scrollIntoView(selector: string, timeoutMs?: number): Promise<void>;
   waitForTimeout(ms: number): Promise<void>;
   screenshot(path: string): Promise<void>;
   /**
@@ -159,6 +166,12 @@ export interface ContextLaunchOptions {
   timezoneId?: string;
   storageState?: string;
   baseURL?: string;
+  /**
+   * sessionStorage seeded before the first script runs (M17). `origin` scopes
+   * the entries to the app's origin (`null` = every origin, used when the
+   * project has no base URL).
+   */
+  sessionState?: { origin: string | null; entries: Record<string, string> };
   dialogPolicy?: "default" | "accept" | "dismiss";
   /** Where click downloads land (M16): `<videoDir>/downloads`. */
   downloadsDir: string;
@@ -238,8 +251,64 @@ export function contextLaunchOptionsFromProfile(input: {
       }
       options.storageState = storagePath;
     }
+    if (profile.sessionState !== undefined) {
+      const sessionPath = resolveAuthStatePath(
+        input.artifactsRoot,
+        input.projectId,
+        profile.sessionState,
+      );
+      if (!existsSync(sessionPath)) {
+        throw new MissingAuthStateError(profile.sessionState);
+      }
+      options.sessionState = {
+        origin: originOf(input.projectBaseUrl),
+        entries: readSessionStateFile(sessionPath, profile.sessionState),
+      };
+    }
   }
   return options;
+}
+
+/** The origin of a URL, or `null` (apply everywhere) when it cannot be parsed. */
+function originOf(url: string | undefined): string | null {
+  if (url === undefined || url === "") {
+    return null;
+  }
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read a sessionStorage seed file (M17): a JSON object of string → string. A
+ * file in any other shape is a user error and fails loudly, naming the file.
+ */
+function readSessionStateFile(path: string, filename: string): Record<string, string> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    throw new StepExecutionError(
+      `session state file ${filename} is not valid JSON — expected {"key":"value"}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new StepExecutionError(
+      `session state file ${filename} must be a JSON object of string values`,
+    );
+  }
+  const entries: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof value !== "string") {
+      throw new StepExecutionError(
+        `session state file ${filename} has a non-string value for "${key}"`,
+      );
+    }
+    entries[key] = value;
+  }
+  return entries;
 }
 
 export type RunEventChannel = "run:step-update" | "run:log" | "run:finished";
@@ -306,7 +375,9 @@ export function substituteStepValue(
  * `"shift"` / `"ctrl"` / `"alt"` / `"meta"` (+ `-click` / `+`-joined forms) =
  * modifiers, `"force"` = force click, `"popup"` / `"download"` = adopt the
  * opened page / save the triggered download (M16), or a JSON object like
- * `{"button":"right","modifiers":["Shift"],"force":true,"popup":true}`.
+ * `{"button":"right","modifiers":["Shift"],"force":true,"popup":true}` or
+ * `{"position":{"x":10,"y":20}}` to click an offset inside the element (M17).
+ * Only the JSON form can express `position` — the token form cannot.
  */
 export function parseClickValue(value: string | undefined): {
   double: boolean;
@@ -345,6 +416,16 @@ export function parseClickValue(value: string | undefined): {
       }
       if (parsed["download"] === true) {
         out.download = true;
+      }
+      const position = parsed["position"];
+      if (
+        typeof position === "object" &&
+        position !== null &&
+        typeof (position as Record<string, unknown>)["x"] === "number" &&
+        typeof (position as Record<string, unknown>)["y"] === "number"
+      ) {
+        const { x, y } = position as { x: number; y: number };
+        out.position = { x, y };
       }
       const count = parsed["clickCount"];
       if (typeof count === "number" && Number.isInteger(count) && count >= 1) {
@@ -424,6 +505,33 @@ export function parseStringList(value: string): string | string[] {
     }
   }
   return value;
+}
+
+/**
+ * `type` value encoding (M17): a JSON object `{"text":"…","delay":50}` types
+ * `text` with a per-keystroke `delay`; anything else is the literal text. A
+ * malformed object falls back to the literal so a stray brace never breaks a run.
+ */
+export function parseTypeValue(value: string | undefined): { text: string; delayMs?: number } {
+  if (value === undefined) {
+    return { text: "" };
+  }
+  const trimmed = value.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (isOptions(parsed) && typeof parsed["text"] === "string") {
+        const delay = parsed["delay"];
+        if (typeof delay === "number" && Number.isInteger(delay) && delay >= 0) {
+          return { text: parsed["text"], delayMs: delay };
+        }
+        return { text: parsed["text"] };
+      }
+    } catch {
+      // Not JSON — fall through to the literal form.
+    }
+  }
+  return { text: value };
 }
 
 /**
@@ -638,7 +746,8 @@ export async function executeStep(
       if (step.value === undefined) {
         throw new StepExecutionError(`${label} needs a value`);
       }
-      await page.type(step.selector, step.value, timeoutMs);
+      const { text, delayMs } = parseTypeValue(step.value);
+      await page.type(step.selector, text, timeoutMs, delayMs);
       return;
     }
     case "check": {
@@ -864,6 +973,20 @@ export async function executeStep(
         throw new StepExecutionError(`${label} needs a duration in ms in value (e.g. 500)`);
       }
       await page.waitForTimeout(Number.parseInt(step.value.trim(), 10));
+      return;
+    }
+    case "wait-url": {
+      if (step.value === undefined || step.value === "") {
+        throw new StepExecutionError(`${label} needs a URL glob or /regex/ in value`);
+      }
+      await page.waitForUrl(step.value, timeoutMs);
+      return;
+    }
+    case "scroll-into-view": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      await page.scrollIntoView(step.selector, timeoutMs);
       return;
     }
   }
@@ -2386,8 +2509,11 @@ class PlaywrightRunPage implements RunPage {
     await this.loc(selector).fill(value, { timeout: timeoutMs });
   }
 
-  async type(selector: string, value: string, timeoutMs?: number): Promise<void> {
-    await this.loc(selector).pressSequentially(value, { timeout: timeoutMs });
+  async type(selector: string, text: string, timeoutMs?: number, delayMs?: number): Promise<void> {
+    await this.loc(selector).pressSequentially(text, {
+      timeout: timeoutMs,
+      ...(delayMs !== undefined ? { delay: delayMs } : {}),
+    });
   }
 
   async selectOption(
@@ -2471,6 +2597,11 @@ class PlaywrightRunPage implements RunPage {
     await expect(this.page).toHaveURL(parseAssertMatcher(value), this.assertTimeout(timeoutMs));
   }
 
+  /** `waitForURL` takes a glob (`**` + `/login`); `/re/flags` stays a RegExp (M17). */
+  async waitForUrl(value: string, timeoutMs?: number): Promise<void> {
+    await this.page.waitForURL(parseAssertMatcher(value), { timeout: timeoutMs });
+  }
+
   async assertTitle(value: string, timeoutMs?: number): Promise<void> {
     await expect(this.page).toHaveTitle(parseAssertMatcher(value), this.assertTimeout(timeoutMs));
   }
@@ -2519,6 +2650,11 @@ class PlaywrightRunPage implements RunPage {
 
   async drag(source: string, target: string, timeoutMs?: number): Promise<void> {
     await this.loc(source).dragTo(this.loc(target), { timeout: timeoutMs });
+  }
+
+  /** Reveals the element — lazy-loading lists, screenshot framing (M17). */
+  async scrollIntoView(selector: string, timeoutMs?: number): Promise<void> {
+    await this.loc(selector).scrollIntoViewIfNeeded({ timeout: timeoutMs });
   }
 
   /** Web-first matchers default to 30 s, overridable per step (PLAN §2). */
@@ -2662,6 +2798,18 @@ class PlaywrightBrowserHandle implements BrowserHandle {
     });
     try {
       await context.tracing.start({ screenshots: true, snapshots: true, title: o.title });
+      if (o.sessionState !== undefined) {
+        await context.addInitScript(
+          ({ origin, entries }: { origin: string | null; entries: Record<string, string> }) => {
+            if (origin === null || location.origin === origin) {
+              for (const [key, value] of Object.entries(entries)) {
+                window.sessionStorage.setItem(key, value);
+              }
+            }
+          },
+          { origin: o.sessionState.origin, entries: o.sessionState.entries },
+        );
+      }
       const page = await context.newPage();
       attachDialogPolicy(page, o.dialogPolicy);
       return new PlaywrightRunContext(context, page, o);

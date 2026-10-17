@@ -14,6 +14,7 @@
 | M14 — Case profiles: recorded environment applied at run time | done | all items 1–9 landed |
 | M15 — Recorder & locator coverage + new actions | done 2026-10-17 | 6 items; 3 parallel workstreams; verify + e2e green |
 | M16 — Runtime parity: popups and downloads | done 2026-10-17 | 4 items; 3 parallel workstreams; verify + e2e green |
+| M17 — Flakiness gaps: wait-url, scroll, input/nav parity, sessionStorage | done 2026-10-17 | P1–P4 landed; `step-types.ts` 33 → 35 actions; verify + unit green |
 
 Completed: M1–M10, M12–M13; file transfer (import/export) and Phase-2 git-sync core;
 input/assertion parity (9 → 25 actions). M11 closed as wont-do (`SPECS.md` §2).
@@ -245,6 +246,44 @@ codegen itself only emits the 3-line shape — the inline form arrives via paste
 ---
 
 Deferred items (out of scope for M13–M16, new re-plan required): `SPECS.md` §2.
+
+## M17 — Flakiness gaps: waits, input parity, navigation, sessionStorage
+
+Status: done 2026-10-17 · P1–P4 landed. `STEP_ACTIONS` 33 → 35
+(`wait-url`, `scroll-into-view`); `case_profiles.session_state` added to the bootstrap DDL.
+
+Goal: close the flakiness/parity gaps the playwright.dev audit left open, using native
+Playwright APIs rather than shims. Rule of thumb unchanged: if Playwright exposes a native API,
+use it.
+
+- [x] **P1 — stop guessing with fixed waits.** New `wait-url` action → `page.waitForURL`
+      (glob `**/login` or `/re/flags`, reusing `parseAssertMatcher`), distinct from `assert-url`'s
+      immediate exact match. No `wait-visible`/`wait-text` steps were needed: `assert-visible` /
+      `assert-hidden` / `assert-text` already auto-retry as web-first matchers.
+- [x] **P2 — input parity.** Click `position` (JSON-only: `{"position":{"x":10,"y":20}}`);
+      `type` keystroke `delay` via `{"text":"…","delay":50}` (`parseTypeValue`); new
+      `scroll-into-view` action → `locator.scrollIntoViewIfNeeded`. Deliberately not added:
+      `dispatchEvent` clicks and manual hover/down/move/up drag (they bypass actionability,
+      which Playwright's own guidance warns against).
+- [x] **P3 — navigation robustness.** An embedded `waitForUrl` click option was rejected as
+      redundant: the sequential `click` → `wait-url` step pair is more transparent (and the
+      recorder maps `page.waitForURL` to it directly). BFCache needed no code — Playwright
+      disables it by default, and a restore would desync the `Page`; `go-back`/`go-forward` keep
+      their actionable "no page history" error.
+- [x] **P4 — auth/session docs.** Profile field `sessionState` (bare filename under
+      `~/PlayTestData/<projectId>/auth/`) seeding `sessionStorage` via `context.addInitScript`,
+      origin-scoped to the project `baseUrl`. Run-only: `playwright codegen` cannot inject init
+      scripts (documented in `SPECS.md` §10); the tester produces the JSON file from DevTools.
+      Malformed JSON / wrong shape / missing file fail loudly with the filename.
+
+Files: `src/shared/step-types.ts`, `src/shared/schema.ts`, `src/shared/export-format.ts`,
+`src/main/{db,schema,runner,recorder,ipc-profiles}.ts`,
+`src/renderer/{components/StepEditorPanel.tsx,pages/CaseDetailPage.tsx}`,
+`tests/{runner,recorder,ipc-profiles,shared-contracts,suite-runner}.test.ts`,
+`tests/fixtures/test-site.ts` (`/session` page), `tests/e2e-wait-url.test.ts`, `package.json`.
+
+Note: the new `case_profiles.session_state` column only reaches fresh databases — an existing
+`~/PlayTestData/playtest.db` must be deleted and re-seeded (no migration runner, `SPECS.md` §2).
 
 ## Notes
 

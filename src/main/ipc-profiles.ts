@@ -58,6 +58,7 @@ function toCaseProfile(row: CaseProfileRow): CaseProfile {
     ...(row.timezone !== null ? { timezone: row.timezone } : {}),
     ...(row.storageState !== null ? { storageState: row.storageState } : {}),
     ...(row.saveStorageState !== null ? { saveStorageState: row.saveStorageState } : {}),
+    ...(row.sessionState !== null ? { sessionState: row.sessionState } : {}),
     ...(row.dialogPolicy !== null ? { dialogPolicy: row.dialogPolicy } : {}),
     updatedAt: row.updatedAt,
   });
@@ -74,6 +75,7 @@ function columnValues(profile: CaseProfileInput) {
     timezone: profile.timezone ?? null,
     storageState: profile.storageState ?? null,
     saveStorageState: profile.saveStorageState ?? null,
+    sessionState: profile.sessionState ?? null,
     dialogPolicy: profile.dialogPolicy ?? null,
   };
 }

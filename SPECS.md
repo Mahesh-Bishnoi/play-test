@@ -20,16 +20,24 @@ self-contained HTML + PDF reports → re-run failures. Local-first, Chromium onl
 - DB: local-first SQLite (`better-sqlite3` + Drizzle). Artifacts on disk under `~/PlayTestData`.
 - Schema evolution: additive tables/indexes only, added to `BOOTSTRAP_DDL` as
   `CREATE … IF NOT EXISTS`. There is no migration runner and no ALTER support. Re-plan approved
-  2026-10-17 for `case_profiles` (M14); further table/column changes need their own re-plan.
+  2026-10-17 for `case_profiles` (M14) and again for `case_profiles.session_state` (M17); further
+  table/column changes need their own re-plan.
 - Browsers: Chromium only. `playwright install chromium` on first run + in-app progress check.
 - Recording: external `playwright codegen` window (not embedded), launched via the resolved
   Playwright CLI through Electron-as-Node (`ELECTRON_RUN_AS_NODE=1`, `npx` fallback) so spawn
   failures and codegen stderr surface in the UI. Parse output → editable steps; unsupported
   codegen lines are reported (never silently converted) for the user to add as manual steps.
-- Steps: 33 actions (see `STEP_ACTIONS` in `src/shared/step-types.ts`);
+- Steps: 35 actions (see `STEP_ACTIONS` in `src/shared/step-types.ts`);
   table + linear graph; green=pass, red=fail, grey=skipped, blue=running. Click variants
-  (button/modifiers/force/clickCount) and select options (`label`/`value`/`index`, single or
-  multi) encode in `value`.
+  (button/modifiers/force/clickCount/position) and select options (`label`/`value`/`index`,
+  single or multi) encode in `value`; `type` may carry `{"text","delay"}`, and only the JSON
+  click form can express `position`. Step actions:
+  - `wait-url` (M17): waits until the page URL matches — `waitForURL` glob semantics (`**/login`)
+    or `/pattern/flags`; distinct from `assert-url`, which matches exactly and checks immediately.
+  - `scroll-into-view` (M17): `locator.scrollIntoViewIfNeeded` — lazy-loading lists, screenshot
+    framing. Playwright's own auto-scroll covers ordinary actions, so this is the manual case.
+  Deliberately not added (they bypass actionability, against Playwright's own guidance):
+  `dispatchEvent` clicks and manual hover/down/move/up drag sequences.
 - Execution: suite-parallel (`workers = min(cpu/2, cases)`); direct `playwright` library plus
   `playwright/test`'s `expect` matchers (no test runner — so no UI mode / sharding /
   multi-browser; see Non-goals). One Chromium per runner/suite worker, fresh context per case.
@@ -41,7 +49,9 @@ self-contained HTML + PDF reports → re-run failures. Local-first, Chromium onl
 - Case profile (M14): one `case_profiles` row per case — device/viewport/colorScheme/locale/
   timezone, storage-state filenames, dialog policy — drives both `recorder:start` and every
   run. Auth state files live in `~/PlayTestData/<projectId>/auth/` and are never included in
-  transfer bundles or git sync.
+  transfer bundles or git sync. `sessionState` (M17) is the one run-only field: it seeds
+  `sessionStorage` via `addInitScript` before the first script, because `playwright codegen`
+  has no flag to inject init scripts (see §10).
 - Hierarchy: `Project (1) → Suite (N) → Case (N)` via join table (cases reusable across suites).
 - Resume: resume-from-failed-step only for supervised single-case runs (context kept open).
   Suites: full re-run or re-run-failed-cases-only.
@@ -113,13 +123,15 @@ the query builder only; there is no migration runner.
   recording start URL; when empty the recording falls back to the project `baseUrl`
 - `suite_test_cases(suiteId, caseId)` — PK(suiteId, caseId)
 - `test_steps(id, caseId, order, action, selector, value, timeoutMs, editedAt)` —
-  `action` is plain text; valid values = `STEP_ACTIONS` (33 — see
+  `action` is plain text; valid values = `STEP_ACTIONS` (35 — see
   `src/shared/step-types.ts`). Click variants and select options
-  encode in `value` (`parseClickValue` / `parseSelectValue` in `runner.ts`).
+  encode in `value` (`parseClickValue` / `parseSelectValue` / `parseTypeValue` in `runner.ts`).
 - `test_data(caseId, key, value, source)` — `source='kv'` today.
 - `case_profiles(caseId, device, viewportW, viewportH, colorScheme, locale, timezone,
-  storageState, saveStorageState, dialogPolicy, updatedAt)` — M14; storage fields are
-  filenames under `~/PlayTestData/<projectId>/auth/`; no row = defaults (1280×720, no auth).
+  storageState, saveStorageState, sessionState, dialogPolicy, updatedAt)` — M14, plus
+  `sessionState` (M17); storage fields are filenames under `~/PlayTestData/<projectId>/auth/`
+  (the session file is a JSON object of string → string seeded into `sessionStorage`); no row =
+  defaults (1280×720, no auth).
 - `suite_runs(id, suiteId|null, mode, status, startedAt, endedAt, reportHtmlPath, reportPdfPath)`
 - `case_runs(id, suiteRunId, caseId, status, durationMs, videoPath)`
 - `step_runs(id, caseRunId, stepId, order, status, error, screenshotPath, durationMs)`
@@ -154,7 +166,8 @@ Artifacts: `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/step-<NN>.png, fail
   doubles as keyword run-filter, Run-filtered scope, Re-run-last-failed, View report.
 - CaseDetailPage: linear `@xyflow/react` graph + step editor (action/selector/value+`{{key}}`
   hints/timeout) + KV TestDataEditor + Case URL field + Record options disclosure
-  (viewport/device/theme/locale/timezone/storage-state filenames/dialog policy, persisted
+  (viewport/device/theme/locale/timezone/storage-state filenames — load, save and the run-only
+  session-state seed — dialog policy, persisted
   per case via `profile:get/set`) + import preview + paste-locator
   insert + Supervised (with speed selector) / Unsupervised run + live colors + resume/cancel + log.
 - RunReportPage: suite summary, per-case step grid with thumbnails, Open-trace buttons,
@@ -163,7 +176,7 @@ Artifacts: `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/step-<NN>.png, fail
 
 ## 7. Behavior Notes (current, not history)
 
-The approved M14–M16 changes live in `PLAN.md`. Where that plan conflicts with §6–§7 the
+The approved M14–M17 changes live in `PLAN.md`. Where that plan conflicts with §6–§7 the
 plan wins until the milestone lands; this section describes the code as it is today.
 
 - Recorder: argv-only flag builder (`buildCodegenArgs`, allowlisted; viewport `"W,H"` comma,
@@ -171,9 +184,12 @@ plan wins until the milestone lands; this section describes the code as it is to
   Electron-as-Node, `npx` fallback) with a post-spawn grace check that surfaces codegen stderr.
   Parser: goto/fill/select (incl. `{label|value|index}`)/check/uncheck/press/dblclick/type/
   hover/focus/click (options in `value`)/reload/go-back/go-forward/upload (`setInputFiles`)/
-  drag (`dragTo`)/asserts — `toContainText`→`assert-text`, `toHaveText`→`assert-text-exact`,
-  `toHaveAttribute`→`assert-attribute`, `toBeAttached`→`assert-attached`. Unrecognised
-  statements are returned as `unsupported` (never become a `wait` step). Resolver
+  drag (`dragTo`)/`waitForTimeout`/`waitForURL`→`wait-url`/`scrollIntoViewIfNeeded`→
+  `scroll-into-view`/asserts — `toContainText`→`assert-text`, `toHaveText`→`assert-text-exact`,
+  `toHaveAttribute`→`assert-attribute`, `toBeAttached`→`assert-attached`. Click `position` and a
+  `pressSequentially`/`type` `{delay}` option are encoded into the same JSON `value` the runner
+  parses. Unrecognised statements are returned as `unsupported` (never become a `wait` step).
+  Resolver
   `resolveLocator` allowlists `getBy*`/`locator`/`frameLocator` chains (incl. nested frames) and
   recursive `filter({has|hasNot})`; `page.evaluate` and other non-locator heads fail with edit
   guidance.
@@ -181,7 +197,13 @@ plan wins until the milestone lands; this section describes the code as it is to
   steps) + `SuiteRunner` (worker pool, missing-key pre-scan, fail→skip-rest, settle
   failed > cancelled > passed, best-effort HTML). Screenshot: animations disabled, caret
   hidden, 10 s budget, up to two 250 ms retries (shared `captureStepScreenshot`); cancel maps
-  to skipped bucket.
+  to skipped bucket. `go-back`/`go-forward` fail with edit guidance when there is no history
+  entry; Back/Forward Cache restores are not a concern — Playwright disables BFCache by default
+  (and a restore would desynchronise the `Page` anyway, so it is out of scope).
+- Profile seeding (M17): `storageState` loads a saved auth file, `sessionState` reads a JSON
+  object of string → string and seeds `sessionStorage` through `addInitScript`, scoped to the
+  project's base-URL origin (unscoped when the project has no base URL). A malformed seed file
+  or a missing auth/session file fails loudly, naming the file.
 - Reports: single HTML file (inline CSS, base64 thumbs ≤500KB, step cell `action — detail`,
   trace hint), PDF via hidden `BrowserWindow`.
 - Transfer: versioned JSON, dialogs+fs in main, re-exports byte-equal modulo `exportedAt`.
@@ -198,7 +220,7 @@ files. Never copy dependency versions from memory — check live (`npm view`) be
 ## 9. Verification
 
 `npm run typecheck && npm test && npm run package`, plus `npm run test:e2e` when
-runner/recorder/reports change (M14–M16 add e2e files — list them in the `test:e2e` script).
+runner/recorder/reports change (M14–M17 add e2e files — list them in the `test:e2e` script).
 `package` already stops at the unpacked `out/<app>-<platform>-<arch>/` dir; Forge 8 removed the
 `--dir` flag (the command in older notes fails with `unknown option '--dir'`).
 Manual smoke: record 3-step login → supervised run (pause/resume) → unsupervised suite of 2
@@ -213,4 +235,9 @@ viewer now spawn the resolved Playwright CLI via Electron-as-Node (`ELECTRON_RUN
 an `npx` fallback — the packaged path for both still needs one smoke test; open case tabs keep
 mounted state after sync pull (refresh on revisit); pending
 sync conflicts surface on pull, not status refresh. Toolchain: `typescript@7.0.2` ↔
-`oxlint-tsgolint@7.0.2004` version-locked, upgrade together.
+`oxlint-tsgolint@7.0.2004` version-locked, upgrade together. `sessionState` (M17) is run-only —
+`playwright codegen` offers no init-script flag, so a recording session cannot be seeded; the
+file is produced by the tester (DevTools `JSON.stringify(sessionStorage)`). The M17
+`case_profiles.session_state` column is part of the bootstrap DDL only: an existing
+`~/PlayTestData/playtest.db` must be deleted and re-seeded (no migration runner or ALTER
+support, §2).

@@ -35,7 +35,7 @@ export const ExportCaseSchema = z.object({
   testData: testDataRecord,
   // Case profile (M14, SPECS §2/§4) — the recorded environment travels with
   // the case. Auth state FILE CONTENTS never travel: the profile only holds
-  // filenames (`storageState` / `saveStorageState`) under
+  // filenames (`storageState` / `saveStorageState` / `sessionState`) under
   // `~/PlayTestData/<projectId>/auth/`, and the importer gets a fresh project
   // id, so those files are intentionally not part of a bundle. Additive
   // optional field: no EXPORT_VERSION bump — old readers strip it.

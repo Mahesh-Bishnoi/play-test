@@ -107,7 +107,8 @@ export type ProfileDialogPolicy = z.infer<typeof ProfileDialogPolicySchema>;
 
 /**
  * Mutable profile fields. Absent field == not configured; absent `storageState`
- * means no auth state is loaded, absent `saveStorageState` means none is saved.
+ * means no auth state is loaded, absent `saveStorageState` means none is saved,
+ * absent `sessionState` means no sessionStorage is seeded at run start.
  */
 export const CaseProfileInputSchema = z.object({
   device: DeviceNameSchema.optional(),
@@ -118,6 +119,7 @@ export const CaseProfileInputSchema = z.object({
   timezone: TimezoneSchema.optional(),
   storageState: AuthStateFilenameSchema.optional(),
   saveStorageState: AuthStateFilenameSchema.optional(),
+  sessionState: AuthStateFilenameSchema.optional(),
   dialogPolicy: ProfileDialogPolicySchema.optional(),
 });
 export type CaseProfileInput = z.infer<typeof CaseProfileInputSchema>;
