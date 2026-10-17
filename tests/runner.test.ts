@@ -12,6 +12,7 @@ import {
   SingleCaseRunner,
   StepExecutionError,
   executeStep,
+  formatStepError,
   parseAssertMatcher,
   parseClickValue,
   parseSelectValue,
@@ -378,6 +379,20 @@ describe("executeStep mapping", () => {
     expect(parseAssertMatcher("/a(/")).toBe("/a(/");
   });
 
+  it("keeps the full Playwright error text, trimming trailing whitespace and capping length", () => {
+    // Playwright assertion failures end with the call log plus a trailing newline.
+    const playwrightError = new Error(
+      "expect(locator).toBeVisible() failed\n\nExpected: visible\nReceived: <element(s) not found>\n\nCall log:\n  - expect.toBeVisible with timeout 30000ms\n",
+    );
+    expect(formatStepError(playwrightError)).toBe(
+      "expect(locator).toBeVisible() failed\n\nExpected: visible\nReceived: <element(s) not found>\n\nCall log:\n  - expect.toBeVisible with timeout 30000ms",
+    );
+    // Non-Error throwables still produce a message.
+    expect(formatStepError("plain string")).toBe("plain string");
+    // Oversized messages are capped before they reach the DB.
+    expect(formatStepError(new Error("x".repeat(9_000)))).toHaveLength(8_000);
+  });
+
   it("drives new assertion actions with the right page calls", async () => {
     const page = new FakePage();
     await executeStep(page, { order: 0, action: "assert-hidden", selector: "#h" });
@@ -541,7 +556,8 @@ describe("runSingle (M5)", () => {
     fx.launcher.launch = async (headless, videoDir) => {
       const context = (await originalLaunch(headless, videoDir)) as FakeContext;
       context.page.failWhen = (method) => method === "click";
-      context.page.failMessage = "locator('#go'): element is not visible";
+      context.page.failMessage =
+        "expect(locator).toBeVisible() failed\nExpected: visible\nReceived: <element(s) not found>\nCall log:\n  - waiting for locator('#go')\n";
       context.videoFile = fx.launcher.primeVideo(fx.root);
       return context;
     };
@@ -552,7 +568,9 @@ describe("runSingle (M5)", () => {
     expect(fx.launcher.contexts[0]?.closed).toBe(true);
     const rows = stepRows(fx, started.caseRunId);
     expect(rows.map((r) => r.status)).toEqual(["pass", "fail", "skipped"]);
-    expect(rows[1]?.error).toContain("not visible");
+    expect(rows[1]?.error).toContain("Call log:");
+    // Trailing whitespace from Playwright's call log is trimmed.
+    expect(rows[1]?.error).not.toMatch(/\s$/);
     for (const row of rows) {
       if (row.status === "skipped") {
         expect(row.screenshotPath).toBeNull();

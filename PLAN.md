@@ -10,7 +10,7 @@
 
 | Milestone | Status | Notes |
 | --- | --- | --- |
-| M13 — Playwright `expect` assertions + diagnostics | in progress | items 1–2 done; next item 3 |
+| M13 — Playwright `expect` assertions + diagnostics | in progress | items 1–3 done; next item 4 |
 | M14 — Case profiles: recorded environment applied at run time | not started | after M13 |
 | M15 — Recorder & locator coverage + new actions | not started | after M14 |
 | M16 — Runtime parity: popups and downloads | not started | after M15 |
@@ -29,7 +29,7 @@ against the current implementation.
 
 ## M13 — Playwright `expect` assertions + diagnostics
 
-Status: in progress · Next: item 3 (`formatStepError`)
+Status: in progress · Next: item 4 (`screenshot` options + retry)
 
 Goal: every `assert-*` step runs through Playwright web-first matchers; errors keep
 Playwright's full detail; failure evidence survives a supervised resume.
@@ -56,9 +56,11 @@ Playwright's full detail; failure evidence survives a supervised resume.
         elements now fails with Playwright's "resolved to N elements" strict-mode error.
         `assert-count` keeps counting all matches.
       - Every matcher gets `{ timeout: timeoutMs ?? 30_000 }` (`assertTimeout` helper).
-- [ ] **3.** Error fidelity — delete `asMessage`; add `formatStepError(err)` that keeps the
-      full Playwright message (Expected/Received/Call log), trims trailing whitespace, caps
-      at 8 000 chars; used for `step_runs.error`, report cells, run log.
+- [x] **3.** Error fidelity — `asMessage` was already deleted with item 2; added
+      `formatStepError(err)` (keeps the full Playwright message + call log, trims trailing
+      whitespace, caps at 8 000 chars) used for `step_runs.error`, report cells and the run
+      log in both `runner.ts` and `suite-runner.ts`; the old `slice(0, 20000)` in
+      `updateStepRun` is gone now that the formatter owns the bound.
 - [ ] **4.** Screenshots — `page.screenshot({ animations: 'disabled', caret: 'hide', timeout })`;
       up to 2 retries 250 ms apart instead of the single 1 s retry; warn after the last failure.
 - [ ] **5.** Trace — start with `title: <case name>`; wrap each step in

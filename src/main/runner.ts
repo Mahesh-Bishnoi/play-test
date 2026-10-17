@@ -261,6 +261,19 @@ export function parseSelectValue(value: string): string | string[] {
   return parseStringList(value);
 }
 
+/** Step-error budget — big enough for Playwright's diff + call log, bounded for the DB. */
+const STEP_ERROR_MAX_CHARS = 8_000;
+
+/**
+ * Failure text for a step. Playwright's assertion errors carry the
+ * Expected/Received diff and call log, so the message is kept verbatim (only
+ * trailing whitespace trimmed) instead of being re-wrapped in a summary.
+ */
+export function formatStepError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.trimEnd().slice(0, STEP_ERROR_MAX_CHARS);
+}
+
 /**
  * Execute one substituted step against the page. Throws StepExecutionError
  * for missing required fields so the failure message tells the user exactly
@@ -737,7 +750,7 @@ export class SingleCaseRunner {
         this.updateStepRun(caseRunId, step.id, "pass", null, screenshotPath, stepStarted);
         this.stepEvent(caseRunId, step.order, "pass");
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = formatStepError(err);
         await this.captureScreenshot(context, screenshotPath);
         this.updateStepRun(caseRunId, step.id, "fail", message, screenshotPath, stepStarted);
         this.stepEvent(caseRunId, step.order, "fail");
@@ -904,7 +917,7 @@ export class SingleCaseRunner {
       .update(stepRuns)
       .set({
         status,
-        error: error?.slice(0, 20000) ?? null,
+        error,
         screenshotPath,
         durationMs: this.now() - stepStarted,
       })

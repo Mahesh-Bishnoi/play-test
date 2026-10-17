@@ -36,7 +36,12 @@ import { getTestData, listSteps } from "./ipc-steps.js";
 import { tryWriteSuiteHtmlReport } from "./reports.js";
 import { caseRuns, stepRuns, suiteRuns } from "./schema.js";
 import type { BrowserLauncher, EmitRunEvent, RunContext } from "./runner.js";
-import { executeStep, RunAlreadyActiveError, substituteStepValue } from "./runner.js";
+import {
+  executeStep,
+  formatStepError,
+  RunAlreadyActiveError,
+  substituteStepValue,
+} from "./runner.js";
 
 /**
  * Parallel suite runner (WS5 part 2 / M6, PLAN §2 + §8). Unsupervised only,
@@ -363,7 +368,7 @@ export class SuiteRunner {
         this.updateStepRun(caseRunId, step.id, "pass", null, screenshotPath, stepStarted);
         this.stepEvent(caseRunId, step.order, "pass");
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = formatStepError(err);
         await this.captureScreenshot(context, screenshotPath);
         this.updateStepRun(caseRunId, step.id, "fail", message, screenshotPath, stepStarted);
         this.stepEvent(caseRunId, step.order, "fail");
@@ -467,7 +472,7 @@ export class SuiteRunner {
       .update(stepRuns)
       .set({
         status,
-        error: error?.slice(0, 20000) ?? null,
+        error,
         screenshotPath,
         durationMs: this.now() - stepStarted,
       })
