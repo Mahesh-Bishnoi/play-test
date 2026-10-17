@@ -1,11 +1,12 @@
 # AGENTS.md — How to Work on PlayTest (Multi-Agent)
 
-Read `PLAN.md` first. It is the source of truth for scope, decisions, and status. This file tells you **how to use it**.
+Read `SPECS.md` first — the source of truth for scope, locked decisions, the data model, and the IPC contract. `PLAN.md` is the agent scratchpad: milestone breakdown, current status, next actions. This file tells you **how to use them**.
 
 ## 1. Startup checklist (every agent, every session)
-1. Read `PLAN.md` fully — §2 (Locked Decisions), §5 (IPC Contract).
-2. Check `git log --oneline -10` + `git status` for what's done/in progress (history lives in git, not PLAN.md).
-3. Respect ownership in PLAN §3. Edit only your area unless the task says otherwise.
+1. Read `SPECS.md` fully — §2 (Locked Decisions), §5 (IPC Contract).
+2. Read `PLAN.md` — the status table + the milestone you are picking up.
+3. Check `git log --oneline -10` + `git status` for what's done/in progress (history lives in git, not in the docs).
+4. Respect ownership in SPECS §3. Edit only your area unless the task says otherwise.
 
 ## 2. Workstream rules
 - `src/shared/*` (contracts, step types) is frozen — don't change without updating all consumers + noting why in the commit message.
@@ -13,12 +14,12 @@ Read `PLAN.md` first. It is the source of truth for scope, decisions, and status
 - Never commit secrets, browsers, or `~/PlayTestData` artifacts. No `rm -rf`, no network-wide commands.
 
 ## 3. How to record work
-- PLAN.md is a current-state spec, not a log — do not append history rows.
-- Update PLAN.md only when scope, IPC, or schema changes (plus §11 Status when a milestone opens/closes).
-- Locked Decisions (§2) need user approval — propose, don't assume.
+- `SPECS.md` is a current-state spec, not a log — update it only when scope, IPC, schema, or a locked decision changes. Locked Decisions (`SPECS.md` §2) need user approval — propose, don't assume.
+- `PLAN.md` is the scratchpad — keep its status table and the active milestone's `Status:` line (and checkboxes) current as you go. Edit it freely; no history rows.
+- Commit messages for planned work start with the milestone id (`M13: …`).
 
 ## 4. Definition of Done per task
-- Code + `npm run typecheck` clean (PLAN §9 if a narrower check is documented there).
+- Code + `npm run typecheck` clean (SPECS §9 if a narrower check is documented there).
 - Unit tests for parser/substitution if touched (`vitest`).
 - Manual smoke where applicable: create project → add step → run → report exists.
 - Commit message lists files changed + checks run + outcome.
@@ -30,7 +31,7 @@ Read `PLAN.md` first. It is the source of truth for scope, decisions, and status
 
 ## 6. Dependency version policy
 - Never copy dependency versions from memory. Before adding or upgrading any dependency, check the latest stable version first (e.g. `npm view <pkg> version`, `npm view <pkg> versions --json | tail`), then pin/add it.
-- Use latest stable unless PLAN.md or a project convention pins otherwise; if you deliberately pin older, note why in the commit message.
+- Use latest stable unless SPECS.md or a project convention pins otherwise; if you deliberately pin older, note why in the commit message.
 
 ## 7. Quick commands (see repo README/AGENTS overrides if present)
 - `npm run typecheck`, `npm test`, `npm run package -- --dir`
