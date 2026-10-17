@@ -560,13 +560,14 @@ function writeConflicts(dir: string, conflicts: StoredConflict[]): void {
 
 // --- Three-way entity merge -----------------------------------------------------
 
-type MergeOutcome =
+export type MergeOutcome =
   | { kind: "take-remote" }
   | { kind: "delete-remote" }
   | { kind: "keep-local" }
   | { kind: "conflict" };
 
-function mergeEntity<T>(slots: { base?: T; local?: T; remote?: T }): MergeOutcome {
+/** Three-way per-entity merge (pure — unit-tested without the e2e gate). */
+export function mergeEntity<T>(slots: { base?: T; local?: T; remote?: T }): MergeOutcome {
   const b = slots.base === undefined ? undefined : canonical(slots.base);
   const l = slots.local === undefined ? undefined : canonical(slots.local);
   const r = slots.remote === undefined ? undefined : canonical(slots.remote);
@@ -618,6 +619,14 @@ export async function initSyncRepo(
   }
   if (fs.existsSync(gitdirOf(opts.dir))) {
     throw new SyncRemoteError(`already a sync repo: ${opts.dir}`);
+  }
+  // Destructive guard: init + snapshot write wipes <dir>/suites and
+  // <dir>/cases. Refuse a non-empty directory — pointing init at an export
+  // folder or a de-gitted clone must fail loudly, never erase.
+  if (fs.existsSync(opts.dir) && fs.readdirSync(opts.dir).length > 0) {
+    throw new SyncRemoteError(
+      `refusing to init in non-empty directory (pick an empty folder): ${opts.dir}`,
+    );
   }
   fs.mkdirSync(opts.dir, { recursive: true });
   await git.init({ fs, dir: opts.dir, defaultBranch: branch });
@@ -1085,6 +1094,13 @@ export async function cloneSyncRepo(
   if (fs.existsSync(gitdirOf(opts.dir))) {
     throw new SyncRemoteError(`already a sync repo: ${opts.dir}`);
   }
+  // Same destructive guard as initSyncRepo: clone ends in a force checkout
+  // that overwrites working-tree files.
+  if (fs.existsSync(opts.dir) && fs.readdirSync(opts.dir).length > 0) {
+    throw new SyncRemoteError(
+      `refusing to clone into non-empty directory (pick an empty folder): ${opts.dir}`,
+    );
+  }
   fs.mkdirSync(opts.dir, { recursive: true });
   await git.init({ fs, dir: opts.dir, defaultBranch: branch });
   copyGitObjects(remotePath, gitdirOf(opts.dir));
@@ -1161,7 +1177,7 @@ export async function syncStatus(
         queue.push(...commit.parent);
       }
     } else {
-      // Diverged or behind: count tracking-side commits unknown locally.
+      // Diverged or behind: count tracking-side commits unknown locally…
       const queue = [tracking];
       const visited = new Set<string>();
       while (queue.length > 0 && visited.size < 10000) {
@@ -1173,6 +1189,20 @@ export async function syncStatus(
         behind += 1;
         const { commit } = await git.readCommit({ fs, gitdir: gitdirOf(dir), oid });
         queue.push(...commit.parent);
+      }
+      // …and local-side commits unknown to tracking (0 when strictly behind).
+      const trackingAncestors = await ancestorOids(gitdirOf(dir), tracking);
+      const aheadQueue = [local];
+      const aheadVisited = new Set<string>();
+      while (aheadQueue.length > 0 && aheadVisited.size < 10000) {
+        const oid = aheadQueue.pop() as string;
+        if (aheadVisited.has(oid) || trackingAncestors.has(oid)) {
+          continue;
+        }
+        aheadVisited.add(oid);
+        ahead += 1;
+        const { commit } = await git.readCommit({ fs, gitdir: gitdirOf(dir), oid });
+        aheadQueue.push(...commit.parent);
       }
     }
   } else if (local !== null && tracking === null) {

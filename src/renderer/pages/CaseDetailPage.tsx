@@ -472,19 +472,18 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
       });
   };
 
-  const runBadge =
-    activeRun !== null ? (
-      <span className="pt-badge pt-badge-run">
-        <span className="pt-badge-dot" aria-hidden="true" />
-        Running · {activeRun.mode}
-      </span>
-    ) : paused ? (
-      <span className="pt-badge pt-badge-warn">Paused</span>
-    ) : runFinished !== null ? (
-      <span className="pt-badge pt-badge-pass">{runFinished}</span>
-    ) : (
-      <span className="pt-badge pt-badge-mute">Idle</span>
-    );
+  const runBadge = paused ? (
+    <span className="pt-badge pt-badge-warn">Paused</span>
+  ) : activeRun !== null ? (
+    <span className="pt-badge pt-badge-run">
+      <span className="pt-badge-dot" aria-hidden="true" />
+      Running · {activeRun.mode}
+    </span>
+  ) : runFinished !== null ? (
+    <span className="pt-badge pt-badge-pass">{runFinished}</span>
+  ) : (
+    <span className="pt-badge pt-badge-mute">Idle</span>
+  );
 
   return (
     <section aria-label="Case workflow" className="pt-page">

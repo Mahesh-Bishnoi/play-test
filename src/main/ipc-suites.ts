@@ -10,7 +10,7 @@ import {
 import type { Suite } from "../shared/schema.js";
 import { SuiteSchema } from "../shared/schema.js";
 import type { AppDatabase } from "./db.js";
-import { projects, suiteTestCases, testCases } from "./schema.js";
+import { caseRuns, projects, stepRuns, suiteRuns, suiteTestCases, testCases } from "./schema.js";
 import { testSuites } from "./schema.js";
 
 /** Thrown when a suite id has no row — IPC maps this to a not-found error. */
@@ -101,9 +101,28 @@ export function updateSuite(db: AppDatabase, input: SuiteUpdatePayload): Suite {
   return getSuite(db, existing.id);
 }
 
-/** Delete a suite and its join rows (cases themselves are reusable — kept). */
+/** Delete a suite, its join rows, and its run history (cases kept — reusable). */
 export function deleteSuite(db: AppDatabase, id: string): void {
   getSuite(db, id);
+  const runs = db
+    .select({ id: suiteRuns.id })
+    .from(suiteRuns)
+    .where(eq(suiteRuns.suiteId, id))
+    .all();
+  const runIds = runs.map((r) => r.id);
+  if (runIds.length > 0) {
+    const cases = db
+      .select({ id: caseRuns.id })
+      .from(caseRuns)
+      .where(inArray(caseRuns.suiteRunId, runIds))
+      .all();
+    const caseRunIds = cases.map((c) => c.id);
+    if (caseRunIds.length > 0) {
+      db.delete(stepRuns).where(inArray(stepRuns.caseRunId, caseRunIds)).run();
+    }
+    db.delete(caseRuns).where(inArray(caseRuns.suiteRunId, runIds)).run();
+    db.delete(suiteRuns).where(inArray(suiteRuns.id, runIds)).run();
+  }
   db.delete(suiteTestCases).where(eq(suiteTestCases.suiteId, id)).run();
   db.delete(testSuites).where(eq(testSuites.id, id)).run();
 }
@@ -149,21 +168,4 @@ export function setSuiteCases(db: AppDatabase, suiteId: string, caseIds: string[
     db.insert(suiteTestCases).values({ suiteId, caseId }).run();
   }
   return unique;
-}
-
-/** Cases of a project not yet in the suite — backs the suite-detail picker. */
-export function listAvailableCases(
-  db: AppDatabase,
-  suiteId: string,
-): { id: string; name: string; member: boolean }[] {
-  const suite = getSuite(db, suiteId);
-  const members = new Set(getSuiteCaseIds(db, suiteId));
-  const rows = db
-    .select({ id: testCases.id, name: testCases.name })
-    .from(testCases)
-    .where(eq(testCases.projectId, suite.projectId))
-    .all();
-  return rows
-    .map((r) => ({ id: r.id, name: r.name, member: members.has(r.id) }))
-    .sort((a, b) => a.name.localeCompare(b.name));
 }

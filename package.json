@@ -2,7 +2,7 @@
   "name": "playtest",
   "version": "0.0.0",
   "private": true,
-  "description": "PlayTest — Electron + Playwright manual-tester studio",
+  "description": "PlayTest \u2014 Electron + Playwright manual-tester studio",
   "type": "module",
   "main": ".vite/build/main.cjs",
   "scripts": {
@@ -37,7 +37,6 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "@vitest/coverage-v8": "5.0.5",
-    "drizzle-kit": "^0.31.11",
     "electron": "^44.8.0",
     "oxlint": "1.88.0",
     "oxlint-tsgolint": "7.0.2004",

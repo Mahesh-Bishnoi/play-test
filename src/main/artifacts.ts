@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -94,5 +94,19 @@ export function discardPath(path: string | null): void {
     unlinkSync(path);
   } catch {
     // Already gone — a leftover recording is harmless.
+  }
+}
+
+/**
+ * Remove a project's whole artifact tree (`<root>/<projectId>`).
+ * Contained to `root` by construction (join, no `..` segments from ids —
+ * project ids are nanoid alphanumerics). Never throws: deleteProject must
+ * succeed at the DB level even when the disk tree is already gone.
+ */
+export function removeProjectArtifacts(root: string, projectId: string): void {
+  try {
+    rmSync(join(root, projectId), { recursive: true, force: true });
+  } catch {
+    // Best-effort — orphaned media is wasteful, not corrupt.
   }
 }

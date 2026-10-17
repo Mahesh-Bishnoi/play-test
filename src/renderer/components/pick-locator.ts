@@ -2,30 +2,21 @@
  * Pick-locator paste validation (M10, PLAN §18.3). Pure: no React, no IO —
  * unit-tested in Node.
  *
- * Mirrors the allowlist in `src/main/runner.ts` (`PAGE_FACTORY_METHODS` /
- * `CHAIN_METHODS` + `splitLocatorChain`): the runner stays the source of
- * truth at execution time, this is a fail-fast pre-check so a bad paste is
- * rejected in the UI with the same edit guidance instead of creating a step
- * that can only fail at run time. Unknown-but-CSS selectors fall through to
- * `page.locator` exactly like the runner, so they are accepted as-is.
+ * Uses the shared allowlist in `src/shared/locator-allowlist.ts` (the same
+ * rule the runner executes against) as a fail-fast pre-check so a bad paste
+ * is rejected in the UI with the same edit guidance instead of creating a
+ * step that can only fail at run time. Unknown-but-CSS selectors fall
+ * through to `page.locator` exactly like the runner, so they are accepted
+ * as-is.
  */
 
+import {
+  CHAIN_METHODS,
+  PAGE_FACTORY_METHODS,
+  splitTopLevel,
+} from "../../shared/locator-allowlist.js";
+
 export type PickLocatorResult = { ok: true; selector: string } | { ok: false; error: string };
-
-/** Factory methods codegen emits directly on `page.` (plus bare `locator(`). */
-const PAGE_FACTORY_METHODS = new Set([
-  "getByRole",
-  "getByText",
-  "getByLabel",
-  "getByPlaceholder",
-  "getByAltText",
-  "getByTitle",
-  "getByTestId",
-  "locator",
-]);
-
-/** Chainable methods supported after the factory call. */
-const CHAIN_METHODS = new Set([...PAGE_FACTORY_METHODS, "filter", "first", "last", "nth"]);
 
 const GUIDANCE = "edit the step to a CSS selector or a getByRole/getByText/locator chain";
 
@@ -108,86 +99,4 @@ export function validatePastedLocator(raw: string): PickLocatorResult {
     }
   }
   return { ok: true, selector: text };
-}
-
-/** Split on a separator at nesting depth 0, ignoring strings/regex/parens. */
-function splitTopLevel(text: string, separator: "." | ","): string[] {
-  const parts: string[] = [];
-  let depth = 0;
-  let current = "";
-  let quote: string | null = null;
-  let inRegex = false;
-  let inRegexClass = false;
-  let escaped = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i] as string;
-    if (quote !== null) {
-      current += ch;
-      if (escaped) {
-        escaped = false;
-      } else if (ch === "\\") {
-        escaped = true;
-      } else if (ch === quote) {
-        quote = null;
-      }
-      continue;
-    }
-    if (inRegex) {
-      current += ch;
-      if (escaped) {
-        escaped = false;
-      } else if (ch === "\\") {
-        escaped = true;
-      } else if (ch === "[") {
-        inRegexClass = true;
-      } else if (ch === "]") {
-        inRegexClass = false;
-      } else if (ch === "/" && !inRegexClass) {
-        while (i + 1 < text.length && /[a-z]/i.test(text[i + 1] as string)) {
-          current += text[i + 1];
-          i++;
-        }
-        inRegex = false;
-      }
-      continue;
-    }
-    if (ch === "'" || ch === '"' || ch === "`") {
-      quote = ch;
-      current += ch;
-      continue;
-    }
-    if (ch === "/" && isRegexStart(text, i)) {
-      inRegex = true;
-      current += ch;
-      continue;
-    }
-    if (ch === "(" || ch === "[" || ch === "{") {
-      depth++;
-    } else if (ch === ")" || ch === "]" || ch === "}") {
-      depth--;
-    }
-    if (ch === separator && depth === 0) {
-      parts.push(current.trim());
-      current = "";
-      continue;
-    }
-    current += ch;
-  }
-  parts.push(current.trim());
-  return parts;
-}
-
-/** A `/` starts a regex literal when the previous token cannot end an expression. */
-function isRegexStart(text: string, index: number): boolean {
-  if (text[index + 1] === "/" || text[index + 1] === "*") {
-    return false;
-  }
-  let j = index - 1;
-  while (j >= 0 && /\s/.test(text[j] as string)) {
-    j--;
-  }
-  if (j < 0) {
-    return true;
-  }
-  return "([,{=:!&|?;".includes(text[j] as string);
 }

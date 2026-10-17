@@ -19,6 +19,11 @@ import {
 } from "../shared/ipc-contract.js";
 import { RunStepUpdateEvent } from "../shared/ipc-contract.js";
 import type { RunMode, StepRow } from "../shared/schema.js";
+import {
+  CHAIN_METHODS,
+  PAGE_FACTORY_METHODS,
+  splitTopLevel,
+} from "../shared/locator-allowlist.js";
 import { MissingTestDataKeyError, substituteTestDataValue } from "../shared/step-types.js";
 import type { StepStatus } from "../shared/step-types.js";
 import type { AppDatabase } from "./db.js";
@@ -173,9 +178,6 @@ export function parseClickValue(value: string | undefined): {
   if (trimmed.startsWith("{")) {
     try {
       const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-      if (parsed["double"] === true || parsed["clickCount"] === 2) {
-        return { double: true, options: {} };
-      }
       const out: ClickStepOptions = {};
       if (parsed["button"] === "right" || parsed["button"] === "middle") {
         out.button = parsed["button"];
@@ -191,6 +193,9 @@ export function parseClickValue(value: string | undefined): {
       }
       if (parsed["force"] === true) {
         out.force = true;
+      }
+      if (parsed["double"] === true || parsed["clickCount"] === 2) {
+        return { double: true, options: out };
       }
       return { double: false, options: out };
     } catch {
@@ -484,6 +489,9 @@ interface LiveSession {
   busy: boolean;
   settled: boolean;
   startedAt: number;
+  /** Pause snapshot: remaining steps are marked skipped if cancelled while paused. */
+  pausedSteps?: StepRow[];
+  pausedFromIndex?: number;
 }
 
 export interface StartedRun {
@@ -640,6 +648,8 @@ export class SingleCaseRunner {
     this.clearStepRunsFrom(session.caseRunId, parsed.fromOrder);
     session.busy = true;
     session.cancelled = false;
+    session.pausedSteps = undefined;
+    session.pausedFromIndex = undefined;
     const startedAt = this.now();
     session.startedAt = startedAt;
     const done = (async (): Promise<void> => {
@@ -661,7 +671,7 @@ export class SingleCaseRunner {
     }
     session.cancelled = true;
     if (!session.busy) {
-      await this.settleCancel(session);
+      await this.settleCancel(session, session.pausedSteps, session.pausedFromIndex);
     }
     return null;
   }
@@ -725,6 +735,8 @@ export class SingleCaseRunner {
         this.log("error", `step s${step.order} (${step.action}) failed: ${message}`);
         if (session.mode === "supervised") {
           session.busy = false;
+          session.pausedSteps = steps;
+          session.pausedFromIndex = index + 1;
           this.log("warn", `paused at step ${step.order} — edit the step and resume, or re-run`);
           return;
         }
@@ -1032,21 +1044,6 @@ export function resolveLocator(page: Page, selector: string): Locator {
   return current;
 }
 
-/** Factory methods codegen emits directly on `page.` (plus bare `locator(`). */
-const PAGE_FACTORY_METHODS = new Set([
-  "getByRole",
-  "getByText",
-  "getByLabel",
-  "getByPlaceholder",
-  "getByAltText",
-  "getByTitle",
-  "getByTestId",
-  "locator",
-]);
-
-/** Chainable methods supported after the factory call. */
-const CHAIN_METHODS = new Set([...PAGE_FACTORY_METHODS, "filter", "first", "last", "nth"]);
-
 function unsupportedSelector(full: string, detail: string): StepExecutionError {
   return new StepExecutionError(
     `unsupported selector "${full}": ${detail} — edit the step to a CSS selector or a getByRole/getByText/locator chain`,
@@ -1089,90 +1086,6 @@ function splitLocatorChain(selector: string): string[] | null {
     }
   }
   return segments;
-}
-
-/** Split on a separator at nesting depth 0, ignoring strings/regex/parens. */
-function splitTopLevel(text: string, separator: "." | ","): string[] {
-  const parts: string[] = [];
-  let depth = 0;
-  let current = "";
-  let quote: string | null = null;
-  let inRegex = false;
-  let inRegexClass = false;
-  let escaped = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i] as string;
-    if (quote !== null) {
-      current += ch;
-      if (escaped) {
-        escaped = false;
-      } else if (ch === "\\") {
-        escaped = true;
-      } else if (ch === quote) {
-        quote = null;
-      }
-      continue;
-    }
-    if (inRegex) {
-      current += ch;
-      if (escaped) {
-        escaped = false;
-      } else if (ch === "\\") {
-        escaped = true;
-      } else if (ch === "[") {
-        inRegexClass = true;
-      } else if (ch === "]") {
-        inRegexClass = false;
-      } else if (ch === "/" && !inRegexClass) {
-        while (i + 1 < text.length && /[a-z]/i.test(text[i + 1] as string)) {
-          current += text[i + 1];
-          i++;
-        }
-        inRegex = false;
-      }
-      continue;
-    }
-    if (ch === "'" || ch === '"' || ch === "`") {
-      quote = ch;
-      current += ch;
-      continue;
-    }
-    if (ch === "/" && isRegexStart(text, i)) {
-      inRegex = true;
-      current += ch;
-      continue;
-    }
-    if (ch === "(" || ch === "[" || ch === "{") {
-      depth++;
-    } else if (ch === ")" || ch === "]" || ch === "}") {
-      depth--;
-    }
-    if (ch === separator && depth === 0) {
-      parts.push(current.trim());
-      current = "";
-      continue;
-    }
-    current += ch;
-  }
-  parts.push(current.trim());
-  return parts;
-}
-
-/** A `/` starts a regex literal when the previous token cannot end an expression. */
-function isRegexStart(text: string, index: number): boolean {
-  // Division never appears in selectors; `//xpath` never reaches here (not a
-  // factory head), so treat a second `/` as a non-regex char.
-  if (text[index + 1] === "/" || text[index + 1] === "*") {
-    return false;
-  }
-  let j = index - 1;
-  while (j >= 0 && /\s/.test(text[j] as string)) {
-    j--;
-  }
-  if (j < 0) {
-    return true;
-  }
-  return "([,{=:!&|?;".includes(text[j] as string);
 }
 
 interface ParsedCall {
@@ -1720,6 +1633,9 @@ function rejectLocatorOptions(options: unknown, full: string): void {
 
 // --- Production Playwright adapter -----------------------------------------------
 
+/** Hand-rolled assert polls wait as long as Playwright's own default action timeout. */
+const DEFAULT_ASSERT_TIMEOUT_MS = 30_000;
+
 class PlaywrightRunPage implements RunPage {
   private readonly page: Page;
 
@@ -1874,7 +1790,7 @@ class PlaywrightRunPage implements RunPage {
   }
 
   async assertUrl(value: string, timeoutMs?: number): Promise<void> {
-    const deadline = Date.now() + (timeoutMs ?? 5000);
+    const deadline = Date.now() + (timeoutMs ?? DEFAULT_ASSERT_TIMEOUT_MS);
     for (;;) {
       if (matchesText(this.page.url(), value)) {
         return;
@@ -1887,7 +1803,7 @@ class PlaywrightRunPage implements RunPage {
   }
 
   async assertTitle(value: string, timeoutMs?: number): Promise<void> {
-    const deadline = Date.now() + (timeoutMs ?? 5000);
+    const deadline = Date.now() + (timeoutMs ?? DEFAULT_ASSERT_TIMEOUT_MS);
     for (;;) {
       if (matchesText(await this.page.title(), value)) {
         return;
@@ -1906,7 +1822,7 @@ class PlaywrightRunPage implements RunPage {
     timeoutMs?: number,
     first = true,
   ): Promise<void> {
-    const deadline = Date.now() + (timeoutMs ?? 5000);
+    const deadline = Date.now() + (timeoutMs ?? DEFAULT_ASSERT_TIMEOUT_MS);
     const root = this.loc(selector);
     const loc = first ? root.first() : root;
     for (;;) {

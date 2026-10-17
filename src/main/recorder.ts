@@ -59,14 +59,17 @@ function unquote(literal: string): string {
     return text;
   }
   const inner = text.slice(1, -1);
+  // Unescape `\\` first (via a placeholder): otherwise a literal backslash-n
+  // in the recorded value would become a real newline below.
   return inner
+    .replace(/\\\\/g, "\uE000")
     .replace(/\\n/g, "\n")
     .replace(/\\t/g, "\t")
     .replace(/\\r/g, "\r")
     .replace(/\\`/g, "`")
     .replace(/\\"/g, '"')
     .replace(/\\'/g, "'")
-    .replace(/\\\\/g, "\\");
+    .replace(/\uE000/g, "\\");
 }
 
 /** First quoted string argument in a call, e.g. `fill('hi')` → `hi`. */
@@ -229,8 +232,11 @@ function parseLine(line: string): Omit<TestStep, "order"> | null {
     const num = /waitForTimeout\(\s*(\d+)/.exec(stmt)?.[1];
     return { action: "wait", value: num };
   }
-  // Visibility wait: locator.waitFor()
+  // Visibility wait: locator.waitFor() — hidden/detached waits assert absence.
   if (/\.waitFor\(/.test(stmt)) {
+    if (/state:\s*['"](hidden|detached)['"]/.test(stmt)) {
+      return { action: "assert-hidden", selector: locatorSource(stmt, "waitFor") };
+    }
     return { action: "assert-visible", selector: locatorSource(stmt, "waitFor") };
   }
   // Assertions: expect(locator).toBeVisible() / toContainText('…') / toHaveText('…')

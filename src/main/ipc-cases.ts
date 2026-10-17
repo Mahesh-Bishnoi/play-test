@@ -10,7 +10,7 @@ import {
 import type { TestCase } from "../shared/schema.js";
 import { TestCaseSchema } from "../shared/schema.js";
 import type { AppDatabase } from "./db.js";
-import { projects, suiteTestCases, testData, testSteps } from "./schema.js";
+import { caseRuns, projects, stepRuns, suiteTestCases, testData, testSteps } from "./schema.js";
 import { testCases } from "./schema.js";
 
 /** Thrown when a case id has no row — IPC maps this to a not-found error. */
@@ -121,11 +121,18 @@ export function updateCase(db: AppDatabase, input: CaseUpdatePayload): TestCase 
 }
 
 /**
- * Delete a case and everything scoped to it (steps, test-data, suite joins).
- * Suites that referenced it keep their remaining members.
+ * Delete a case and everything scoped to it (steps, test-data, suite joins,
+ * plus its case_runs and their step_runs). Suites that referenced it keep
+ * their remaining members.
  */
 export function deleteCase(db: AppDatabase, id: string): void {
   getCase(db, id);
+  const runs = db.select({ id: caseRuns.id }).from(caseRuns).where(eq(caseRuns.caseId, id)).all();
+  const runIds = runs.map((r) => r.id);
+  if (runIds.length > 0) {
+    db.delete(stepRuns).where(inArray(stepRuns.caseRunId, runIds)).run();
+    db.delete(caseRuns).where(inArray(caseRuns.id, runIds)).run();
+  }
   db.delete(suiteTestCases).where(eq(suiteTestCases.caseId, id)).run();
   db.delete(testSteps).where(eq(testSteps.caseId, id)).run();
   db.delete(testData).where(eq(testData.caseId, id)).run();

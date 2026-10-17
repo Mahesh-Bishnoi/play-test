@@ -4,6 +4,7 @@ import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import started from "electron-squirrel-startup";
 
 import { createDatabase, defaultDbPath } from "./db.js";
+import { ExportValidationError, MAX_EXPORT_BYTES } from "../shared/export-format.js";
 import {
   registerCrudHandlers,
   registerRecorderHandlers,
@@ -119,7 +120,12 @@ void app.whenReady().then(() => {
           : (result.filePaths[0] as string);
       },
       async readTextFile(path: string): Promise<string> {
-        const { readFile } = await import("node:fs/promises");
+        const { readFile, stat } = await import("node:fs/promises");
+        // Pre-read size guard: parseExportText caps at the same limit, but
+        // only after the whole file is already in memory.
+        if ((await stat(path)).size > MAX_EXPORT_BYTES) {
+          throw new ExportValidationError(`export file too large (max ${MAX_EXPORT_BYTES} bytes)`);
+        }
         return readFile(path, "utf8");
       },
       async writeTextFile(path: string, text: string): Promise<void> {

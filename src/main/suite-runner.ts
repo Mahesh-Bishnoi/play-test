@@ -31,7 +31,7 @@ import {
   stepScreenshotPath,
 } from "./artifacts.js";
 import { getCase } from "./ipc-cases.js";
-import { getSuite } from "./ipc-suites.js";
+import { getSuite, getSuiteCaseIds } from "./ipc-suites.js";
 import { getTestData, listSteps } from "./ipc-steps.js";
 import { tryWriteSuiteHtmlReport } from "./reports.js";
 import { caseRuns, stepRuns, suiteRuns } from "./schema.js";
@@ -165,8 +165,15 @@ export class SuiteRunner {
       throw new RunAlreadyActiveError();
     }
     const suite = getSuite(this.db, parsed.suiteId);
+    const members = new Set(getSuiteCaseIds(this.db, suite.id));
     for (const caseId of parsed.caseIds) {
-      getCase(this.db, caseId);
+      const testCase = getCase(this.db, caseId);
+      if (!members.has(caseId)) {
+        throw new Error(`case ${caseId} is not a member of suite ${suite.id}`);
+      }
+      if (testCase.projectId !== suite.projectId) {
+        throw new Error(`case ${caseId} belongs to a different project than suite ${suite.id}`);
+      }
     }
     return this.start(suite.id, parsed.caseIds, parsed.mode);
   }
@@ -397,6 +404,20 @@ export class SuiteRunner {
 
   /** Derive suite status + summary from the settled case rows, then report. */
   private settleSuite(suiteRunId: string): void {
+    if (this.cancelled.has(suiteRunId)) {
+      // Cancel makes workers return early, so cases still queued (never
+      // started) keep their initial "running" rows. Settle them here — the
+      // queue is drained and every in-flight case already settled itself.
+      const pending = this.db
+        .select()
+        .from(caseRuns)
+        .where(eq(caseRuns.suiteRunId, suiteRunId))
+        .all()
+        .filter((r) => r.status === "running");
+      for (const row of pending) {
+        this.finishCase(row.id, "cancelled", this.now());
+      }
+    }
     const rows = this.db.select().from(caseRuns).where(eq(caseRuns.suiteRunId, suiteRunId)).all();
     const passed = rows.filter((r) => r.status === "passed").length;
     const failed = rows.filter((r) => r.status === "failed").length;

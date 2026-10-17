@@ -355,9 +355,9 @@ export default function SyncPanel({ projectId, projectName, onChanged }: Props):
           </button>
         </div>
         <p className="pt-hint pt-mt-8">
-          The link (folder + remote) is remembered per project on this machine. Cloning a shared
-          remote into a new folder happens on the Welcome screen — then open the clone and link it
-          here, or just pull straight into it.
+          Init refuses a non-empty folder (it wipes `suites/` and `cases/` on write) — pick an empty
+          folder. Cloning a shared remote into a new folder happens on the Welcome screen — then
+          open the clone and link it here, or just pull straight into it.
         </p>
       </div>
 

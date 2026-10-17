@@ -21,9 +21,9 @@ export function defaultDbPath(): string {
   return join(homedir(), "PlayTestData", "playtest.db");
 }
 
-// Bootstrap DDL kept in sync with src/main/schema.ts. Fresh installs get
-// CREATE TABLE IF NOT EXISTS here; schema evolution ships as Drizzle
-// migrations (drizzle/ + drizzle-kit). One place owns DDL per table.
+// Bootstrap DDL kept in sync with src/main/schema.ts. Fresh installs and
+// upgrades get CREATE TABLE / CREATE INDEX IF NOT EXISTS here — there is no
+// migration runner (Drizzle is the query builder only). One place owns DDL.
 const BOOTSTRAP_DDL = [
   `CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,

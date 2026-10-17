@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { join, relative } from "node:path";
 
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 import type { AppDatabase } from "./db.js";
 import { caseTracePath } from "./artifacts.js";
@@ -84,21 +84,39 @@ export function getSuiteReport(
       null;
   }
   const caseRows = db.select().from(caseRuns).where(eq(caseRuns.suiteRunId, suiteRunId)).all();
+  // Batched lookups: one query for this run's step_runs, one for its
+  // test_steps, one for its test_cases — never the whole tables, never N+1.
+  const caseRunIds = caseRows.map((cr) => cr.id);
+  const stepRunRows =
+    caseRunIds.length === 0
+      ? []
+      : db.select().from(stepRuns).where(inArray(stepRuns.caseRunId, caseRunIds)).all();
+  const stepRowsByCaseRun = new Map<string, typeof stepRunRows>();
+  for (const sr of stepRunRows) {
+    const list = stepRowsByCaseRun.get(sr.caseRunId) ?? [];
+    list.push(sr);
+    stepRowsByCaseRun.set(sr.caseRunId, list);
+  }
+  for (const list of stepRowsByCaseRun.values()) {
+    list.sort((a, b) => a.order - b.order);
+  }
+  const stepIds = [...new Set(stepRunRows.map((s) => s.stepId))];
   const stepById = new Map(
-    db
-      .select()
-      .from(testSteps)
-      .all()
-      .map((s) => [s.id, s] as const),
+    (stepIds.length === 0
+      ? []
+      : db.select().from(testSteps).where(inArray(testSteps.id, stepIds)).all()
+    ).map((s) => [s.id, s] as const),
+  );
+  const caseIds = [...new Set(caseRows.map((cr) => cr.caseId))];
+  const caseById = new Map(
+    (caseIds.length === 0
+      ? []
+      : db.select().from(testCases).where(inArray(testCases.id, caseIds)).all()
+    ).map((c) => [c.id, c] as const),
   );
   const cases: ReportCase[] = caseRows.map((cr) => {
-    const testCase = db.select().from(testCases).where(eq(testCases.id, cr.caseId)).all()[0];
-    const stepRows = db
-      .select()
-      .from(stepRuns)
-      .where(eq(stepRuns.caseRunId, cr.id))
-      .all()
-      .sort((a, b) => a.order - b.order);
+    const testCase = caseById.get(cr.caseId);
+    const stepRows = stepRowsByCaseRun.get(cr.id) ?? [];
     return {
       caseRunId: cr.id,
       caseId: cr.caseId,
@@ -458,7 +476,7 @@ export function reportFileExists(path: string | null): boolean {
     return false;
   }
   try {
-    return existsSync(path) && !dirname(path).includes("\0");
+    return existsSync(path);
   } catch {
     return false;
   }

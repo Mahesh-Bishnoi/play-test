@@ -68,8 +68,9 @@ dummy-tax-site/server.js        // zero-dep manual-trial portal (npm run dummy:t
 scripts/seed-dummy-tax.mjs      // idempotent seed of ~/PlayTestData (npm run seed:dummy-tax)
 ```
 
-Runtime data lives in `~/PlayTestData`, never in the repo. Generated `drizzle/` is excluded
-from formatting.
+Runtime data lives in `~/PlayTestData`, never in the repo. Schema DDL lives in
+`src/main/db.ts` (`BOOTSTRAP_DDL`, mirroring `src/main/schema.ts`) — Drizzle is
+the query builder only; there is no migration runner.
 
 ## 4. Data Model (Drizzle/SQLite)
 

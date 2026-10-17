@@ -11,7 +11,17 @@ import {
 import type { Project } from "../shared/schema.js";
 import { ProjectSchema } from "../shared/schema.js";
 import type { AppDatabase } from "./db.js";
-import { suiteTestCases, testCases, testData, testSteps, testSuites } from "./schema.js";
+import { defaultArtifactsRoot, removeProjectArtifacts } from "./artifacts.js";
+import {
+  caseRuns,
+  stepRuns,
+  suiteRuns,
+  suiteTestCases,
+  testCases,
+  testData,
+  testSteps,
+  testSuites,
+} from "./schema.js";
 import { projects } from "./schema.js";
 
 /** Thrown when a project id has no row — IPC maps this to a not-found error. */
@@ -99,10 +109,16 @@ export function updateProject(db: AppDatabase, input: ProjectUpdatePayload): Pro
 
 /**
  * Delete a project and everything scoped to it (suites, cases, steps,
- * test-data, join rows). Sequential deletes are safe: single writer,
- * no concurrent IPC mutation mid-delete.
+ * test-data, join rows, all run history) plus its artifact tree.
+ * Sequential deletes are safe: single writer, no concurrent IPC mutation
+ * mid-delete. `opts.artifactsRoot` is injectable so tests use a tmp dir;
+ * production passes the real ~/PlayTestData root.
  */
-export function deleteProject(db: AppDatabase, id: string): void {
+export function deleteProject(
+  db: AppDatabase,
+  id: string,
+  opts?: { artifactsRoot?: string },
+): void {
   getProject(db, id);
   const suites = db
     .select({ id: testSuites.id })
@@ -117,15 +133,73 @@ export function deleteProject(db: AppDatabase, id: string): void {
   const suiteIds = suites.map((s) => s.id);
   const caseIds = cases.map((c) => c.id);
 
+  // Run history first (child-to-parent): step_runs → case_runs → suite_runs.
+  // case_runs rows are reachable by suite-run id (suite runs) or by case id
+  // (supervised single-case runs), so collect both.
+  const suiteRunIds = new Set<string>();
+  if (suiteIds.length > 0) {
+    const bySuite = db
+      .select({ id: suiteRuns.id })
+      .from(suiteRuns)
+      .where(inArray(suiteRuns.suiteId, suiteIds))
+      .all();
+    for (const r of bySuite) {
+      suiteRunIds.add(r.id);
+    }
+  }
+  if (caseIds.length > 0) {
+    const byCase = db
+      .select({ suiteRunId: caseRuns.suiteRunId })
+      .from(caseRuns)
+      .where(inArray(caseRuns.caseId, caseIds))
+      .all();
+    for (const r of byCase) {
+      suiteRunIds.add(r.suiteRunId);
+    }
+  }
+  const caseRunIds: string[] = [];
+  if (suiteRunIds.size > 0) {
+    const ids = [...suiteRunIds];
+    const bySuiteRun = db
+      .select({ id: caseRuns.id })
+      .from(caseRuns)
+      .where(inArray(caseRuns.suiteRunId, ids))
+      .all();
+    for (const r of bySuiteRun) {
+      caseRunIds.push(r.id);
+    }
+  }
+  if (caseIds.length > 0) {
+    const byCase = db
+      .select({ id: caseRuns.id })
+      .from(caseRuns)
+      .where(inArray(caseRuns.caseId, caseIds))
+      .all();
+    for (const r of byCase) {
+      if (!caseRunIds.includes(r.id)) {
+        caseRunIds.push(r.id);
+      }
+    }
+  }
+  if (caseRunIds.length > 0) {
+    db.delete(stepRuns).where(inArray(stepRuns.caseRunId, caseRunIds)).run();
+    db.delete(caseRuns).where(inArray(caseRuns.id, caseRunIds)).run();
+  }
+  if (suiteRunIds.size > 0) {
+    db.delete(suiteRuns)
+      .where(inArray(suiteRuns.id, [...suiteRunIds]))
+      .run();
+  }
+
   if (suiteIds.length > 0) {
     db.delete(suiteTestCases).where(inArray(suiteTestCases.suiteId, suiteIds)).run();
     db.delete(testSuites).where(inArray(testSuites.id, suiteIds)).run();
   }
   if (caseIds.length > 0) {
-    db.delete(suiteTestCases).where(inArray(suiteTestCases.caseId, caseIds)).run();
     db.delete(testSteps).where(inArray(testSteps.caseId, caseIds)).run();
     db.delete(testData).where(inArray(testData.caseId, caseIds)).run();
     db.delete(testCases).where(inArray(testCases.id, caseIds)).run();
   }
   db.delete(projects).where(eq(projects.id, id)).run();
+  removeProjectArtifacts(opts?.artifactsRoot ?? defaultArtifactsRoot(), id);
 }

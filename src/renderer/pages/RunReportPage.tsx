@@ -188,12 +188,18 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
       {html === null ? (
         <p className="pt-empty">Loading report…</p>
       ) : (
-        <iframe
-          title={`Report for run ${suiteRunId}`}
-          srcDoc={html}
-          sandbox=""
-          className="pt-report-frame"
-        />
+        <>
+          <p className="pt-hint">
+            In-app preview only: screenshots over 500KB stay linked files and do not render inside
+            this preview. Open the exported HTML file for the full report.
+          </p>
+          <iframe
+            title={`Report for run ${suiteRunId}`}
+            srcDoc={html}
+            sandbox=""
+            className="pt-report-frame"
+          />
+        </>
       )}
     </section>
   );

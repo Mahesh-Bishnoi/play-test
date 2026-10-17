@@ -2,14 +2,14 @@
 
 Desktop app for manual testers: create Projects → Suites → Test Cases → record flows with Playwright codegen → edit steps in a workflow graph → run supervised or unsupervised → get screenshots, failure video, and self-contained HTML + PDF reports.
 
-Built with Electron + TypeScript + React + Tailwind, SQLite (`better-sqlite3` + Drizzle ORM) local-first storage, and Playwright (Chromium only in MVP) for record/run.
+Built with Electron + TypeScript + React + hand-written CSS, SQLite (`better-sqlite3` + Drizzle ORM) local-first storage, and Playwright (Chromium only in MVP) for record/run.
 
 ## Features
 
 - **Project / Suite / Case hierarchy** — cases are reusable across suites via a join table. Suite detail has checkbox selection, select-all/none, search, and a pre-run confirm dialog.
 - **Record via Playwright codegen** — launches an external `playwright codegen` window against the project's base URL, parses the output into editable `TestStep[]`, with an import-preview modal. Unparseable lines are kept as raw fallback, never dropped.
 - **Workflow step editor** — linear `@xyflow/react` chain + step table; node colors by last run status (green pass / red fail / grey skipped / blue running). Edit action, selector, value (with `{{key}}` hints), timeout; drag/arrow reorder.
-- **9 step actions** — `goto | click | fill | select | check | press | assert-visible | assert-text | wait`. Recorder `getBy*`/`locator` chains are resolved without `eval`.
+- **25 step actions** — `goto | click | dblclick | fill | type | select | check | uncheck | press | hover | focus | assert-visible | assert-hidden | assert-text | assert-value | assert-checked | assert-unchecked | assert-enabled | assert-disabled | assert-editable | assert-focused | assert-count | assert-url | assert-title | wait`. Recorder `getBy*`/`locator` chains are resolved without `eval`.
 - **Supervised single-case runs** — headed, one worker, pauses on failure with context kept open. Resume-from-failed-step (re-runs edited step + followers in the same context) or full re-run. Optional pre-run speed control (Instant / 0.6s / 1.5s / 3s pacing between steps).
 - **Unsupervised runs** — single case or whole suite, headless, suite-parallel from day one (`workers = max(1, min(cpu/2, cases))`).
 - **Artifacts** — screenshot after every step; video + trace retained on failure only. Stored under `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/` (`step-NN.png`, `failed.webm`, `trace.zip`).

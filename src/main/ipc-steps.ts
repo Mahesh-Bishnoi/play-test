@@ -248,7 +248,13 @@ export function reorderSteps(db: AppDatabase, input: StepReorderPayload): StepRo
     throw new Error("orderedIds must match the case's step ids exactly");
   }
   const byId = new Map(rows.map((r) => [r.id, r]));
-  const next = parsed.orderedIds.map((id) => byId.get(id) as StepDbRow);
+  const next = parsed.orderedIds.map((id) => {
+    const row = byId.get(id);
+    if (row === undefined) {
+      throw new Error("orderedIds must match the case's step ids exactly");
+    }
+    return row;
+  });
   persistOrder(db, next);
   return loadOrdered(db, parsed.caseId).map(toStepRow);
 }

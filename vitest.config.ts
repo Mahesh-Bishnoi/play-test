@@ -8,12 +8,13 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
-      include: ["src/**/*.ts"],
-      exclude: ["src/**/*.test.ts"],
-      // Floor per clean-code §7: a suite ships with an enforced gate.
-      // WSs raise these as real logic lands; 0 today keeps the gate honest
-      // until src/ exists (no silently-absent coverage).
-      thresholds: { lines: 0, functions: 0, branches: 0, statements: 0 },
+      include: ["src/**/*.ts", "src/**/*.tsx"],
+      exclude: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+      // Floor per clean-code §7: set just under measured coverage (2026-10:
+      // ~42% lines / ~42% statements / ~36% branches / ~30% functions with
+      // tsx included) so the gate fails on real regression, not decoration.
+      // Raise these as tested surface grows — never lower.
+      thresholds: { lines: 41, functions: 29, branches: 35, statements: 40 },
     },
   },
 });
