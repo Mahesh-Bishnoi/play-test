@@ -67,6 +67,20 @@ const BOOTSTRAP_DDL = [
     source TEXT NOT NULL DEFAULT 'kv',
     PRIMARY KEY (case_id, key)
   )`,
+  // M14 case profiles: one row per case (case_id PK), no FK by convention.
+  `CREATE TABLE IF NOT EXISTS case_profiles (
+    case_id TEXT PRIMARY KEY,
+    device TEXT,
+    viewport_w INTEGER,
+    viewport_h INTEGER,
+    color_scheme TEXT,
+    locale TEXT,
+    timezone TEXT,
+    storage_state TEXT,
+    save_storage_state TEXT,
+    dialog_policy TEXT,
+    updated_at INTEGER NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS suite_runs (
     id TEXT PRIMARY KEY,
     suite_id TEXT,

@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-import { RunModeSchema } from "./schema.js";
+import {
+  CaseProfileInputSchema,
+  DeviceNameSchema,
+  LocaleSchema,
+  RunModeSchema,
+  TimezoneSchema,
+} from "./schema.js";
 import { StepStatusSchema } from "./step-types.js";
 import { TestStepSchema } from "./step-types.js";
 
@@ -34,6 +40,8 @@ export const IPC_CHANNELS = [
   "step:reorder",
   "testdata:get",
   "testdata:set",
+  "profile:get",
+  "profile:set",
   "recorder:start",
   "recorder:stop",
   "runner:runSingle",
@@ -162,12 +170,14 @@ export const TestDataSetPayload = z.object({
 
 // --- Recorder (WS4) ----------------------------------------------------------
 
-// M9 emulation + auth-state options (PLAN §18.2): all additive optionals.
-// Flag mapping verified against `npx playwright codegen --help`
-// (playwright@1.64.1): viewport → --viewport-size "W,H" (comma, NOT WxH),
-// device → --device, colorScheme → --color-scheme, locale → --lang
-// (there is no --locale flag), timezone → --timezone,
-// storageStatePath → --load-storage, saveStoragePath → --save-storage.
+// M14 (SPECS §2/§5): the renderer no longer sends emulation/auth options —
+// `recorder:start({caseId})` names the case and main resolves project baseUrl +
+// the case profile into `RecorderStartOptions`. Field validators are shared
+// with the profile schema (one dialect). Flag mapping verified against
+// `npx playwright codegen --help` (playwright@1.64.1): viewport →
+// --viewport-size "W,H" (comma, NOT WxH), device → --device, colorScheme →
+// --color-scheme, locale → --lang (there is no --locale flag), timezone →
+// --timezone, storageStatePath → --load-storage, saveStoragePath → --save-storage.
 // Values must never look like flags (no leading `-`): even though spawn
 // uses an argv array (no shell), minimist would still eat a `--foo` value
 // as a flag — so shape checks below reject them at the trust boundary.
@@ -184,33 +194,34 @@ export const RecorderViewportPayload = z.object({
   height: z.number().int().min(100).max(4320),
 });
 
-export const RecorderStartPayload = z.object({
-  baseUrl: z.string().trim().min(1).max(2000),
+/** Resolved emulation/auth options main builds from the case profile (M14). */
+export const RecorderStartOptionsSchema = z.object({
   viewport: RecorderViewportPayload.optional(),
-  device: z
-    .string()
-    .min(1)
-    .max(100)
-    .regex(/^(?![-])(?!.*--)[A-Za-z0-9 _.()/+-]+$/, "unsafe device name")
-    .optional(),
+  device: DeviceNameSchema.optional(),
   colorScheme: z.enum(["light", "dark"]).optional(),
-  locale: z
-    .string()
-    .min(2)
-    .max(20)
-    .regex(/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/, "locale must be BCP47-like, e.g. en-GB")
-    .optional(),
-  timezone: z
-    .string()
-    .min(1)
-    .max(100)
-    .regex(/^(?!.*\.\.)(?!-)[A-Za-z0-9_+/-]+$/, "timezone must be IANA-like, e.g. Europe/Rome")
-    .optional(),
+  locale: LocaleSchema.optional(),
+  timezone: TimezoneSchema.optional(),
   storageStatePath: noFlagPrefix("storageStatePath").optional(),
   saveStoragePath: noFlagPrefix("saveStoragePath").optional(),
 });
 
+/** `recorder:start` now names only the case; main resolves the rest (M14). */
+export const RecorderStartPayload = z.object({
+  caseId: z.string().min(1).max(100),
+});
+
 export const RecorderStopPayload = z.object({});
+
+// --- Case profile (M14) ------------------------------------------------------
+
+export const ProfileGetPayload = z.object({
+  caseId: z.string().min(1).max(100),
+});
+
+export const ProfileSetPayload = z.object({
+  caseId: z.string().min(1).max(100),
+  profile: CaseProfileInputSchema,
+});
 
 // --- Runner (WS5) ------------------------------------------------------------
 
@@ -400,9 +411,11 @@ export type StepDeletePayload = z.infer<typeof StepDeletePayload>;
 export type StepReorderPayload = z.infer<typeof StepReorderPayload>;
 export type TestDataGetPayload = z.infer<typeof TestDataGetPayload>;
 export type TestDataSetPayload = z.infer<typeof TestDataSetPayload>;
+export type ProfileGetPayload = z.infer<typeof ProfileGetPayload>;
+export type ProfileSetPayload = z.infer<typeof ProfileSetPayload>;
 export type RecorderStartPayload = z.infer<typeof RecorderStartPayload>;
-/** Emulation/auth options for `recorder:start` — everything but the URL. */
-export type RecorderStartOptions = Omit<RecorderStartPayload, "baseUrl">;
+/** Emulation/auth options resolved from the case profile in main (M14). */
+export type RecorderStartOptions = z.infer<typeof RecorderStartOptionsSchema>;
 export type RecorderStopPayload = z.infer<typeof RecorderStopPayload>;
 export type RunnerRunSinglePayload = z.infer<typeof RunnerRunSinglePayload>;
 export type RunnerRunSuitePayload = z.infer<typeof RunnerRunSuitePayload>;
@@ -457,6 +470,8 @@ export const IPC_PAYLOADS: Record<string, z.ZodType> = {
   "step:reorder": StepReorderPayload,
   "testdata:get": TestDataGetPayload,
   "testdata:set": TestDataSetPayload,
+  "profile:get": ProfileGetPayload,
+  "profile:set": ProfileSetPayload,
   "recorder:start": RecorderStartPayload,
   "recorder:stop": RecorderStopPayload,
   "runner:runSingle": RunnerRunSinglePayload,

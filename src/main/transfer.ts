@@ -9,6 +9,8 @@ import {
   type ExportScope,
   type ExportStep,
 } from "../shared/export-format.js";
+import { CaseProfileInputSchema } from "../shared/schema.js";
+import { getCaseProfile, setCaseProfile } from "./ipc-profiles.js";
 import { getProject } from "./ipc-projects.js";
 import { createProject, deleteProject } from "./ipc-projects.js";
 import { getCase, createCase, deleteCase, listCases, listCasesByIds } from "./ipc-cases.js";
@@ -107,12 +109,18 @@ function readCaseBundle(db: AppDatabase, caseId: string): ExportCase {
   const c = getCase(db, caseId);
   const steps = toExportSteps(listSteps(db, caseId));
   const testData = getTestData(db, { caseId });
+  // Profile travels as the mutable input shape only (the shared schema strips
+  // identity: `caseId`/`updatedAt`). Auth state file CONTENTS never travel —
+  // just the filenames. An absent/empty profile stays absent in the bundle.
+  const stored = getCaseProfile(db, caseId);
+  const profile = stored === null ? null : CaseProfileInputSchema.parse(stored);
   return {
     name: c.name,
     ...(c.description !== undefined ? { description: c.description } : {}),
     ...(c.url !== undefined ? { url: c.url } : {}),
     steps,
     testData,
+    ...(profile !== null && Object.keys(profile).length > 0 ? { profile } : {}),
   };
 }
 
@@ -192,6 +200,10 @@ function createCaseFromBundle(
   });
   if (Object.keys(bundle.testData).length > 0) {
     setTestData(db, { caseId: created.id, data: bundle.testData });
+  }
+  // Fresh id: the profile (filenames only) is copied onto the new case.
+  if (bundle.profile !== undefined) {
+    setCaseProfile(db, created.id, bundle.profile);
   }
   return { caseId: created.id, steps: ordered.length };
 }

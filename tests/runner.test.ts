@@ -5,7 +5,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { eq } from "drizzle-orm";
 
-import type { BrowserLauncher, RunContext, RunPage, RunEventChannel } from "../src/main/runner.js";
+import type {
+  BrowserHandle,
+  BrowserLauncher,
+  ContextLaunchOptions,
+  RunContext,
+  RunPage,
+  RunEventChannel,
+} from "../src/main/runner.js";
 import {
   captureStepScreenshot,
   ContextClosedError,
@@ -22,13 +29,14 @@ import {
   substituteStepValue,
 } from "../src/main/runner.js";
 import { SuiteRunner } from "../src/main/suite-runner.js";
-import { caseVideoPath, stepScreenshotPath } from "../src/main/artifacts.js";
+import { caseArtifactsDir, caseVideoPath, stepScreenshotPath } from "../src/main/artifacts.js";
 import { createDatabase } from "../src/main/db.js";
 import type { DatabaseHandle } from "../src/main/db.js";
 import type { AppDatabase } from "../src/main/db.js";
 import { registerRunnerHandlers } from "../src/main/ipc-register.js";
 import type { IpcHandleFn } from "../src/main/ipc-register.js";
 import { createCase } from "../src/main/ipc-cases.js";
+import { authStateDir, MissingAuthStateError, setCaseProfile } from "../src/main/ipc-profiles.js";
 import { createProject } from "../src/main/ipc-projects.js";
 import { setTestData, upsertStep } from "../src/main/ipc-steps.js";
 import { caseRuns, stepRuns, suiteRuns } from "../src/main/schema.js";
@@ -199,22 +207,49 @@ class FakeContext implements RunContext {
   }
 }
 
+class FakeBrowser implements BrowserHandle {
+  contexts: FakeContext[] = [];
+  options: ContextLaunchOptions[] = [];
+  closed = false;
+
+  constructor(private readonly owner: FakeLauncher) {}
+
+  async newContext(o: ContextLaunchOptions): Promise<RunContext> {
+    this.options.push(o);
+    const context = new FakeContext();
+    const index = this.contexts.length;
+    this.contexts.push(context);
+    this.owner.contexts.push(context);
+    this.owner.optionsSeen.push(o);
+    this.owner.onCreate?.(context, index);
+    return context;
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    this.owner.browsersClosed.push(this);
+  }
+}
+
 class FakeLauncher implements BrowserLauncher {
   headlessSeen: boolean[] = [];
-  titlesSeen: string[] = [];
+  optionsSeen: ContextLaunchOptions[] = [];
   contexts: FakeContext[] = [];
+  browsers: FakeBrowser[] = [];
+  browsersClosed: FakeBrowser[] = [];
   launchFail: string | null = null;
   videoContent = "fake-video";
+  /** Per-context customization hook (replaces the old per-launch override). */
+  onCreate: ((context: FakeContext, index: number) => void) | null = null;
 
-  async launch(headless: boolean, _videoDir: string, title = ""): Promise<RunContext> {
+  async launchBrowser(headless: boolean): Promise<BrowserHandle> {
     if (this.launchFail !== null) {
       throw new Error(this.launchFail);
     }
     this.headlessSeen.push(headless);
-    this.titlesSeen.push(title);
-    const context = new FakeContext();
-    this.contexts.push(context);
-    return context;
+    const browser = new FakeBrowser(this);
+    this.browsers.push(browser);
+    return browser;
   }
 
   /** Give the next launched context a real video file to retain/discard. */
@@ -512,16 +547,15 @@ describe("runSingle (M5)", () => {
   it("passes all steps headless when unsupervised, screenshotting every step", async () => {
     const fx = track(makeFixture());
     const rawVideo = fx.launcher.primeVideo(fx.root);
-    const originalLaunch = fx.launcher.launch.bind(fx.launcher);
-    fx.launcher.launch = async (headless, videoDir) => {
-      const context = (await originalLaunch(headless, videoDir)) as FakeContext;
+    fx.launcher.onCreate = (context) => {
       context.videoFile = rawVideo;
-      return context;
     };
     const started = fx.runner.runSingle({ caseId: fx.caseId, mode: "unsupervised" });
     await started.done;
 
     expect(fx.launcher.headlessSeen).toEqual([true]);
+    expect(fx.launcher.browsers).toHaveLength(1);
+    expect(fx.launcher.browsersClosed).toHaveLength(1);
     const page = fx.launcher.contexts[0]?.page;
     expect(page?.calls.map((c) => c.method)).toEqual(["goto", "screenshot", "click", "screenshot"]);
 
@@ -610,20 +644,18 @@ describe("runSingle (M5)", () => {
         { action: "click", selector: "#next" },
       ]),
     );
-    const originalLaunch = fx.launcher.launch.bind(fx.launcher);
-    fx.launcher.launch = async (headless, videoDir) => {
-      const context = (await originalLaunch(headless, videoDir)) as FakeContext;
+    fx.launcher.onCreate = (context) => {
       context.page.failWhen = (method) => method === "click";
       context.page.failMessage =
         "expect(locator).toBeVisible() failed\nExpected: visible\nReceived: <element(s) not found>\nCall log:\n  - waiting for locator('#go')\n";
       context.videoFile = fx.launcher.primeVideo(fx.root);
-      return context;
     };
     const started = fx.runner.runSingle({ caseId: fx.caseId, mode: "unsupervised" });
     await started.done;
 
     expect(fx.launcher.headlessSeen).toEqual([true]);
     expect(fx.launcher.contexts[0]?.closed).toBe(true);
+    expect(fx.launcher.browsers[0]?.closed).toBe(true);
     const rows = stepRows(fx, started.caseRunId);
     expect(rows.map((r) => r.status)).toEqual(["pass", "fail", "skipped"]);
     expect(rows[1]?.error).toContain("Call log:");
@@ -698,12 +730,9 @@ describe("supervised pause + resume (M5)", () => {
   it("pauses with the context open and resumes edited steps to green", async () => {
     const fx = track(failingFixture());
     // Arm the fill failure before starting — runSingle launches synchronously.
-    const originalLaunch = fx.launcher.launch.bind(fx.launcher);
-    fx.launcher.launch = async (headless, videoDir) => {
-      const context = (await originalLaunch(headless, videoDir)) as FakeContext;
+    fx.launcher.onCreate = (context) => {
       context.page.failWhen = (method) => method === "fill";
       context.page.failMessage = "selector unresolved";
-      return context;
     };
     const started = fx.runner.runSingle({ caseId: fx.caseId, mode: "supervised" });
     await started.done;
@@ -749,18 +778,15 @@ describe("supervised pause + resume (M5)", () => {
 
   it("saves a trace chunk at the supervised pause so evidence survives a resume", async () => {
     const fx = track(failingFixture());
-    const originalLaunch = fx.launcher.launch.bind(fx.launcher);
-    fx.launcher.launch = async (headless, videoDir, title) => {
-      const context = (await originalLaunch(headless, videoDir, title)) as FakeContext;
+    fx.launcher.onCreate = (context) => {
       context.page.failWhen = (method) => method === "fill";
       context.page.failMessage = "selector unresolved";
-      return context;
     };
     const started = fx.runner.runSingle({ caseId: fx.caseId, mode: "supervised" });
     await started.done;
 
     // The trace is titled with the case name; each executed step is one group.
-    expect(fx.launcher.titlesSeen[0]).toBe("C");
+    expect(fx.launcher.optionsSeen[0]?.title).toBe("C");
     const live = fx.launcher.contexts[0]!;
     expect(live.traceChunkPaths).toHaveLength(1);
     expect(live.traceChunkPaths[0]?.endsWith("trace.zip")).toBe(true);
@@ -781,12 +807,8 @@ describe("supervised pause + resume (M5)", () => {
 
   it("resume without a live session demands a full re-run", async () => {
     const fx = track(makeFixture([{ action: "click", selector: "#go" }]));
-    fx.launcher.launch = async (headless, videoDir) => {
-      const context = (await new FakeLauncher().launch(headless, videoDir)) as FakeContext;
+    fx.launcher.onCreate = (context) => {
       context.page.failWhen = () => true;
-      fx.launcher.contexts.push(context);
-      fx.launcher.headlessSeen.push(headless);
-      return context;
     };
     const started = fx.runner.runSingle({ caseId: fx.caseId, mode: "unsupervised" });
     await started.done;
@@ -810,15 +832,15 @@ describe("supervised pause + resume (M5)", () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const originalLaunch = fx.launcher.launch.bind(fx.launcher);
-    fx.launcher.launch = async (headless, videoDir) => {
-      const context = (await originalLaunch(headless, videoDir)) as FakeContext;
+    fx.launcher.onCreate = (context) => {
       context.page.gate = gate;
-      return context;
     };
     const started = fx.runner.runSingle({ caseId: fx.caseId, mode: "unsupervised" });
     // Wait until the first step is executing, then cancel.
-    for (let i = 0; i < 1000 && fx.launcher.contexts[0]?.page.calls.length === 0; i++) {
+    for (let i = 0; i < 1000; i++) {
+      if ((fx.launcher.contexts[0]?.page.calls.length ?? 0) > 0) {
+        break;
+      }
       await new Promise((r) => setTimeout(r, 1));
     }
     await fx.runner.cancelRun({ suiteRunId: started.suiteRunId });
@@ -855,11 +877,8 @@ describe("supervised pause + resume (M5)", () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const originalLaunch = fx.launcher.launch.bind(fx.launcher);
-    fx.launcher.launch = async (headless, videoDir) => {
-      const context = (await originalLaunch(headless, videoDir)) as FakeContext;
+    fx.launcher.onCreate = (context) => {
       context.page.gate = gate;
-      return context;
     };
     const started = fx.runner.runSingle({ caseId: fx.caseId, mode: "supervised" });
     for (let i = 0; i < 1000 && fx.launcher.contexts.length === 0; i++) {
@@ -1027,11 +1046,8 @@ describe("supervised speed control (actionDelayMs)", () => {
       { action: "fill", selector: "#name", value: "ada" },
       { action: "click", selector: "#go" },
     ]);
-    const originalLaunch = launcher.launch.bind(launcher);
-    launcher.launch = async (headless, videoDir) => {
-      const context = (await originalLaunch(headless, videoDir)) as FakeContext;
+    launcher.onCreate = (context) => {
       context.page.failWhen = (method) => method === "fill";
-      return context;
     };
     const started = runner.runSingle({ caseId, mode: "supervised", actionDelayMs: 500 });
     await started.done;
@@ -1081,5 +1097,112 @@ describe("artifacts layout (PLAN §4)", () => {
     expect(shot).toBe(join("R", "proj", "run", "case", "step-03.png"));
     const video = caseVideoPath("R", "proj", "run", "case");
     expect(video).toBe(join("R", "proj", "run", "case", "failed.webm"));
+  });
+});
+
+// --- Case profile at run time (M14) ----------------------------------------------
+
+describe("case profile at run time (M14)", () => {
+  function profileFixture(): {
+    dbHandle: DatabaseHandle;
+    launcher: FakeLauncher;
+    runner: SingleCaseRunner;
+    root: string;
+    projectId: string;
+    caseId: string;
+  } {
+    const dbHandle = createDatabase(":memory:");
+    openHandles.push(dbHandle);
+    const root = join(
+      tmpdir(),
+      `playtest-profile-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    mkdirSync(root, { recursive: true });
+    const launcher = new FakeLauncher();
+    const runner = new SingleCaseRunner(dbHandle.db, {
+      launchBrowser: launcher,
+      emit: () => undefined,
+      artifactsRoot: root,
+    });
+    const project = createProject(dbHandle.db, { name: "P", baseUrl: "https://app.test" });
+    const testCase = createCase(dbHandle.db, { projectId: project.id, name: "Login" });
+    upsertStep(dbHandle.db, {
+      caseId: testCase.id,
+      step: { order: 0, action: "goto", value: "https://app.test" },
+    });
+    return {
+      dbHandle,
+      launcher,
+      runner,
+      root,
+      projectId: project.id,
+      caseId: testCase.id,
+    };
+  }
+
+  it("maps the profile onto one browser + one fresh context and passes every option", async () => {
+    const fx = profileFixture();
+    const authDir = authStateDir(fx.root, fx.projectId);
+    mkdirSync(authDir, { recursive: true });
+    const authFile = join(authDir, "login.json");
+    writeFileSync(authFile, "{}");
+    setCaseProfile(fx.dbHandle.db, fx.caseId, {
+      viewportW: 800,
+      viewportH: 600,
+      device: "iPhone 11",
+      colorScheme: "dark",
+      locale: "en-GB",
+      timezone: "Europe/Rome",
+      storageState: "login.json",
+      dialogPolicy: "accept",
+    });
+
+    const started = fx.runner.runSingle({ caseId: fx.caseId, mode: "unsupervised" });
+    await started.done;
+
+    expect(fx.launcher.optionsSeen).toHaveLength(1);
+    expect(fx.launcher.optionsSeen[0]).toMatchObject({
+      title: "Login",
+      viewport: { width: 800, height: 600 },
+      device: "iPhone 11",
+      colorScheme: "dark",
+      locale: "en-GB",
+      timezoneId: "Europe/Rome",
+      storageState: authFile,
+      baseURL: "https://app.test",
+      dialogPolicy: "accept",
+    });
+    expect(fx.launcher.optionsSeen[0]?.videoDir).toBe(
+      caseArtifactsDir(fx.root, fx.projectId, started.suiteRunId, fx.caseId),
+    );
+    // One browser per run, exactly one context for the single case.
+    expect(fx.launcher.browsers).toHaveLength(1);
+    expect(fx.launcher.browsers[0]?.contexts).toHaveLength(1);
+    expect(fx.launcher.browsers[0]?.closed).toBe(true);
+  });
+
+  it("throws MissingAuthStateError before launching when the auth file is gone", () => {
+    const fx = profileFixture();
+    setCaseProfile(fx.dbHandle.db, fx.caseId, { storageState: "ghost.json" });
+    expect(() => fx.runner.runSingle({ caseId: fx.caseId, mode: "unsupervised" })).toThrow(
+      MissingAuthStateError,
+    );
+    expect(fx.launcher.browsers).toHaveLength(0);
+    expect(fx.launcher.contexts).toHaveLength(0);
+    // No run rows: a config error must not leave a perpetually "running" run.
+    expect(fx.dbHandle.db.select().from(suiteRuns).all()).toHaveLength(0);
+    expect(fx.dbHandle.db.select().from(caseRuns).all()).toHaveLength(0);
+  });
+
+  it("omits baseURL and the emulation fields when no profile is stored", async () => {
+    const fx = profileFixture();
+    const started = fx.runner.runSingle({ caseId: fx.caseId, mode: "unsupervised" });
+    await started.done;
+    const options = fx.launcher.optionsSeen[0];
+    expect(options?.baseURL).toBe("https://app.test");
+    expect(options?.viewport).toBeUndefined();
+    expect(options?.device).toBeUndefined();
+    expect(options?.storageState).toBeUndefined();
+    expect(options?.dialogPolicy).toBeUndefined();
   });
 });

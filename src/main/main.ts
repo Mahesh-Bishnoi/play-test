@@ -52,16 +52,20 @@ void app.whenReady().then(() => {
   closeDb = () => {
     handle.close();
   };
+  const artifactsRoot = defaultArtifactsRoot();
   registerCrudHandlers((channel, listener) => {
     ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
   }, handle.db);
-  registerRecorderHandlers((channel, listener) => {
-    ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
-  });
+  registerRecorderHandlers(
+    (channel, listener) => {
+      ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
+    },
+    handle.db,
+    { artifactsRoot },
+  );
   registerSystemHandlers((channel, listener) => {
     ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
   });
-  const artifactsRoot = defaultArtifactsRoot();
   let suiteRunner: SuiteRunner;
   const runner = new SingleCaseRunner(handle.db, {
     launchBrowser: playwrightLauncher(),

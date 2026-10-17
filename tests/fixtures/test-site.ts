@@ -12,6 +12,7 @@ import { once } from "node:events";
  * - `/form`        order form: text input, select, checkbox, submit
  * - `/result`      echoes the submitted order in `#summary`
  * - `/products`    searchable list (`?q=` filters server-side)
+ * - `/secure`      cookie-gated: `#welcome` only with a `session=ok` cookie
  */
 
 const PRODUCTS = ["Apple", "Banana", "Cherry", "Date", "Elderberry"];
@@ -95,6 +96,18 @@ function productsPage(params: URLSearchParams): string {
   );
 }
 
+/**
+ * Cookie-gated page (M14 e2e): the auth state file sets `session=ok`, so
+ * providing it changes what this route renders.
+ */
+function securePage(cookieHeader: string | undefined): string {
+  const signedIn = (cookieHeader ?? "").split(";").some((cookie) => cookie.trim() === "session=ok");
+  if (signedIn) {
+    return shell("Secure area", '<h1 id="welcome">Welcome back</h1>');
+  }
+  return shell("Sign in", '<h1 id="signin">Sign in</h1><p>Please log in to continue.</p>');
+}
+
 export interface TestSite {
   baseUrl: string;
   close: () => Promise<void>;
@@ -117,6 +130,9 @@ export async function startTestSite(): Promise<TestSite> {
         break;
       case "/products":
         body = productsPage(url.searchParams);
+        break;
+      case "/secure":
+        body = securePage(req.headers.cookie);
         break;
       default:
         status = 404;

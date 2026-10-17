@@ -5,6 +5,7 @@ import type { DatabaseHandle } from "../src/main/db.js";
 import type { IpcHandleFn } from "../src/main/ipc-register.js";
 import { registerCrudHandlers } from "../src/main/ipc-register.js";
 import { createCase, deleteCase, getCase, listCases } from "../src/main/ipc-cases.js";
+import { getCaseProfile, setCaseProfile } from "../src/main/ipc-profiles.js";
 import { createProject } from "../src/main/ipc-projects.js";
 import {
   deleteStep,
@@ -79,7 +80,7 @@ describe("suite service (WS2)", () => {
     );
   });
 
-  it("case delete drops steps, test-data, and suite joins but keeps the suite", () => {
+  it("case delete drops steps, test-data, suite joins, and the profile but keeps the suite", () => {
     handle = createDatabase(":memory:");
     const project = createProject(handle.db, { name: "P" });
     const suite = createSuite(handle.db, { projectId: project.id, name: "S" });
@@ -89,11 +90,13 @@ describe("suite service (WS2)", () => {
       step: { order: 0, action: "goto", value: "https://x.test" },
     });
     setTestData(handle.db, { caseId: testCase.id, data: { user: "ada" } });
+    setCaseProfile(handle.db, testCase.id, { device: "iPhone 11" });
     setSuiteCases(handle.db, suite.id, [testCase.id]);
 
     deleteCase(handle.db, testCase.id);
     expect(listCases(handle.db, project.id)).toHaveLength(0);
     expect(getSuiteCaseIds(handle.db, suite.id)).toHaveLength(0);
+    expect(getCaseProfile(handle.db, testCase.id)).toBeNull();
     expect(() => getCase(handle.db, testCase.id)).toThrow();
   });
 });

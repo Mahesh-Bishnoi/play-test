@@ -120,27 +120,115 @@ describe("renderer api report wrappers (M8, PLAN §18.1)", () => {
   });
 });
 
-describe("renderer api recorder wrappers (M9, PLAN §18.2)", () => {
-  it("sends emulation options only when provided", async () => {
-    const calls = stubPlaytest(() => Promise.resolve({ pid: 4242 }));
-    await expect(api.startRecorder("https://example.com")).resolves.toEqual({ pid: 4242 });
-    await expect(
-      api.startRecorder("https://example.com", {
-        viewport: { width: 390, height: 844 },
-        colorScheme: "dark",
-      }),
-    ).resolves.toEqual({ pid: 4242 });
-    expect(calls).toEqual([
-      { channel: "recorder:start", payload: { baseUrl: "https://example.com" } },
-      {
-        channel: "recorder:start",
-        payload: {
-          baseUrl: "https://example.com",
-          viewport: { width: 390, height: 844 },
+describe("renderer api case-profile wrappers (M14, PLAN §M14 item 7)", () => {
+  it("loads the case profile through profile:get and unwraps the envelope", async () => {
+    const calls = stubPlaytest((channel) => {
+      expect(channel).toBe("profile:get");
+      return Promise.resolve({
+        profile: {
+          caseId: "c1",
+          device: "iPhone 11",
+          viewportW: 390,
+          viewportH: 844,
           colorScheme: "dark",
+          locale: "en-GB",
+          timezone: "Europe/Rome",
+          storageState: "login.json",
+          dialogPolicy: "accept",
+          updatedAt: 1_700_000_000_000,
         },
-      },
+      });
+    });
+    await expect(api.profileGet("c1")).resolves.toMatchObject({
+      caseId: "c1",
+      viewportW: 390,
+      viewportH: 844,
+      storageState: "login.json",
+      dialogPolicy: "accept",
+    });
+    expect(calls).toEqual([{ channel: "profile:get", payload: { caseId: "c1" } }]);
+  });
+
+  it("returns null when the case has no profile row", async () => {
+    const calls = stubPlaytest(() => Promise.resolve({ profile: null }));
+    await expect(api.profileGet("c1")).resolves.toBeNull();
+    expect(calls).toEqual([{ channel: "profile:get", payload: { caseId: "c1" } }]);
+  });
+
+  it("writes the profile through profile:set and parses the stored row", async () => {
+    const calls = stubPlaytest((channel, payload) => {
+      expect(channel).toBe("profile:set");
+      expect(payload).toEqual({ caseId: "c1", profile: { viewportW: 1280, viewportH: 720 } });
+      return Promise.resolve({
+        caseId: "c1",
+        viewportW: 1280,
+        viewportH: 720,
+        updatedAt: 42,
+      });
+    });
+    await expect(api.profileSet("c1", { viewportW: 1280, viewportH: 720 })).resolves.toMatchObject({
+      caseId: "c1",
+      viewportW: 1280,
+      updatedAt: 42,
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("treats an all-default write as cleared (null)", async () => {
+    stubPlaytest(() => Promise.resolve(null));
+    await expect(api.profileSet("c1", {})).resolves.toBeNull();
+  });
+
+  it("rejects malformed profile responses", async () => {
+    stubPlaytest(() => Promise.resolve({ profile: { caseId: 42 } }));
+    await expect(api.profileGet("c1")).rejects.toThrow();
+  });
+});
+
+describe("renderer api case wrappers (M14)", () => {
+  it("sends the case URL through case:update and parses the stored case", async () => {
+    const calls = stubPlaytest((channel, payload) => {
+      expect(channel).toBe("case:update");
+      expect(payload).toEqual({ id: "c1", url: "https://shop.test/checkout" });
+      return Promise.resolve({
+        id: "c1",
+        projectId: "p1",
+        name: "Checkout",
+        url: "https://shop.test/checkout",
+        createdAt: 1_700_000_000_000,
+      });
+    });
+    const updated = await api.updateCase("c1", { url: "https://shop.test/checkout" });
+    expect(updated).toMatchObject({ id: "c1", url: "https://shop.test/checkout" });
+    expect(calls).toEqual([
+      { channel: "case:update", payload: { id: "c1", url: "https://shop.test/checkout" } },
     ]);
+  });
+
+  it("carries a null url to clear the case URL", async () => {
+    const calls = stubPlaytest(() =>
+      Promise.resolve({ id: "c1", projectId: "p1", name: "Checkout", createdAt: 1 }),
+    );
+    await expect(api.updateCase("c1", { url: null })).resolves.toMatchObject({ id: "c1" });
+    expect(calls).toEqual([{ channel: "case:update", payload: { id: "c1", url: null } }]);
+  });
+
+  it("rejects a malformed case response", async () => {
+    stubPlaytest(() => Promise.resolve({ id: 42 }));
+    await expect(api.updateCase("c1", { url: null })).rejects.toThrow();
+  });
+});
+
+describe("renderer api recorder wrappers (M9/M14, PLAN §18.2)", () => {
+  it("starts the recorder from the case id only (M14)", async () => {
+    const calls = stubPlaytest(() => Promise.resolve({ pid: 4242 }));
+    await expect(api.startRecorder("c1")).resolves.toEqual({ pid: 4242 });
+    expect(calls).toEqual([{ channel: "recorder:start", payload: { caseId: "c1" } }]);
+  });
+
+  it("rejects a malformed recorder response", async () => {
+    stubPlaytest(() => Promise.resolve({ pid: "nope" }));
+    await expect(api.startRecorder("c1")).rejects.toThrow();
   });
 });
 

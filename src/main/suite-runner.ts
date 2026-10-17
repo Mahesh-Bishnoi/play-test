@@ -24,13 +24,16 @@ import type { StepStatus } from "../shared/step-types.js";
 import type { AppDatabase } from "./db.js";
 import { caseTracePath, caseVideoPath, ensureCaseDir, stepScreenshotPath } from "./artifacts.js";
 import { getCase } from "./ipc-cases.js";
+import { getCaseProfile } from "./ipc-profiles.js";
+import { getProject } from "./ipc-projects.js";
 import { getSuite, getSuiteCaseIds } from "./ipc-suites.js";
 import { getTestData, listSteps } from "./ipc-steps.js";
 import { tryWriteSuiteHtmlReport } from "./reports.js";
 import { caseRuns, stepRuns, suiteRuns } from "./schema.js";
-import type { BrowserLauncher, EmitRunEvent, RunContext } from "./runner.js";
+import type { BrowserHandle, BrowserLauncher, EmitRunEvent, RunContext } from "./runner.js";
 import {
   captureStepScreenshot,
+  contextLaunchOptionsFromProfile,
   executeStep,
   formatStepError,
   RunAlreadyActiveError,
@@ -256,17 +259,40 @@ export class SuiteRunner {
         const workers = Array.from(
           { length: this.workerCount(caseIds.length) },
           async (): Promise<void> => {
-            while (queue.length > 0) {
-              if (this.cancelled.has(suiteRunId)) {
-                return;
+            // One browser per worker (M14); every case gets a fresh context so
+            // profiles never leak across cases. Created lazily so an empty or
+            // fail-fast case never pays for a browser.
+            const browsers: BrowserHandle[] = [];
+            const getBrowser = async (): Promise<BrowserHandle> => {
+              const existing = browsers[0];
+              if (existing !== undefined) {
+                return existing;
               }
-              const caseId = queue.shift();
-              if (caseId === undefined) {
-                return;
+              const created = await this.launchBrowser.launchBrowser(true);
+              browsers.push(created);
+              return created;
+            };
+            try {
+              while (queue.length > 0) {
+                if (this.cancelled.has(suiteRunId)) {
+                  return;
+                }
+                const caseId = queue.shift();
+                if (caseId === undefined) {
+                  return;
+                }
+                const caseRunId = caseRunIds.get(caseId);
+                if (caseRunId !== undefined) {
+                  await this.runOneCase(getBrowser, suiteRunId, caseId, caseRunId);
+                }
               }
-              const caseRunId = caseRunIds.get(caseId);
-              if (caseRunId !== undefined) {
-                await this.runOneCase(suiteRunId, caseId, caseRunId);
+            } finally {
+              for (const owned of browsers) {
+                try {
+                  await owned.close();
+                } catch {
+                  // Already closing — the suite still settles.
+                }
               }
             }
           },
@@ -288,8 +314,13 @@ export class SuiteRunner {
     return { suiteRunId, done };
   }
 
-  /** Settle one case: launch → steps → pass/fail/cancel → artifacts. */
-  private async runOneCase(suiteRunId: string, caseId: string, caseRunId: string): Promise<void> {
+  /** Settle one case: launch context → steps → pass/fail/cancel → artifacts. */
+  private async runOneCase(
+    getBrowser: () => Promise<BrowserHandle>,
+    suiteRunId: string,
+    caseId: string,
+    caseRunId: string,
+  ): Promise<void> {
     const testCase = getCase(this.db, caseId);
     const steps = listSteps(this.db, caseId);
     const data = getTestData(this.db, { caseId });
@@ -325,7 +356,19 @@ export class SuiteRunner {
     const caseDir = ensureCaseDir(this.artifactsRoot, testCase.projectId, suiteRunId, caseId);
     let context: RunContext;
     try {
-      context = await this.launchBrowser.launch(true, caseDir, testCase.name);
+      // Resolve the case profile (M14) before the browser: a missing auth-state
+      // file is a config error, caught by the same per-case failure path as a
+      // launch failure. The worker's browser is shared; the context is fresh.
+      const options = contextLaunchOptionsFromProfile({
+        artifactsRoot: this.artifactsRoot,
+        projectId: testCase.projectId,
+        caseName: testCase.name,
+        projectBaseUrl: getProject(this.db, testCase.projectId).baseUrl,
+        profile: getCaseProfile(this.db, caseId),
+        videoDir: caseDir,
+      });
+      const browser = await getBrowser();
+      context = await browser.newContext(options);
     } catch (err) {
       for (const step of steps) {
         this.createStepRun(caseRunId, step.id, step.order, "skipped", null);

@@ -13,6 +13,7 @@ import { ProjectSchema } from "../shared/schema.js";
 import type { AppDatabase } from "./db.js";
 import { defaultArtifactsRoot, removeProjectArtifacts } from "./artifacts.js";
 import {
+  caseProfiles,
   caseRuns,
   stepRuns,
   suiteRuns,
@@ -109,7 +110,7 @@ export function updateProject(db: AppDatabase, input: ProjectUpdatePayload): Pro
 
 /**
  * Delete a project and everything scoped to it (suites, cases, steps,
- * test-data, join rows, all run history) plus its artifact tree.
+ * test-data, case profiles, join rows, all run history) plus its artifact tree.
  * Sequential deletes are safe: single writer, no concurrent IPC mutation
  * mid-delete. `opts.artifactsRoot` is injectable so tests use a tmp dir;
  * production passes the real ~/PlayTestData root.
@@ -196,6 +197,7 @@ export function deleteProject(
     db.delete(testSuites).where(inArray(testSuites.id, suiteIds)).run();
   }
   if (caseIds.length > 0) {
+    db.delete(caseProfiles).where(inArray(caseProfiles.caseId, caseIds)).run();
     db.delete(testSteps).where(inArray(testSteps.caseId, caseIds)).run();
     db.delete(testData).where(inArray(testData.caseId, caseIds)).run();
     db.delete(testCases).where(inArray(testCases.id, caseIds)).run();

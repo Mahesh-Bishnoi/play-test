@@ -107,7 +107,8 @@ the query builder only; there is no migration runner.
 
 - `projects(id, name, baseUrl, createdAt)`
 - `test_suites(id, projectId, name, createdAt)`
-- `test_cases(id, projectId, name, description, url, createdAt)`
+- `test_cases(id, projectId, name, description, url, createdAt)` — `url` is the per-case
+  recording start URL; when empty the recording falls back to the project `baseUrl`
 - `suite_test_cases(suiteId, caseId)` — PK(suiteId, caseId)
 - `test_steps(id, caseId, order, action, selector, value, timeoutMs, editedAt)` —
   `action` is plain text; valid values = `STEP_ACTIONS` (25 today, 33 after M15 — see
@@ -129,7 +130,8 @@ Artifacts: `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/step-<NN>.png, fail
 - CRUD: `project:*` (create/list/get/update/delete), `suite:*` (+ `suite:setCases`),
   `case:*` (+ `case:get` returns `{case, steps}`), `step:*` (upsert/move/delete/reorder),
   `testdata:get/set`, `profile:get({caseId}) → {profile | null}` / `profile:set({caseId, profile})` (M14).
-- Recorder: `recorder:start({caseId})` — main resolves project `baseUrl` + the case profile
+- Recorder: `recorder:start({caseId})` — main resolves the case `url` (falling back to the
+  project `baseUrl`), then the case profile
   (M14; previously explicit emulation/storage fields). `recorder:stop() → {steps, unsupported:
   [{line, reason}], raw}` (M15 adds `unsupported`).
 - Runner: `runner:runSingle({caseId, mode, actionDelayMs?})`, `runner:runSuite({suiteId, caseIds[], mode:'unsupervised'})`,
@@ -148,9 +150,9 @@ Artifacts: `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/step-<NN>.png, fail
 - SuiteDetailPage: membership + runs only (creation lives in sidebar); checkbox table, search
   doubles as keyword run-filter, Run-filtered scope, Re-run-last-failed, View report.
 - CaseDetailPage: linear `@xyflow/react` graph + step editor (action/selector/value+`{{key}}`
-  hints/timeout) + KV TestDataEditor + Record options disclosure (viewport/device/theme/
-  locale/timezone/storage-state, persisted in localStorage today; M14 moves these to the
-  per-case profile via `profile:get/set`) + import preview + paste-locator
+  hints/timeout) + KV TestDataEditor + Case URL field + Record options disclosure
+  (viewport/device/theme/locale/timezone/storage-state filenames/dialog policy, persisted
+  per case via `profile:get/set`) + import preview + paste-locator
   insert + Supervised (with speed selector) / Unsupervised run + live colors + resume/cancel + log.
 - RunReportPage: suite summary, per-case step grid with thumbnails, Open-trace buttons,
   Export PDF, Re-run failed.

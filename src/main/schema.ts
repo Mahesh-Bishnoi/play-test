@@ -62,6 +62,22 @@ export const testData = sqliteTable(
   (t) => [primaryKey({ columns: [t.caseId, t.key] })],
 );
 
+// Per-case recording/run environment (M14). One row per case at most; no row
+// means defaults. `case_id` is the PK (no FK by convention — services delete).
+export const caseProfiles = sqliteTable("case_profiles", {
+  caseId: text("case_id").primaryKey(),
+  device: text("device"),
+  viewportW: integer("viewport_w"),
+  viewportH: integer("viewport_h"),
+  colorScheme: text("color_scheme"),
+  locale: text("locale"),
+  timezone: text("timezone"),
+  storageState: text("storage_state"),
+  saveStorageState: text("save_storage_state"),
+  dialogPolicy: text("dialog_policy"),
+  updatedAt: integer("updated_at").notNull(),
+});
+
 export const suiteRuns = sqliteTable("suite_runs", {
   id: text("id").primaryKey(),
   suiteId: text("suite_id"),

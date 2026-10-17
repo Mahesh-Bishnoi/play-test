@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { CaseProfileInputSchema } from "./schema.js";
 import { TestStepSchema } from "./step-types.js";
 
 // Versioned file interchange for project/suite/case import/export.
@@ -32,6 +33,13 @@ export const ExportCaseSchema = z.object({
   url: z.string().trim().max(2000).optional(),
   steps: z.array(ExportStepSchema).max(5000),
   testData: testDataRecord,
+  // Case profile (M14, SPECS §2/§4) — the recorded environment travels with
+  // the case. Auth state FILE CONTENTS never travel: the profile only holds
+  // filenames (`storageState` / `saveStorageState`) under
+  // `~/PlayTestData/<projectId>/auth/`, and the importer gets a fresh project
+  // id, so those files are intentionally not part of a bundle. Additive
+  // optional field: no EXPORT_VERSION bump — old readers strip it.
+  profile: CaseProfileInputSchema.optional(),
 });
 export type ExportCase = z.infer<typeof ExportCaseSchema>;
 

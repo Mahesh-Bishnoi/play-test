@@ -20,6 +20,7 @@ import {
 } from "../src/main/git-sync.js";
 import type { SyncAuthor } from "../src/main/git-sync.js";
 import { createCase, getCase, updateCase } from "../src/main/ipc-cases.js";
+import { getCaseProfile, setCaseProfile } from "../src/main/ipc-profiles.js";
 import { createProject, getProject, updateProject } from "../src/main/ipc-projects.js";
 import { getTestData, listSteps, setTestData, upsertStep } from "../src/main/ipc-steps.js";
 import {
@@ -105,6 +106,13 @@ describeE2E("e2e git sync: two machines, one central repo", () => {
       url: "http://127.0.0.1:9/",
     });
     setTestData(dbA, { caseId: caseA.id, data: { base: "http://127.0.0.1:9", customer: "Ada" } });
+    setCaseProfile(dbA, caseA.id, {
+      device: "Desktop Chrome",
+      locale: "en-GB",
+      storageState: "login.json",
+      saveStorageState: "saved.json",
+      dialogPolicy: "accept",
+    });
     upsertStep(dbA, {
       caseId: caseA.id,
       step: { order: 0, action: "goto", value: "{{base}}/" },
@@ -160,6 +168,14 @@ describeE2E("e2e git sync: two machines, one central repo", () => {
       base: "http://127.0.0.1:9",
       customer: "Ada",
     });
+    // The profile is part of the case entity: it clones with stable ids.
+    expect(getCaseProfile(dbB, caseA.id)).toMatchObject({
+      device: "Desktop Chrome",
+      locale: "en-GB",
+      storageState: "login.json",
+      saveStorageState: "saved.json",
+      dialogPolicy: "accept",
+    });
     // Nothing ran anywhere: no run rows synced.
     expect(dbB.select().from(suiteRuns).all()).toEqual([]);
     expect(dbB.select().from(caseRuns).all()).toEqual([]);
@@ -172,6 +188,7 @@ describeE2E("e2e git sync: two machines, one central repo", () => {
       caseId: caseA.id,
       step: { order: 2, action: "assert-text", selector: "h1", value: "Shop" },
     });
+    setCaseProfile(dbB, caseA.id, { locale: "fr-FR", storageState: "login.json" });
     const commitB = await syncCommit(dbB, cloned.projectId, {
       dir: dirB,
       author: BEN,
@@ -184,6 +201,11 @@ describeE2E("e2e git sync: two machines, one central repo", () => {
     expect(pullA.applied).toContain(caseA.id);
     expect(getCase(dbA, caseA.id).description).toBe("extended by Ben");
     expect(listSteps(dbA, caseA.id).length).toBe(3);
+    // The profile change rode along with the case entity.
+    expect(getCaseProfile(dbA, caseA.id)).toMatchObject({
+      locale: "fr-FR",
+      storageState: "login.json",
+    });
 
     // --- Divergent edits to DIFFERENT entities auto-merge ---
     updateSuite(dbA, { id: suiteA.id, name: "Smoke v2" });

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 
 import type { AppDatabase } from "./db.js";
 import { IPC_PAYLOADS } from "../shared/ipc-contract.js";
@@ -12,7 +12,7 @@ import {
   ReportOpenTracePayload,
 } from "../shared/ipc-contract.js";
 import { SystemBrowserStatusPayload, SystemInstallBrowserPayload } from "../shared/ipc-contract.js";
-import type { RecorderStartPayload as RecorderStart } from "../shared/ipc-contract.js";
+import type { RecorderStartOptions } from "../shared/ipc-contract.js";
 import {
   RunnerCancelPayload,
   RunnerResumePayload,
@@ -71,6 +71,13 @@ import type { TransferIoDeps } from "./transfer.js";
 import type { SingleCaseRunner } from "./runner.js";
 import type { SuiteRunner } from "./suite-runner.js";
 import { createCase, deleteCase, getCase, listCases, updateCase } from "./ipc-cases.js";
+import {
+  authStateDir,
+  getCaseProfile,
+  MissingAuthStateError,
+  resolveAuthStatePath,
+  setCaseProfile,
+} from "./ipc-profiles.js";
 import {
   createProject,
   deleteProject,
@@ -137,6 +144,8 @@ const CASE_CHANNELS = [
 const STEP_CHANNELS = ["step:upsert", "step:move", "step:delete", "step:reorder"] as const;
 
 const TESTDATA_CHANNELS = ["testdata:get", "testdata:set"] as const;
+
+const PROFILE_CHANNELS = ["profile:get", "profile:set"] as const;
 
 const RECORDER_CHANNELS = ["recorder:start", "recorder:stop"] as const;
 
@@ -262,13 +271,38 @@ export function registerTestDataHandlers(handle: IpcHandleFn, db: AppDatabase): 
   }
 }
 
-/** All CRUD channels (projects, suites, cases, steps, test-data). Main calls this. */
+/** All CRUD channels (projects, suites, cases, steps, test-data, case profiles). */
 export function registerCrudHandlers(handle: IpcHandleFn, db: AppDatabase): void {
   registerProjectHandlers(handle, db);
   registerSuiteHandlers(handle, db);
   registerCaseHandlers(handle, db);
   registerStepHandlers(handle, db);
   registerTestDataHandlers(handle, db);
+  registerProfileHandlers(handle, db);
+}
+
+/**
+ * Case-profile channels (M14, SPECS §5). `profile:get` returns
+ * `{ profile | null }`; `profile:set` validates the case exists, then upserts
+ * (an all-empty profile deletes the row and returns `null`). Payloads are
+ * zod-validated at the boundary; the service owns the row shape.
+ */
+export function registerProfileHandlers(handle: IpcHandleFn, db: AppDatabase): void {
+  for (const channel of PROFILE_CHANNELS) {
+    handle(channel, (rawPayload: unknown) => {
+      const payload = payloadSchema(channel).parse(rawPayload) as Record<string, unknown>;
+      const caseId = payload["caseId"] as string;
+      switch (channel) {
+        case "profile:get":
+          return { profile: getCaseProfile(db, caseId) };
+        case "profile:set":
+          // The profile hangs off a case — a stale/typo'd id must not write an
+          // orphan row (there are no FKs by convention).
+          getCase(db, caseId);
+          return setCaseProfile(db, caseId, payload["profile"]);
+      }
+    });
+  }
 }
 
 /**
@@ -499,20 +533,96 @@ export function registerSystemHandlers(
 }
 
 /**
+ * Resolve `recorder:start({caseId})` into the codegen argv options the
+ * `CodegenRecorder` consumes (M14, SPECS §2/§5). The recorder no longer takes
+ * emulation/auth fields from the renderer: main reads the case profile and the
+ * start URL and maps them onto `RecorderStartOptions` — one dialect, and
+ * absolute auth-state paths only main can compute.
+ *
+ * The start URL is the case's own `url` when set (the persisted per-case "Case
+ * URL" field is the source of truth), otherwise the project `baseUrl`. Throws
+ * before any spawn when both are empty or the profile names an auth-state file
+ * that is not on disk (recording against a missing login state would silently
+ * produce a broken flow).
+ */
+export function resolveRecorderStartOptions(
+  db: AppDatabase,
+  artifactsRoot: string,
+  caseId: string,
+): { baseUrl: string; options: RecorderStartOptions } {
+  const testCase = getCase(db, caseId);
+  const project = getProject(db, testCase.projectId);
+  const baseUrl = (testCase.url?.trim() ?? "") || (project.baseUrl?.trim() ?? "");
+  if (baseUrl === "") {
+    throw new Error("case has no URL and the project has no base URL — set one before recording");
+  }
+  const profile = getCaseProfile(db, caseId);
+  const options: RecorderStartOptions = {};
+  if (profile !== null) {
+    // Only a complete viewport maps — a half-filled pair is treated as unset
+    // (Playwright needs both dimensions).
+    if (profile.viewportW !== undefined && profile.viewportH !== undefined) {
+      options.viewport = { width: profile.viewportW, height: profile.viewportH };
+    }
+    if (profile.device !== undefined) {
+      options.device = profile.device;
+    }
+    if (profile.colorScheme !== undefined) {
+      options.colorScheme = profile.colorScheme;
+    }
+    if (profile.locale !== undefined) {
+      options.locale = profile.locale;
+    }
+    if (profile.timezone !== undefined) {
+      options.timezone = profile.timezone;
+    }
+    if (profile.storageState !== undefined) {
+      const loadPath = resolveAuthStatePath(
+        artifactsRoot,
+        testCase.projectId,
+        profile.storageState,
+      );
+      if (!existsSync(loadPath)) {
+        throw new MissingAuthStateError(profile.storageState);
+      }
+      options.storageStatePath = loadPath;
+    }
+    if (profile.saveStorageState !== undefined) {
+      // Create the auth dir up front so codegen's --save-storage can write it.
+      mkdirSync(authStateDir(artifactsRoot, testCase.projectId), { recursive: true });
+      options.saveStoragePath = resolveAuthStatePath(
+        artifactsRoot,
+        testCase.projectId,
+        profile.saveStorageState,
+      );
+    }
+  }
+  return { baseUrl, options };
+}
+
+/**
  * Recorder channels (WS4, PLAN §7). The recorder is process-wide (one codegen
  * window per app), so handlers take it as a param — default the shared
- * instance in prod, inject a fake in tests.
+ * instance in prod, inject a fake in tests. `artifactsRoot` locates the
+ * per-project auth-state directory the profile's storage filenames resolve
+ * under (M14).
  */
 export function registerRecorderHandlers(
   handle: IpcHandleFn,
-  recorder: CodegenRecorder = sharedRecorder,
+  db: AppDatabase,
+  deps: { artifactsRoot: string; recorder?: CodegenRecorder },
 ): void {
+  const recorder = deps.recorder ?? sharedRecorder;
   for (const channel of RECORDER_CHANNELS) {
     handle(channel, (rawPayload: unknown) => {
       switch (channel) {
         case "recorder:start": {
-          const payload = RecorderStartPayload.parse(rawPayload) as RecorderStart;
-          const { baseUrl, ...options } = payload;
+          const payload = RecorderStartPayload.parse(rawPayload);
+          const { baseUrl, options } = resolveRecorderStartOptions(
+            db,
+            deps.artifactsRoot,
+            payload.caseId,
+          );
           return recorder.start(baseUrl, options);
         }
         case "recorder:stop": {

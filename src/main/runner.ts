@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 
 import { eq } from "drizzle-orm";
-import { chromium } from "playwright";
+import { chromium, devices } from "playwright";
 import { expect } from "playwright/test";
 import type { Browser, BrowserContext, Locator, Page } from "playwright";
 
@@ -19,13 +20,15 @@ import {
   RunnerRunSinglePayload as RunnerRunSingleSchema,
 } from "../shared/ipc-contract.js";
 import { RunStepUpdateEvent } from "../shared/ipc-contract.js";
-import type { RunMode, StepRow } from "../shared/schema.js";
+import type { CaseProfile, RunMode, StepRow } from "../shared/schema.js";
 import { CHAIN_METHODS, PAGE_FACTORY_METHODS, splitTopLevel } from "../shared/locator-allowlist.js";
 import { MissingTestDataKeyError, substituteTestDataValue } from "../shared/step-types.js";
 import type { StepStatus } from "../shared/step-types.js";
 import type { AppDatabase } from "./db.js";
 import { caseTracePath, caseVideoPath, ensureCaseDir, stepScreenshotPath } from "./artifacts.js";
 import { getCase } from "./ipc-cases.js";
+import { getCaseProfile, MissingAuthStateError, resolveAuthStatePath } from "./ipc-profiles.js";
+import { getProject } from "./ipc-projects.js";
 import { getTestData, listSteps } from "./ipc-steps.js";
 import { caseRuns, stepRuns, suiteRuns } from "./schema.js";
 
@@ -100,12 +103,97 @@ export interface RunContext {
   groupEnd(): Promise<void>;
 }
 
+/**
+ * Everything a single browser context needs, resolved per case from its profile
+ * (M14, SPECS §2). `videoDir`/`title` are per-case; the rest mirror Playwright's
+ * `newContext` options. `baseURL` comes from the project, not the profile.
+ */
+export interface ContextLaunchOptions {
+  /** Playwright's raw recording dir (moved to `failed.webm` on failure). */
+  videoDir: string;
+  /** Trace display name (case name); tracing is per-context. */
+  title: string;
+  viewport?: { width: number; height: number };
+  device?: string;
+  colorScheme?: "light" | "dark";
+  locale?: string;
+  timezoneId?: string;
+  storageState?: string;
+  baseURL?: string;
+  dialogPolicy?: "default" | "accept" | "dismiss";
+}
+
+/** An open browser with a fresh-context factory (M14 launcher seam). */
+export interface BrowserHandle {
+  newContext(o: ContextLaunchOptions): Promise<RunContext>;
+  /** Tear down the whole browser (the owner closes it, not the context). */
+  close(): Promise<void>;
+}
+
 export interface BrowserLauncher {
   /**
-   * `videoDir` receives Playwright's raw recording (moved to `failed.webm`
-   * via `saveVideo` on failure); `title` is the trace's display name.
+   * One browser per run (single) or per suite worker; every case gets a fresh
+   * context via `BrowserHandle.newContext` so profiles never leak across cases.
    */
-  launch(headless: boolean, videoDir: string, title: string): Promise<RunContext>;
+  launchBrowser(headless: boolean): Promise<BrowserHandle>;
+}
+
+/**
+ * Build the `ContextLaunchOptions` for one case (M14): profile emulation +
+ * auth-state file (absolute path) + the project's `baseUrl`. A named auth-state
+ * file that is not on disk throws `MissingAuthStateError` *before* the caller
+ * launches anything, so a stale login never starts a silently-wrong run.
+ */
+export function contextLaunchOptionsFromProfile(input: {
+  artifactsRoot: string;
+  projectId: string;
+  caseName: string;
+  projectBaseUrl?: string;
+  profile: CaseProfile | null;
+  videoDir: string;
+}): ContextLaunchOptions {
+  const options: ContextLaunchOptions = {
+    videoDir: input.videoDir,
+    title: input.caseName,
+  };
+  if (input.projectBaseUrl !== undefined && input.projectBaseUrl !== "") {
+    options.baseURL = input.projectBaseUrl;
+  }
+  const profile = input.profile;
+  if (profile !== null) {
+    // An explicit viewport wins over the device preset; only a complete pair
+    // counts (Playwright needs both dimensions).
+    if (profile.viewportW !== undefined && profile.viewportH !== undefined) {
+      options.viewport = { width: profile.viewportW, height: profile.viewportH };
+    }
+    if (profile.device !== undefined) {
+      options.device = profile.device;
+    }
+    if (profile.colorScheme !== undefined) {
+      options.colorScheme = profile.colorScheme;
+    }
+    if (profile.locale !== undefined) {
+      options.locale = profile.locale;
+    }
+    if (profile.timezone !== undefined) {
+      options.timezoneId = profile.timezone;
+    }
+    if (profile.dialogPolicy !== undefined) {
+      options.dialogPolicy = profile.dialogPolicy;
+    }
+    if (profile.storageState !== undefined) {
+      const storagePath = resolveAuthStatePath(
+        input.artifactsRoot,
+        input.projectId,
+        profile.storageState,
+      );
+      if (!existsSync(storagePath)) {
+        throw new MissingAuthStateError(profile.storageState);
+      }
+      options.storageState = storagePath;
+    }
+  }
+  return options;
 }
 
 export type RunEventChannel = "run:step-update" | "run:log" | "run:finished";
@@ -584,6 +672,8 @@ interface LiveSession {
   projectId: string;
   mode: RunMode;
   actionDelayMs: number;
+  /** One browser per run; every run uses a single fresh context (M14). */
+  browser: BrowserHandle | null;
   context: RunContext | null;
   cancelled: boolean;
   busy: boolean;
@@ -653,16 +743,19 @@ export class SingleCaseRunner {
     const startedAt = this.now();
     const suiteRunId = this.generateId();
     const caseRunId = this.generateId();
-    this.db
-      .insert(suiteRuns)
-      .values({ id: suiteRunId, suiteId: null, mode: parsed.mode, status: "running", startedAt })
-      .run();
-    this.db
-      .insert(caseRuns)
-      .values({ id: caseRunId, suiteRunId, caseId: parsed.caseId, status: "running" })
-      .run();
+    const insertRunRows = (): void => {
+      this.db
+        .insert(suiteRuns)
+        .values({ id: suiteRunId, suiteId: null, mode: parsed.mode, status: "running", startedAt })
+        .run();
+      this.db
+        .insert(caseRuns)
+        .values({ id: caseRunId, suiteRunId, caseId: parsed.caseId, status: "running" })
+        .run();
+    };
 
     if (steps.length === 0) {
+      insertRunRows();
       this.finishSuite(suiteRunId, "passed");
       this.finishCase(caseRunId, "passed", startedAt);
       this.log("warn", "no steps — nothing to execute");
@@ -674,6 +767,7 @@ export class SingleCaseRunner {
     // still exists (failed step + finished event) so the graph shows red.
     const missingKey = firstMissingKey(steps, data);
     if (missingKey !== null) {
+      insertRunRows();
       this.createStepRun(
         caseRunId,
         missingKey.stepId,
@@ -694,12 +788,24 @@ export class SingleCaseRunner {
       return { suiteRunId, caseRunId, done: Promise.resolve() };
     }
 
+    // Resolve the run environment (M14) before writing any run row: a missing
+    // auth-state file is a config error that must not leave a perpetually
+    // "running" row behind (it throws synchronously to the caller).
     const caseDir = ensureCaseDir(
       this.artifactsRoot,
       testCase.projectId,
       suiteRunId,
       parsed.caseId,
     );
+    const launchOptions = contextLaunchOptionsFromProfile({
+      artifactsRoot: this.artifactsRoot,
+      projectId: testCase.projectId,
+      caseName: testCase.name,
+      projectBaseUrl: getProject(this.db, testCase.projectId).baseUrl,
+      profile: getCaseProfile(this.db, parsed.caseId),
+      videoDir: caseDir,
+    });
+    insertRunRows();
     const session: LiveSession = {
       suiteRunId,
       caseRunId,
@@ -707,6 +813,7 @@ export class SingleCaseRunner {
       projectId: testCase.projectId,
       mode: parsed.mode,
       actionDelayMs: parsed.actionDelayMs ?? 0,
+      browser: null,
       context: null,
       cancelled: false,
       busy: true,
@@ -716,14 +823,12 @@ export class SingleCaseRunner {
     this.session = session;
     const done = (async (): Promise<void> => {
       try {
-        const context = await this.launchBrowser.launch(
-          parsed.mode === "unsupervised",
-          caseDir,
-          testCase.name,
-        );
-        session.context = context;
+        const browser = await this.launchBrowser.launchBrowser(parsed.mode === "unsupervised");
+        session.browser = browser;
+        session.context = await browser.newContext(launchOptions);
         await this.executeFrom(session, steps, data, 0, startedAt);
       } catch (err) {
+        await this.closeSessionResources(session);
         this.abortSession(session, steps, err instanceof Error ? err.message : String(err));
       }
     })();
@@ -732,8 +837,9 @@ export class SingleCaseRunner {
 
   /**
    * Resume a paused supervised run in its live context (PLAN §8). Reloads
-   * steps + test data so edits made while paused apply. Anything else —
-   * finished, cancelled, unsupervised — has no live context.
+   * steps + test data so edits made while paused apply. The live context keeps
+   * the profile it launched with (M14) — re-resolving here would change the
+   * environment mid-run; anything without a live context has none to resume.
    */
   resumeFromStep(input: RunnerResumePayload): StartedRun {
     const parsed = RunnerResumeSchema.parse(input);
@@ -876,8 +982,8 @@ export class SingleCaseRunner {
         this.log("warn", "failed to discard trace");
       }
       await this.safeDiscardVideo(context);
-      await context.close();
     }
+    await this.closeSessionResources(session);
     this.finishCase(session.caseRunId, "passed", startedAt);
     this.finishSuite(session.suiteRunId, "passed");
     this.finish(session.suiteRunId, { total: 1, passed: 1, failed: 0, skipped: 0 });
@@ -910,8 +1016,8 @@ export class SingleCaseRunner {
       if (await this.safeSaveVideo(context, videoDest)) {
         videoPath = videoDest;
       }
-      await context.close();
     }
+    await this.closeSessionResources(session);
     if (videoPath !== null) {
       this.db.update(caseRuns).set({ videoPath }).where(eq(caseRuns.id, session.caseRunId)).run();
     }
@@ -944,8 +1050,8 @@ export class SingleCaseRunner {
         // Context may already be half-closed — cancellation still proceeds.
       }
       await this.safeDiscardVideo(context);
-      await context.close();
     }
+    await this.closeSessionResources(session);
     this.finishCase(session.caseRunId, "cancelled", session.startedAt);
     this.finishSuite(session.suiteRunId, "cancelled");
     // Contract has no cancelled bucket — cancellation counts as skipped.
@@ -953,6 +1059,32 @@ export class SingleCaseRunner {
     this.log("warn", "run cancelled — remaining steps skipped");
     if (this.session === session) {
       this.session = null;
+    }
+  }
+
+  /**
+   * Close the run's context then its browser (M14: the browser outlives a
+   * single context). Best-effort — teardown failures must not unseat a settled
+   * run.
+   */
+  private async closeSessionResources(session: LiveSession): Promise<void> {
+    const context = session.context;
+    if (context !== null) {
+      try {
+        await context.close();
+      } catch {
+        // Already closing — nothing left to do.
+      }
+      session.context = null;
+    }
+    const browser = session.browser;
+    if (browser !== null) {
+      try {
+        await browser.close();
+      } catch {
+        // Already closing — nothing left to do.
+      }
+      session.browser = null;
     }
   }
 
@@ -1897,13 +2029,12 @@ class PlaywrightRunPage implements RunPage {
 }
 
 class PlaywrightRunContext implements RunContext {
-  private readonly browser: Browser;
   private readonly context: BrowserContext;
   private readonly rawPage: Page;
   readonly page: RunPage;
+  private closed = false;
 
-  constructor(browser: Browser, context: BrowserContext, page: Page) {
-    this.browser = browser;
+  constructor(context: BrowserContext, page: Page) {
     this.context = context;
     this.rawPage = page;
     this.page = new PlaywrightRunPage(page);
@@ -1911,10 +2042,10 @@ class PlaywrightRunContext implements RunContext {
 
   async saveVideo(dest: string): Promise<void> {
     // Finalize the recording first: Playwright's saveAs needs the browser
-    // connection (it dies in `close()`), and the artifact is only complete
+    // connection (it dies in browser close), and the artifact is only complete
     // once the context closes. Read the Video via the held page — the object
     // outlives the context.
-    await this.context.close();
+    await this.close();
     const video = this.rawPage.video();
     if (video !== null) {
       await video.saveAs(dest);
@@ -1922,7 +2053,7 @@ class PlaywrightRunContext implements RunContext {
   }
 
   async discardVideo(): Promise<void> {
-    await this.context.close();
+    await this.close();
     const video = this.rawPage.video();
     if (video !== null) {
       await video.delete();
@@ -1930,9 +2061,13 @@ class PlaywrightRunContext implements RunContext {
   }
 
   async close(): Promise<void> {
+    // Only the context — the owning BrowserHandle closes the browser (M14).
     // Idempotent: saveVideo/discardVideo already closed the context.
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
     await this.context.close();
-    await this.browser.close();
   }
 
   async saveTrace(path: string | null): Promise<void> {
@@ -1957,6 +2092,58 @@ class PlaywrightRunContext implements RunContext {
   }
 }
 
+/** Attach the profile's dialog policy to a page (M14); `default` = no handler. */
+function attachDialogPolicy(page: Page, policy: ContextLaunchOptions["dialogPolicy"]): void {
+  if (policy === "accept") {
+    page.on("dialog", (dialog) => void dialog.accept());
+  } else if (policy === "dismiss") {
+    page.on("dialog", (dialog) => void dialog.dismiss());
+  }
+}
+
+/**
+ * One Chromium (MVP locked decision) with a fresh-context factory. The context
+ * maps the case profile onto Playwright's `newContext`: an explicit viewport
+ * wins over the device preset (device fields spread first), tracing starts with
+ * the case name, and `dialogPolicy` is attached per created page.
+ */
+class PlaywrightBrowserHandle implements BrowserHandle {
+  private readonly browser: Browser;
+
+  constructor(browser: Browser) {
+    this.browser = browser;
+  }
+
+  async newContext(o: ContextLaunchOptions): Promise<RunContext> {
+    const context = await this.browser.newContext({
+      // Device preset first so an explicit viewport/scheme below wins. Each
+      // field is spread only when set: passing an explicit `viewport: undefined`
+      // would clobber the device's viewport with Playwright's default.
+      ...(o.device !== undefined ? devices[o.device] : {}),
+      ...(o.viewport !== undefined ? { viewport: o.viewport } : {}),
+      ...(o.colorScheme !== undefined ? { colorScheme: o.colorScheme } : {}),
+      ...(o.locale !== undefined ? { locale: o.locale } : {}),
+      ...(o.timezoneId !== undefined ? { timezoneId: o.timezoneId } : {}),
+      ...(o.storageState !== undefined ? { storageState: o.storageState } : {}),
+      ...(o.baseURL !== undefined ? { baseURL: o.baseURL } : {}),
+      recordVideo: { dir: o.videoDir, size: o.viewport ?? { width: 1280, height: 720 } },
+    });
+    try {
+      await context.tracing.start({ screenshots: true, snapshots: true, title: o.title });
+      const page = await context.newPage();
+      attachDialogPolicy(page, o.dialogPolicy);
+      return new PlaywrightRunContext(context, page);
+    } catch (err) {
+      await context.close();
+      throw err;
+    }
+  }
+
+  async close(): Promise<void> {
+    await this.browser.close();
+  }
+}
+
 /**
  * `/pattern/flags` → RegExp; anything else is the literal string the matcher
  * compares against. Playwright 1.64 matches plain URL/title strings exactly
@@ -1977,17 +2164,9 @@ export function parseAssertMatcher(value: string): string | RegExp {
 /** Production launcher: Chromium only (MVP locked decision). */
 export function playwrightLauncher(): BrowserLauncher {
   return {
-    async launch(headless: boolean, videoDir: string, title: string): Promise<RunContext> {
+    async launchBrowser(headless: boolean): Promise<BrowserHandle> {
       const browser = await chromium.launch({ headless });
-      try {
-        const context = await browser.newContext({ recordVideo: { dir: videoDir } });
-        await context.tracing.start({ screenshots: true, snapshots: true, title });
-        const page = await context.newPage();
-        return new PlaywrightRunContext(browser, context, page);
-      } catch (err) {
-        await browser.close();
-        throw err;
-      }
+      return new PlaywrightBrowserHandle(browser);
     },
   };
 }

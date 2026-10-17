@@ -5,7 +5,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { eq } from "drizzle-orm";
 
-import type { BrowserLauncher, RunContext, RunPage } from "../src/main/runner.js";
+import type {
+  BrowserHandle,
+  BrowserLauncher,
+  ContextLaunchOptions,
+  RunContext,
+  RunPage,
+} from "../src/main/runner.js";
 import type { RunEventChannel } from "../src/main/runner.js";
 import { RunAlreadyActiveError, SingleCaseRunner } from "../src/main/runner.js";
 import {
@@ -19,6 +25,7 @@ import type { IpcHandleFn } from "../src/main/ipc-register.js";
 import { createDatabase } from "../src/main/db.js";
 import type { AppDatabase, DatabaseHandle } from "../src/main/db.js";
 import { createCase } from "../src/main/ipc-cases.js";
+import { authStateDir, setCaseProfile } from "../src/main/ipc-profiles.js";
 import { createProject } from "../src/main/ipc-projects.js";
 import { setTestData, upsertStep } from "../src/main/ipc-steps.js";
 import { createSuite, setSuiteCases } from "../src/main/ipc-suites.js";
@@ -173,28 +180,52 @@ class FakeContext implements RunContext {
   }
 }
 
+class FakeBrowser implements BrowserHandle {
+  contexts: FakeContext[] = [];
+  options: ContextLaunchOptions[] = [];
+  closed = false;
+
+  constructor(private readonly owner: FakeLauncher) {}
+
+  async newContext(o: ContextLaunchOptions): Promise<RunContext> {
+    const context = new FakeContext();
+    if (this.owner.contexts.length === 0 && this.owner.gateFirst !== null) {
+      context.page.gate = this.owner.gateFirst;
+    }
+    context.page.failClicks = this.owner.failClicks;
+    this.options.push(o);
+    this.contexts.push(context);
+    this.owner.contexts.push(context);
+    this.owner.optionsSeen.push(o);
+    this.owner.onCreate?.(context, this.contexts.length - 1);
+    return context;
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    this.owner.browsersClosed.push(this);
+  }
+}
+
 class FakeLauncher implements BrowserLauncher {
   contexts: FakeContext[] = [];
-  titlesSeen: string[] = [];
+  optionsSeen: ContextLaunchOptions[] = [];
+  browsers: FakeBrowser[] = [];
+  browsersClosed: FakeBrowser[] = [];
   launchFail: string | null = null;
   /** Applied to the first launched context only (deterministic gating). */
   gateFirst: Promise<void> | null = null;
   failClicks = false;
+  onCreate: ((context: FakeContext, index: number) => void) | null = null;
   private primed = 0;
 
-  async launch(_headless: boolean, videoDir: string, title = ""): Promise<RunContext> {
+  async launchBrowser(_headless: boolean): Promise<BrowserHandle> {
     if (this.launchFail !== null) {
       throw new Error(this.launchFail);
     }
-    const context = new FakeContext();
-    if (this.contexts.length === 0 && this.gateFirst !== null) {
-      context.page.gate = this.gateFirst;
-    }
-    context.page.failClicks = this.failClicks;
-    this.contexts.push(context);
-    this.titlesSeen.push(title);
-    void videoDir;
-    return context;
+    const browser = new FakeBrowser(this);
+    this.browsers.push(browser);
+    return browser;
   }
 
   primeVideo(root: string): string {
@@ -352,6 +383,10 @@ describe("runSuite (M6)", () => {
     });
     expect(fx.launcher.contexts).toHaveLength(2);
     expect(fx.launcher.contexts.every((c) => c.closed)).toBe(true);
+    // One browser per worker, a fresh context per case; every browser closes.
+    expect(fx.launcher.browsers).toHaveLength(2);
+    expect(fx.launcher.browsers.every((b) => b.closed)).toBe(true);
+    expect(fx.launcher.browsers.map((b) => b.contexts.length)).toEqual([1, 1]);
     const rows = fx.caseRunIdsOf(started.suiteRunId);
     expect(rows.map((r) => r.status).sort()).toEqual(["passed", "passed"]);
     // Screenshots exist for every executed step of both cases.
@@ -451,6 +486,10 @@ describe("runSuite (M6)", () => {
         failed: 0,
         skipped: 0,
       });
+      // One worker → one browser for both cases, but a fresh context each.
+      expect(fx.launcher.browsers).toHaveLength(1);
+      expect(fx.launcher.browsers[0]?.contexts).toHaveLength(2);
+      expect(fx.launcher.browsers[0]?.closed).toBe(true);
     } finally {
       release();
     }
@@ -470,14 +509,11 @@ describe("runSuite (M6)", () => {
       ]),
     );
     fx.launcher.failClicks = true;
-    const originalLaunch = fx.launcher.launch.bind(fx.launcher);
-    fx.launcher.launch = async (headless, videoDir) => {
-      const context = (await originalLaunch(headless, videoDir)) as FakeContext;
+    fx.launcher.onCreate = (context) => {
       // One recording per context (like production) — parallel cases must
       // not share a raw file: the passer's discard would unlink it before
       // the failer's retain (renameSync) runs.
       context.videoFile = fx.launcher.primeVideo(fx.root);
-      return context;
     };
     const started = fx.suite.runSuite({
       suiteId: fx.suiteId,
@@ -555,6 +591,39 @@ describe("runSuite (M6)", () => {
       failed: 0,
       skipped: 0,
     });
+  });
+
+  it("applies each case's own profile to its fresh context", async () => {
+    const fx = track(
+      makeFixture(
+        [
+          { steps: [{ action: "goto", value: "https://a.test" }] },
+          { steps: [{ action: "goto", value: "https://b.test" }] },
+        ],
+        { workerCount: () => 1 },
+      ),
+    );
+    // Case 0 loads an auth state file; case 1 is a device profile. The shared
+    // worker browser must NOT carry either across cases.
+    const authDir = authStateDir(fx.root, fx.projectId);
+    mkdirSync(authDir, { recursive: true });
+    const authFile = join(authDir, "login.json");
+    writeFileSync(authFile, "{}");
+    setCaseProfile(fx.db, fx.caseIds[0]!, { storageState: "login.json", dialogPolicy: "dismiss" });
+    setCaseProfile(fx.db, fx.caseIds[1]!, { device: "iPhone 11", locale: "en-GB" });
+
+    const started = fx.suite.runSuite({
+      suiteId: fx.suiteId,
+      caseIds: fx.caseIds,
+      mode: "unsupervised",
+    });
+    await started.done;
+
+    expect(fx.launcher.browsers).toHaveLength(1);
+    const byTitle = new Map(fx.launcher.optionsSeen.map((o) => [o.title, o]));
+    expect(byTitle.get("C0")).toMatchObject({ storageState: authFile, dialogPolicy: "dismiss" });
+    expect(byTitle.get("C1")).toMatchObject({ device: "iPhone 11", locale: "en-GB" });
+    expect(byTitle.get("C1")?.storageState).toBeUndefined();
   });
 
   it("marks the case failed when the browser cannot launch", async () => {

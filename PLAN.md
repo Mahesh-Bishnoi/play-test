@@ -11,7 +11,7 @@
 | Milestone | Status | Notes |
 | --- | --- | --- |
 | M13 — Playwright `expect` assertions + diagnostics | done | all items 1–7 landed |
-| M14 — Case profiles: recorded environment applied at run time | not started | after M13 |
+| M14 — Case profiles: recorded environment applied at run time | done | all items 1–9 landed |
 | M15 — Recorder & locator coverage + new actions | not started | after M14 |
 | M16 — Runtime parity: popups and downloads | not started | after M15 |
 
@@ -88,35 +88,36 @@ Playwright's full detail; failure evidence survives a supervised resume.
 
 ## M14 — Case profiles: recorded environment applied at run time
 
-Status: not started · Next: item 1 (`case_profiles` DDL)
+Status: done 2026-10-17 · Next milestone: M15 item 1 (parser `unsupported` reporting)
 
 Goal: recording environment == run environment; one persisted profile per case; one browser
 per suite worker with a fresh context per case.
 
-- [ ] **1.** Schema (additive only): `case_profiles` per `SPECS.md` §4 — in `src/main/db.ts`
+- [x] **1.** Schema (additive only): `case_profiles` per `SPECS.md` §4 — in `src/main/db.ts`
       `BOOTSTRAP_DDL` and the Drizzle `src/main/schema.ts`. Cleanup on case delete
       (`ipc-cases.ts`) and sync-pull deletes; no FKs (services enforce cleanup, existing
       convention).
-- [ ] **2.** Contract: `CaseProfile` type in `src/shared/schema.ts`; `CaseProfileSchema` +
+- [x] **2.** Contract: `CaseProfile` type in `src/shared/schema.ts`; `CaseProfileSchema` +
       `profile:get` / `profile:set` in `src/shared/ipc-contract.ts`, registered in
       `IPC_CONTRACT`. Validation: device regex as the current recorder payload; viewport
       ints 100..7680 / 100..4320; colorScheme light|dark; locale/timezone as today;
       `storageState`/`saveStorageState` are bare filenames matching
       `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`; `dialogPolicy` ∈ default|accept|dismiss;
       `updatedAt` server-set. Reuse the recorder regexes — one helper, no second dialect.
-- [ ] **3.** `src/main/ipc-profiles.ts` — get/set/delete helpers + `resolveAuthStatePath(projectId,
+- [x] **3.** `src/main/ipc-profiles.ts` — get/set/delete helpers + `resolveAuthStatePath(projectId,
       filename)` → `~/PlayTestData/<projectId>/auth/<filename>` (reject anything but a bare
       filename). Missing auth file at run time fails before launching with `auth state missing:
       <file> — record the login flow again or clear the profile field`.
-- [ ] **4.** Recorder: `recorder:start({caseId})`; the main handler resolves project `baseUrl`
-      + profile into the existing `RecorderStartOptions` (absolute storage paths,
+- [x] **4.** Recorder: `recorder:start({caseId})`; the main handler resolves the case `url`
+      (falling back to the project `baseUrl`, error only when both are empty) + profile into
+      the existing `RecorderStartOptions` (absolute storage paths,
       viewport/device/locale/timezone/colorScheme). `CodegenRecorder.start(baseUrl, options)`
       keeps its shape; resolution lives in `ipc-register.ts` (or a helper it calls).
-- [ ] **5.** Launcher seam (also removes the per-case browser cost):
+- [x] **5.** Launcher seam (also removes the per-case browser cost):
 
       ```ts
       interface ContextLaunchOptions {
-        videoDir: string; viewport?: { width: number; height: number }; device?: string;
+        videoDir: string; title: string; viewport?: { width: number; height: number }; device?: string;
         colorScheme?: "light" | "dark"; locale?: string; timezoneId?: string;
         storageState?: string; baseURL?: string; dialogPolicy?: "default" | "accept" | "dismiss";
       }
@@ -134,17 +135,17 @@ per suite worker with a fresh context per case.
       preset (hint in the UI when both are set). `RunContext.close()` closes only the context;
       the owner closes the browser — `SingleCaseRunner`: one browser per run; `SuiteRunner`: one
       per worker, `newContext` per case. Update `main.ts` wiring and both runner test fakes.
-- [ ] **6.** Runners: load the profile (`getCaseProfile(db, caseId)`) in `runSingle`,
+- [x] **6.** Runners: load the profile (`getCaseProfile(db, caseId)`) in `runSingle`,
       `SuiteRunner.runOneCase`, and `resumeFromStep` (an already-open context keeps its
       original profile). `runSingle` / `runSuite` payloads are unchanged.
-- [ ] **7.** Renderer: `CaseDetailPage.tsx` drops the `playtest.recorder.options` localStorage
+- [x] **7.** Renderer: `CaseDetailPage.tsx` drops the `playtest.recorder.options` localStorage
       key and loads/saves the profile through `profile:get`/`profile:set` (debounced, errors
       surfaced); `api.ts` gains `profileGet`/`profileSet`. Run buttons unchanged.
-- [ ] **8.** Transfer/sync: `ExportCaseSchema` (`src/shared/export-format.ts`) and git-sync
+- [x] **8.** Transfer/sync: `ExportCaseSchema` (`src/shared/export-format.ts`) and git-sync
       `SnapshotCaseSchema` gain an optional `profile`; import writes it; sync treats it as
       part of the case entity (write/pull/merge). No version bump — old readers strip the
       unknown field.
-- [ ] **9.** Tests — profile CRUD + validation, recorder start from the profile (fakes),
+- [x] **9.** Tests — profile CRUD + validation, recorder start from the profile (fakes),
       runners pass options to the fake launcher, transfer round-trip, `git-sync-merge`,
       `ipc-register` channels, and opening an existing DB creates the table. New
       `tests/e2e-profiles.test.ts`: a cookie-gated local-site page passes only with the

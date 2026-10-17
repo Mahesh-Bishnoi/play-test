@@ -9,6 +9,7 @@ import type { DatabaseHandle } from "../src/main/db.js";
 import type { IpcHandleFn } from "../src/main/ipc-register.js";
 import { registerTransferHandlers } from "../src/main/ipc-register.js";
 import { createCase, getCase, listCases } from "../src/main/ipc-cases.js";
+import { getCaseProfile, setCaseProfile } from "../src/main/ipc-profiles.js";
 import { createProject, getProject } from "../src/main/ipc-projects.js";
 import { getTestData, listSteps, setTestData, upsertStep } from "../src/main/ipc-steps.js";
 import { createSuite, getSuiteCaseIds, listSuites, setSuiteCases } from "../src/main/ipc-suites.js";
@@ -158,6 +159,62 @@ describeE2E("e2e transfer: real files on disk", () => {
 
       // Evidence listing (printed for the human log)
       console.log(JSON.stringify({ filePath, bytes: bytes.length }, null, 2));
+    } finally {
+      machineA.close();
+      machineB.close();
+    }
+  });
+
+  it("carries the case profile (filenames only) across real disk bytes", async () => {
+    const machineA = createDatabase(":memory:");
+    const machineB = createDatabase(":memory:");
+    try {
+      const seed = seedShop(machineA.db);
+      setCaseProfile(machineA.db, seed.loginId, {
+        device: "Desktop Chrome",
+        viewportW: 1440,
+        viewportH: 900,
+        colorScheme: "dark",
+        locale: "en-GB",
+        storageState: "login.json",
+        saveStorageState: "saved.json",
+        dialogPolicy: "accept",
+      });
+      const filePath = join(scratch, "profile.project.playtest.json");
+
+      const ipcA = fakeIpc();
+      registerTransferHandlers(ipcA.handle, machineA.db, diskIo(filePath, filePath));
+      const saved = (await ipcA.call("transfer:exportProject", { id: seed.projectId })) as {
+        saved: boolean;
+      };
+      expect(saved.saved).toBe(true);
+
+      // The bundle names the auth state file but never embeds its contents.
+      const bytes = await readFile(filePath, "utf8");
+      expect(bytes).toContain('"profile"');
+      expect(bytes).toContain("login.json");
+
+      const ipcB = fakeIpc();
+      registerTransferHandlers(ipcB.handle, machineB.db, diskIo(filePath, filePath));
+      const result = (await ipcB.call("transfer:importProject", {})) as {
+        imported: boolean;
+        summary?: { projectId: string };
+      };
+      expect(result.imported).toBe(true);
+      const projectId = result.summary?.projectId ?? "";
+      const login = listCases(machineB.db, projectId).find((c) => c.name === "Login");
+      expect(getCaseProfile(machineB.db, login?.id ?? "")).toMatchObject({
+        device: "Desktop Chrome",
+        viewportW: 1440,
+        viewportH: 900,
+        colorScheme: "dark",
+        locale: "en-GB",
+        storageState: "login.json",
+        saveStorageState: "saved.json",
+        dialogPolicy: "accept",
+      });
+      const stray = listCases(machineB.db, projectId).find((c) => c.name === "Stray");
+      expect(getCaseProfile(machineB.db, stray?.id ?? "")).toBeNull();
     } finally {
       machineA.close();
       machineB.close();

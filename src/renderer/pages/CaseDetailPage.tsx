@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { RunMode } from "../../shared/schema.js";
-import type { RecorderStartOptions } from "../../shared/ipc-contract.js";
+import type { CaseProfile, CaseProfileInput, RunMode } from "../../shared/schema.js";
 import type { StepAction, StepStatus } from "../../shared/step-types.js";
 import type { TestStep } from "../../shared/step-types.js";
 import { STEP_ACTIONS } from "../../shared/step-types.js";
@@ -22,86 +21,103 @@ const SUPERVISED_SPEEDS = [
   { label: "Very slow (3s)", ms: 3000 },
 ] as const;
 
+/** Debounce for persisting record-option edits to the case profile (M14). */
+const PROFILE_SAVE_DEBOUNCE_MS = 500;
+
+/** Debounce for persisting the per-case record-start URL (M14). */
+const CASE_URL_SAVE_DEBOUNCE_MS = 500;
+
+/** Case URL input → the `case:update` value (blank clears it to null). */
+function normalizeCaseUrl(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
 interface Props {
   caseId: string;
   onBack: () => void;
 }
 
-/** Last-used codegen emulation options (M9) — persisted across sessions. */
-interface RecordOptions {
+/**
+ * Record-options form (M14): mirrors the per-case `CaseProfileInput`. Values stay
+ * as the raw strings the inputs hold so blanks can be omitted on save; viewport
+ * width/height are parsed back to numbers.
+ */
+interface ProfileForm {
   viewportW: string;
   viewportH: string;
   device: string;
   colorScheme: "" | "light" | "dark";
   locale: string;
   timezone: string;
-  storageStatePath: string;
-  saveStoragePath: string;
+  /** Bare filenames resolved under `~/PlayTestData/<projectId>/auth/`. */
+  storageState: string;
+  saveStorageState: string;
+  dialogPolicy: "default" | "accept" | "dismiss";
 }
 
-const DEFAULT_RECORD_OPTIONS: RecordOptions = {
+const DEFAULT_PROFILE_FORM: ProfileForm = {
   viewportW: "",
   viewportH: "",
   device: "",
   colorScheme: "",
   locale: "",
   timezone: "",
-  storageStatePath: "",
-  saveStoragePath: "",
+  storageState: "",
+  saveStorageState: "",
+  dialogPolicy: "default",
 };
 
-const RECORDER_OPTIONS_KEY = "playtest.recorder.options";
-
-function loadRecordOptions(): RecordOptions {
-  try {
-    const raw = localStorage.getItem(RECORDER_OPTIONS_KEY);
-    if (raw === null) {
-      return DEFAULT_RECORD_OPTIONS;
-    }
-    const parsed = JSON.parse(raw) as Partial<RecordOptions>;
-    return {
-      viewportW: typeof parsed.viewportW === "string" ? parsed.viewportW : "",
-      viewportH: typeof parsed.viewportH === "string" ? parsed.viewportH : "",
-      device: typeof parsed.device === "string" ? parsed.device : "",
-      colorScheme:
-        parsed.colorScheme === "light" || parsed.colorScheme === "dark" ? parsed.colorScheme : "",
-      locale: typeof parsed.locale === "string" ? parsed.locale : "",
-      timezone: typeof parsed.timezone === "string" ? parsed.timezone : "",
-      storageStatePath: typeof parsed.storageStatePath === "string" ? parsed.storageStatePath : "",
-      saveStoragePath: typeof parsed.saveStoragePath === "string" ? parsed.saveStoragePath : "",
-    };
-  } catch {
-    return DEFAULT_RECORD_OPTIONS;
+/** Persisted profile (or none) → form values. */
+function profileToForm(profile: CaseProfile | null): ProfileForm {
+  if (profile === null) {
+    return DEFAULT_PROFILE_FORM;
   }
+  return {
+    viewportW: profile.viewportW !== undefined ? String(profile.viewportW) : "",
+    viewportH: profile.viewportH !== undefined ? String(profile.viewportH) : "",
+    device: profile.device ?? "",
+    colorScheme: profile.colorScheme ?? "",
+    locale: profile.locale ?? "",
+    timezone: profile.timezone ?? "",
+    storageState: profile.storageState ?? "",
+    saveStorageState: profile.saveStorageState ?? "",
+    dialogPolicy: profile.dialogPolicy ?? "default",
+  };
 }
 
-/** Form state → sparse `recorder:start` options (empty fields omitted). */
-function toRecorderOptions(form: RecordOptions): RecorderStartOptions {
-  const options: RecorderStartOptions = {};
-  const w = Number(form.viewportW);
-  const h = Number(form.viewportH);
-  if (form.viewportW.trim() !== "" && form.viewportH.trim() !== "") {
-    options.viewport = { width: w, height: h };
+/** Form values → sparse `CaseProfileInput` (blank fields omitted). */
+function toProfileInput(form: ProfileForm): CaseProfileInput {
+  const profile: CaseProfileInput = {};
+  if (form.viewportW.trim() !== "") {
+    profile.viewportW = Number(form.viewportW);
+  }
+  if (form.viewportH.trim() !== "") {
+    profile.viewportH = Number(form.viewportH);
   }
   if (form.device.trim() !== "") {
-    options.device = form.device.trim();
+    profile.device = form.device.trim();
   }
   if (form.colorScheme !== "") {
-    options.colorScheme = form.colorScheme;
+    profile.colorScheme = form.colorScheme;
   }
   if (form.locale.trim() !== "") {
-    options.locale = form.locale.trim();
+    profile.locale = form.locale.trim();
   }
   if (form.timezone.trim() !== "") {
-    options.timezone = form.timezone.trim();
+    profile.timezone = form.timezone.trim();
   }
-  if (form.storageStatePath.trim() !== "") {
-    options.storageStatePath = form.storageStatePath.trim();
+  if (form.storageState.trim() !== "") {
+    profile.storageState = form.storageState.trim();
   }
-  if (form.saveStoragePath.trim() !== "") {
-    options.saveStoragePath = form.saveStoragePath.trim();
+  if (form.saveStorageState.trim() !== "") {
+    profile.saveStorageState = form.saveStorageState.trim();
   }
-  return options;
+  // "default" is Playwright's own behavior — equivalent to leaving it unset.
+  if (form.dialogPolicy !== "default") {
+    profile.dialogPolicy = form.dialogPolicy;
+  }
+  return profile;
 }
 
 /**
@@ -121,8 +137,16 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
-  const [recordUrl, setRecordUrl] = useState("");
-  const [recordOpts, setRecordOpts] = useState<RecordOptions>(loadRecordOptions);
+  const [profileForm, setProfileForm] = useState<ProfileForm>(DEFAULT_PROFILE_FORM);
+  // Serialized last-saved profile so a reload (or the empty default) never writes
+  // back what the server already has, and edits save once typing pauses.
+  const savedProfileRef = useRef<string>(JSON.stringify(toProfileInput(DEFAULT_PROFILE_FORM)));
+  // Per-case record-start URL (M14): prefilled from the loaded case, saved on a
+  // debounce. Same no-rewrite guard as the profile form; the case id the prefill
+  // last ran for keeps a later refresh from clobbering in-flight edits.
+  const [caseUrl, setCaseUrl] = useState("");
+  const savedCaseUrlRef = useRef<string>(JSON.stringify(normalizeCaseUrl("")));
+  const urlPrefilledForRef = useRef<string | null>(null);
   const [preview, setPreview] = useState<{ steps: TestStep[]; raw: string } | null>(null);
   const [activeRun, setActiveRun] = useState<{
     suiteRunId: string;
@@ -143,7 +167,6 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
       .getCaseDetail(caseId)
       .then((loaded) => {
         setDetail(loaded);
-        setRecordUrl((prev) => (prev === "" ? (loaded.case.url ?? "") : prev));
         setSelectedId((prev) =>
           prev !== null && loaded.steps.some((s) => s.id === prev)
             ? prev
@@ -177,8 +200,110 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
     setRunLogs([]);
     setFailedOrder(null);
     setRunFinished(null);
+    // Reset the URL form + saved ref synchronously so a debounced write from the
+    // previous case can never land under the new case id (M14).
+    setCaseUrl("");
+    savedCaseUrlRef.current = JSON.stringify(normalizeCaseUrl(""));
+    urlPrefilledForRef.current = null;
     refresh();
   }, [caseId, refresh]);
+
+  // Load the persisted profile whenever the selected case changes (M14). The
+  // form (and the saved ref) reset synchronously first so a debounced save from
+  // the previous case can never land under the new case id.
+  useEffect(() => {
+    const empty = JSON.stringify(toProfileInput(DEFAULT_PROFILE_FORM));
+    setProfileForm(DEFAULT_PROFILE_FORM);
+    savedProfileRef.current = empty;
+    api
+      .profileGet(caseId)
+      .then((profile) => {
+        const form = profileToForm(profile);
+        setProfileForm(form);
+        savedProfileRef.current = JSON.stringify(toProfileInput(form));
+      })
+      .catch((err: unknown) => {
+        setError(formatApiError(err));
+      });
+  }, [caseId]);
+
+  // Debounced persistence: write ~500 ms after the last edit (M14). Skipped when
+  // the form still matches what the server has.
+  useEffect(() => {
+    const input = toProfileInput(profileForm);
+    const serialized = JSON.stringify(input);
+    if (serialized === savedProfileRef.current) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      api
+        .profileSet(caseId, input)
+        .then(() => {
+          savedProfileRef.current = serialized;
+        })
+        .catch((err: unknown) => {
+          setError(formatApiError(err));
+        });
+    }, PROFILE_SAVE_DEBOUNCE_MS);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [caseId, profileForm]);
+
+  // Prefill the Case URL from the loaded case once per case (M14). Keyed on the
+  // loaded case id so refreshes after other mutations don't overwrite in-flight
+  // edits, while a switch back to a case re-reads its stored URL.
+  useEffect(() => {
+    if (detail === null || urlPrefilledForRef.current === detail.case.id) {
+      return;
+    }
+    urlPrefilledForRef.current = detail.case.id;
+    const url = detail.case.url ?? "";
+    setCaseUrl(url);
+    savedCaseUrlRef.current = JSON.stringify(normalizeCaseUrl(url));
+  }, [detail]);
+
+  // Debounced URL persistence: write ~500 ms after the last edit (most recent
+  // wins), skipped when the value still matches what the server has (M14).
+  useEffect(() => {
+    const normalized = normalizeCaseUrl(caseUrl);
+    const serialized = JSON.stringify(normalized);
+    if (serialized === savedCaseUrlRef.current) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      api
+        .updateCase(caseId, { url: normalized })
+        .then((updated) => {
+          savedCaseUrlRef.current = serialized;
+          setDetail((prev) => (prev === null ? prev : { ...prev, case: updated }));
+        })
+        .catch((err: unknown) => {
+          setError(formatApiError(err));
+        });
+    }, CASE_URL_SAVE_DEBOUNCE_MS);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [caseId, caseUrl]);
+
+  const patchProfile = (patch: Partial<ProfileForm>): void => {
+    setProfileForm((prev) => ({ ...prev, ...patch }));
+  };
+
+  // Persist the URL now, bypassing the debounce — used before the recorder starts
+  // so it begins from exactly what the field shows (M14).
+  const flushCaseUrl = (): Promise<void> => {
+    const normalized = normalizeCaseUrl(caseUrl);
+    const serialized = JSON.stringify(normalized);
+    if (serialized === savedCaseUrlRef.current) {
+      return Promise.resolve();
+    }
+    return api.updateCase(caseId, { url: normalized }).then((updated) => {
+      savedCaseUrlRef.current = serialized;
+      setDetail((prev) => (prev === null ? prev : { ...prev, case: updated }));
+    });
+  };
 
   const mutate = (task: Promise<unknown>, done: string): void => {
     setBusy(true);
@@ -299,21 +424,18 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
   };
 
   const startRecording = (): void => {
-    const baseUrl = recordUrl.trim() === "" ? (detail?.case.url ?? "") : recordUrl.trim();
-    if (baseUrl === "") {
-      setError("Enter a URL to record from (or set the case URL first).");
-      return;
-    }
-    const options = toRecorderOptions(recordOpts);
-    try {
-      localStorage.setItem(RECORDER_OPTIONS_KEY, JSON.stringify(recordOpts));
-    } catch {
-      // Persistence is best-effort — recording must still work.
-    }
     setBusy(true);
     setError(null);
+    // Persist the form before codegen launches so the recording environment is
+    // exactly what is shown (M14) — main resolves baseUrl + the case profile.
+    const input = toProfileInput(profileForm);
     api
-      .startRecorder(baseUrl, options)
+      .profileSet(caseId, input)
+      .then(() => {
+        savedProfileRef.current = JSON.stringify(input);
+      })
+      .then(() => flushCaseUrl())
+      .then(() => api.startRecorder(caseId))
       .then(() => {
         setRecording(true);
         setNotice("Recording… interact with the codegen browser window, then Stop + import.");
@@ -720,16 +842,20 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
               {recording && <span className="pt-badge pt-badge-run">recording</span>}
             </div>
             <div className="pt-row">
-              <input
-                aria-label="Record URL"
-                className="pt-input pt-mono pt-w-280"
-                placeholder="https://…"
-                value={recordUrl}
-                disabled={busy || recording}
-                onChange={(e) => {
-                  setRecordUrl(e.target.value);
-                }}
-              />
+              <label className="pt-label-inline">
+                Case URL
+                <input
+                  aria-label="Case URL"
+                  className="pt-input pt-mono pt-w-280"
+                  placeholder="https://… (defaults to project base URL)"
+                  value={caseUrl}
+                  disabled={busy || recording}
+                  onChange={(e) => {
+                    setCaseUrl(e.target.value);
+                  }}
+                  title="URL the recorder starts from; leave empty to use the project base URL"
+                />
+              </label>
               {recording ? (
                 <button
                   type="button"
@@ -834,13 +960,19 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                 </>
               )}
             </div>
+            <p className="pt-hint pt-mt-12">
+              Recording starts from the Case URL; when it is empty the project base URL is used
+              (recording fails only if both are empty).
+            </p>
             {runFinished !== null && (
               <p role="status" className="pt-alert pt-alert-info pt-mt-12">
                 {runFinished}
               </p>
             )}
             <details className="pt-panel">
-              <summary>Record options (viewport, device, theme, locale, auth state)</summary>
+              <summary>
+                Record options (viewport, device, theme, locale, auth state, dialogs)
+              </summary>
               <div className="pt-row pt-mb-10">
                 <label className="pt-label-inline">
                   Viewport W
@@ -849,11 +981,10 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                     className="pt-input pt-mono"
                     inputMode="numeric"
                     placeholder="1280"
-                    value={recordOpts.viewportW}
+                    value={profileForm.viewportW}
                     disabled={busy || recording}
                     onChange={(e) => {
-                      const viewportW = e.target.value;
-                      setRecordOpts((prev) => ({ ...prev, viewportW }));
+                      patchProfile({ viewportW: e.target.value });
                     }}
                   />
                 </label>
@@ -864,11 +995,10 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                     className="pt-input pt-mono"
                     inputMode="numeric"
                     placeholder="720"
-                    value={recordOpts.viewportH}
+                    value={profileForm.viewportH}
                     disabled={busy || recording}
                     onChange={(e) => {
-                      const viewportH = e.target.value;
-                      setRecordOpts((prev) => ({ ...prev, viewportH }));
+                      patchProfile({ viewportH: e.target.value });
                     }}
                   />
                 </label>
@@ -878,11 +1008,10 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                     aria-label="Record device"
                     className="pt-input"
                     placeholder="iPhone 11"
-                    value={recordOpts.device}
+                    value={profileForm.device}
                     disabled={busy || recording}
                     onChange={(e) => {
-                      const device = e.target.value;
-                      setRecordOpts((prev) => ({ ...prev, device }));
+                      patchProfile({ device: e.target.value });
                     }}
                   />
                 </label>
@@ -891,11 +1020,10 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                   <select
                     aria-label="Record color scheme"
                     className="pt-select"
-                    value={recordOpts.colorScheme}
+                    value={profileForm.colorScheme}
                     disabled={busy || recording}
                     onChange={(e) => {
-                      const colorScheme = e.target.value as RecordOptions["colorScheme"];
-                      setRecordOpts((prev) => ({ ...prev, colorScheme }));
+                      patchProfile({ colorScheme: e.target.value as ProfileForm["colorScheme"] });
                     }}
                   >
                     <option value="">Default</option>
@@ -911,11 +1039,10 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                     aria-label="Record locale"
                     className="pt-input pt-mono"
                     placeholder="en-GB"
-                    value={recordOpts.locale}
+                    value={profileForm.locale}
                     disabled={busy || recording}
                     onChange={(e) => {
-                      const locale = e.target.value;
-                      setRecordOpts((prev) => ({ ...prev, locale }));
+                      patchProfile({ locale: e.target.value });
                     }}
                   />
                 </label>
@@ -925,48 +1052,63 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                     aria-label="Record timezone"
                     className="pt-input pt-mono"
                     placeholder="Europe/Rome"
-                    value={recordOpts.timezone}
+                    value={profileForm.timezone}
                     disabled={busy || recording}
                     onChange={(e) => {
-                      const timezone = e.target.value;
-                      setRecordOpts((prev) => ({ ...prev, timezone }));
+                      patchProfile({ timezone: e.target.value });
                     }}
                   />
+                </label>
+                <label className="pt-label-inline">
+                  Dialogs
+                  <select
+                    aria-label="Dialog policy"
+                    className="pt-select"
+                    value={profileForm.dialogPolicy}
+                    disabled={busy || recording}
+                    onChange={(e) => {
+                      patchProfile({ dialogPolicy: e.target.value as ProfileForm["dialogPolicy"] });
+                    }}
+                    title="How native dialogs (alert/confirm/prompt) are handled while recording and running"
+                  >
+                    <option value="default">Default (unhandled stay open)</option>
+                    <option value="accept">Auto-accept</option>
+                    <option value="dismiss">Auto-dismiss</option>
+                  </select>
                 </label>
               </div>
               <div className="pt-row">
                 <label className="pt-label-inline">
                   Load storage state
                   <input
-                    aria-label="Load storage state path"
+                    aria-label="Load storage state filename"
                     className="pt-input pt-mono"
-                    placeholder="/path/to/logged-in.json"
-                    value={recordOpts.storageStatePath}
+                    placeholder="login.json"
+                    value={profileForm.storageState}
                     disabled={busy || recording}
                     onChange={(e) => {
-                      const storageStatePath = e.target.value;
-                      setRecordOpts((prev) => ({ ...prev, storageStatePath }));
+                      patchProfile({ storageState: e.target.value });
                     }}
                   />
                 </label>
                 <label className="pt-label-inline">
                   Save storage state
                   <input
-                    aria-label="Save storage state path"
+                    aria-label="Save storage state filename"
                     className="pt-input pt-mono"
-                    placeholder="/path/to/save-here.json"
-                    value={recordOpts.saveStoragePath}
+                    placeholder="login.json"
+                    value={profileForm.saveStorageState}
                     disabled={busy || recording}
                     onChange={(e) => {
-                      const saveStoragePath = e.target.value;
-                      setRecordOpts((prev) => ({ ...prev, saveStoragePath }));
+                      patchProfile({ saveStorageState: e.target.value });
                     }}
                   />
                 </label>
               </div>
               <p className="pt-hint">
-                Record logged-in flows: log in once with Save set, then reuse the file via Load.
-                Invalid values are rejected before codegen launches.
+                Auth state takes a bare filename (e.g. login.json) kept in this project's auth
+                directory — log in once with Save set, then reuse the file via Load. An explicit
+                viewport overrides the device preset. These options drive both recording and runs.
               </p>
             </details>
           </div>

@@ -69,6 +69,66 @@ export const TestDataRowSchema = z.object({
 });
 export type TestDataRow = z.infer<typeof TestDataRowSchema>;
 
+// Case profile (M14, SPECS §4): the recording/run environment persisted per
+// case. Field validators are shared with the recorder options (ipc-contract) so
+// there is exactly one dialect. No row == defaults (1280x720, no auth).
+
+/** Playwright device-preset name — same shape the codegen argv builder accepts. */
+export const DeviceNameSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .regex(/^(?![-])(?!.*--)[A-Za-z0-9 _.()/+-]+$/, "unsafe device name");
+
+/** BCP47-like locale, e.g. `en-GB` (maps to codegen `--lang`). */
+export const LocaleSchema = z
+  .string()
+  .min(2)
+  .max(20)
+  .regex(/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/, "locale must be BCP47-like, e.g. en-GB");
+
+/** IANA-like timezone, e.g. `Europe/Rome`. */
+export const TimezoneSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .regex(/^(?!.*\.\.)(?!-)[A-Za-z0-9_+/-]+$/, "timezone must be IANA-like, e.g. Europe/Rome");
+
+/** Bare filename of an auth state file under `~/PlayTestData/<projectId>/auth/`. */
+export const AuthStateFilenameSchema = z
+  .string()
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/,
+    "auth state must be a bare filename, e.g. login.json",
+  );
+
+export const ProfileDialogPolicySchema = z.enum(["default", "accept", "dismiss"]);
+export type ProfileDialogPolicy = z.infer<typeof ProfileDialogPolicySchema>;
+
+/**
+ * Mutable profile fields. Absent field == not configured; absent `storageState`
+ * means no auth state is loaded, absent `saveStorageState` means none is saved.
+ */
+export const CaseProfileInputSchema = z.object({
+  device: DeviceNameSchema.optional(),
+  viewportW: z.number().int().min(100).max(7680).optional(),
+  viewportH: z.number().int().min(100).max(4320).optional(),
+  colorScheme: z.enum(["light", "dark"]).optional(),
+  locale: LocaleSchema.optional(),
+  timezone: TimezoneSchema.optional(),
+  storageState: AuthStateFilenameSchema.optional(),
+  saveStorageState: AuthStateFilenameSchema.optional(),
+  dialogPolicy: ProfileDialogPolicySchema.optional(),
+});
+export type CaseProfileInput = z.infer<typeof CaseProfileInputSchema>;
+
+/** Persisted profile row (M14) — `updatedAt` is server-set on write. */
+export const CaseProfileSchema = CaseProfileInputSchema.extend({
+  caseId: idField,
+  updatedAt: millisField,
+});
+export type CaseProfile = z.infer<typeof CaseProfileSchema>;
+
 export const SuiteRunSchema = z.object({
   id: idField,
   suiteId: idField.nullable(),

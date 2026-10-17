@@ -6,8 +6,10 @@ import * as git from "isomorphic-git";
 import { z } from "zod";
 
 import { ExportStepSchema } from "../shared/export-format.js";
+import { CaseProfileInputSchema } from "../shared/schema.js";
 import type { AppDatabase } from "./db.js";
 import { deleteCase, getCase, listCases } from "./ipc-cases.js";
+import { deleteCaseProfile, getCaseProfile, setCaseProfile } from "./ipc-profiles.js";
 import { getProject, updateProject } from "./ipc-projects.js";
 import { getTestData, listSteps } from "./ipc-steps.js";
 import { deleteSuite, getSuite, listSuites, updateSuite } from "./ipc-suites.js";
@@ -39,7 +41,7 @@ const SnapshotStepSchema = ExportStepSchema.extend({
 });
 type SnapshotStep = z.infer<typeof SnapshotStepSchema>;
 
-const SnapshotCaseSchema = z.object({
+export const SnapshotCaseSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/, "unsafe case id"),
   name: z.string().trim().min(1).max(200),
   description: z.string().max(5000).optional(),
@@ -48,6 +50,11 @@ const SnapshotCaseSchema = z.object({
   testData: z
     .record(z.string().regex(/^\w+$/, "key must match \\w+"), z.string().max(10000))
     .default({}),
+  // Case profile (M14) is part of the case entity: three-way merge and commit
+  // diffing see it as case content. Optional so snapshots written before M14
+  // (and older readers) still parse. Auth state FILE CONTENTS never sync —
+  // the profile holds filenames only (SPECS §2). Untrusted like the rest.
+  profile: CaseProfileInputSchema.optional(),
 });
 export type SnapshotCase = z.infer<typeof SnapshotCaseSchema>;
 
@@ -181,6 +188,10 @@ export function readSnapshotFromDb(db: AppDatabase, projectId: string): Snapshot
       ...(s.value !== undefined ? { value: s.value } : {}),
       ...(s.timeoutMs !== undefined ? { timeoutMs: s.timeoutMs } : {}),
     }));
+    // Profile identity is dropped (shared schema) and an empty profile is
+    // omitted, so "no row" and a blank row hash the same everywhere.
+    const stored = getCaseProfile(db, c.id);
+    const profile = stored === null ? null : CaseProfileInputSchema.parse(stored);
     cases[c.id] = {
       id: c.id,
       name: c.name,
@@ -188,6 +199,7 @@ export function readSnapshotFromDb(db: AppDatabase, projectId: string): Snapshot
       ...(c.url !== undefined ? { url: c.url } : {}),
       steps: steps as SnapshotStep[],
       testData: getTestData(db, { caseId: c.id }),
+      ...(profile !== null && Object.keys(profile).length > 0 ? { profile } : {}),
     };
   }
   return {
@@ -356,6 +368,9 @@ function insertCaseContent(db: AppDatabase, projectId: string, c: SnapshotCase, 
   for (const [key, value] of Object.entries(c.testData)) {
     db.insert(testData).values({ caseId: c.id, key, value }).run();
   }
+  // The profile is part of the case entity — set it authoritatively so a case
+  // re-inserted after a direct delete never keeps a stale profile row.
+  setCaseProfile(db, c.id, c.profile ?? {});
 }
 
 function insertSuiteContent(
@@ -973,6 +988,8 @@ function applyMergedToDb(
     } catch {
       // Already gone locally — merged state already holds.
     }
+    // No FKs by convention: delete the profile row with its case (M14).
+    deleteCaseProfile(db, id);
   }
   for (const id of suitesToDelete) {
     try {

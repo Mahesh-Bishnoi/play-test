@@ -5,6 +5,7 @@ import type { DatabaseHandle } from "../src/main/db.js";
 import type { IpcHandleFn } from "../src/main/ipc-register.js";
 import { registerTransferHandlers } from "../src/main/ipc-register.js";
 import { createCase, getCase, listCases } from "../src/main/ipc-cases.js";
+import { getCaseProfile, setCaseProfile } from "../src/main/ipc-profiles.js";
 import { createProject, getProject, listProjects } from "../src/main/ipc-projects.js";
 import { getTestData, listSteps, setTestData, upsertStep } from "../src/main/ipc-steps.js";
 import { createSuite, getSuiteCaseIds, listSuites, setSuiteCases } from "../src/main/ipc-suites.js";
@@ -155,6 +156,98 @@ describe("transfer: project round-trip", () => {
     } as unknown as ExportFile["cases"][number];
     expect(() => importProjectBundle(handle.db, file)).toThrow();
     expect(listProjects(handle.db)).toHaveLength(1);
+  });
+});
+
+describe("transfer: case profiles", () => {
+  let handle!: DatabaseHandle;
+
+  afterEach(() => {
+    handle?.close();
+  });
+
+  it("round-trips the profile onto a fresh case id (filenames only, no auth contents)", () => {
+    handle = createDatabase(":memory:");
+    const seed = seedShop(handle.db);
+    setCaseProfile(handle.db, seed.loginId, {
+      device: "Desktop Chrome",
+      viewportW: 1440,
+      viewportH: 900,
+      colorScheme: "dark",
+      locale: "en-GB",
+      timezone: "Europe/Rome",
+      storageState: "login.json",
+      saveStorageState: "saved.json",
+      dialogPolicy: "accept",
+    });
+
+    const file = viaFile(buildProjectExport(handle.db, seed.projectId));
+    const exportedLogin = file.cases.find((c) => c.name === "Login");
+    // Filenames only — the auth-state FILE CONTENTS never travel.
+    expect(exportedLogin?.profile).toEqual({
+      device: "Desktop Chrome",
+      viewportW: 1440,
+      viewportH: 900,
+      colorScheme: "dark",
+      locale: "en-GB",
+      timezone: "Europe/Rome",
+      storageState: "login.json",
+      saveStorageState: "saved.json",
+      dialogPolicy: "accept",
+    });
+    // A case with no profile row carries no profile key.
+    expect(file.cases.find((c) => c.name === "Stray")?.profile).toBeUndefined();
+
+    const summary = importProjectBundle(handle.db, file);
+    const importedLogin = listCases(handle.db, summary.projectId).find((c) => c.name === "Login");
+    expect(importedLogin?.id).not.toBe(seed.loginId);
+    expect(getCaseProfile(handle.db, importedLogin?.id ?? "")).toMatchObject({
+      device: "Desktop Chrome",
+      viewportW: 1440,
+      viewportH: 900,
+      colorScheme: "dark",
+      locale: "en-GB",
+      timezone: "Europe/Rome",
+      storageState: "login.json",
+      saveStorageState: "saved.json",
+      dialogPolicy: "accept",
+    });
+    const importedStray = listCases(handle.db, summary.projectId).find((c) => c.name === "Stray");
+    expect(getCaseProfile(handle.db, importedStray?.id ?? "")).toBeNull();
+  });
+
+  it("keeps a cleared profile cleared across export/import", () => {
+    handle = createDatabase(":memory:");
+    const seed = seedShop(handle.db);
+    setCaseProfile(handle.db, seed.loginId, { locale: "en-GB" });
+    setCaseProfile(handle.db, seed.loginId, {}); // cleared → no row
+    expect(getCaseProfile(handle.db, seed.loginId)).toBeNull();
+
+    const file = viaFile(buildProjectExport(handle.db, seed.projectId));
+    expect(file.cases.find((c) => c.name === "Login")?.profile).toBeUndefined();
+
+    const summary = importProjectBundle(handle.db, file);
+    const importedLogin = listCases(handle.db, summary.projectId).find((c) => c.name === "Login");
+    expect(getCaseProfile(handle.db, importedLogin?.id ?? "")).toBeNull();
+  });
+
+  it("applies the profile through the case-import path with fresh ids", () => {
+    handle = createDatabase(":memory:");
+    const seed = seedShop(handle.db);
+    setCaseProfile(handle.db, seed.loginId, { locale: "fr-FR", storageState: "login.json" });
+
+    const summary = importCaseBundle(
+      handle.db,
+      viaFile(buildCaseExport(handle.db, seed.loginId)),
+      seed.projectId,
+    );
+
+    const imported = getCase(handle.db, summary.caseIds[0] ?? "");
+    expect(imported.id).not.toBe(seed.loginId);
+    expect(getCaseProfile(handle.db, imported.id)).toMatchObject({
+      locale: "fr-FR",
+      storageState: "login.json",
+    });
   });
 });
 

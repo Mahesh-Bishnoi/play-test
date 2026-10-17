@@ -10,6 +10,7 @@ import {
 import type { TestCase } from "../shared/schema.js";
 import { TestCaseSchema } from "../shared/schema.js";
 import type { AppDatabase } from "./db.js";
+import { deleteCaseProfile } from "./ipc-profiles.js";
 import { caseRuns, projects, stepRuns, suiteTestCases, testData, testSteps } from "./schema.js";
 import { testCases } from "./schema.js";
 
@@ -122,8 +123,8 @@ export function updateCase(db: AppDatabase, input: CaseUpdatePayload): TestCase 
 
 /**
  * Delete a case and everything scoped to it (steps, test-data, suite joins,
- * plus its case_runs and their step_runs). Suites that referenced it keep
- * their remaining members.
+ * its case profile, plus its case_runs and their step_runs). Suites that
+ * referenced it keep their remaining members.
  */
 export function deleteCase(db: AppDatabase, id: string): void {
   getCase(db, id);
@@ -136,6 +137,7 @@ export function deleteCase(db: AppDatabase, id: string): void {
   db.delete(suiteTestCases).where(eq(suiteTestCases.caseId, id)).run();
   db.delete(testSteps).where(eq(testSteps.caseId, id)).run();
   db.delete(testData).where(eq(testData.caseId, id)).run();
+  deleteCaseProfile(db, id);
   db.delete(testCases).where(eq(testCases.id, id)).run();
 }
 

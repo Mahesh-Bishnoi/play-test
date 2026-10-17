@@ -1,15 +1,15 @@
 import { z } from "zod";
 
 import type { IpcChannel } from "../shared/ipc-contract.js";
-import type { RecorderStartOptions } from "../shared/ipc-contract.js";
 import { RunFinishedEvent, RunLogEvent, RunStepUpdateEvent } from "../shared/ipc-contract.js";
 import type {
   RunFinishedEvent as RunFinished,
   RunLogEvent as RunLog,
   RunStepUpdateEvent as RunStepUpdate,
 } from "../shared/ipc-contract.js";
-import { StepRowSchema, SuiteSchema, TestCaseSchema } from "../shared/schema.js";
+import { CaseProfileSchema, StepRowSchema, SuiteSchema, TestCaseSchema } from "../shared/schema.js";
 import { ProjectSchema } from "../shared/schema.js";
+import type { CaseProfile, CaseProfileInput } from "../shared/schema.js";
 import type { Project, StepRow, Suite, TestCase } from "../shared/schema.js";
 import type { RunMode } from "../shared/schema.js";
 import { TestStepSchema } from "../shared/step-types.js";
@@ -164,7 +164,7 @@ export const api = {
   createCase(projectId: string, name: string): Promise<TestCase> {
     return invoke("case:create", { projectId, name }, (raw) => TestCaseSchema.parse(raw));
   },
-  updateCase(id: string, patch: { name?: string }): Promise<TestCase> {
+  updateCase(id: string, patch: { name?: string; url?: string | null }): Promise<TestCase> {
     return invoke("case:update", { id, ...patch }, (raw) => TestCaseSchema.parse(raw));
   },
   deleteCase(id: string): Promise<void> {
@@ -198,12 +198,25 @@ export const api = {
     );
   },
 
-  // Recorder (WS4; handlers registered in main.ts, payloads frozen in v1).
-  startRecorder(baseUrl: string, options?: RecorderStartOptions): Promise<{ pid: number }> {
+  // Case profile (M14; PLAN §M14 item 7): one persisted record-options row per
+  // case, shared by the recorder and every run. `null` = no row / defaults.
+  profileGet(caseId: string): Promise<CaseProfile | null> {
     return invoke(
-      "recorder:start",
-      options === undefined ? { baseUrl } : { baseUrl, ...options },
-      (raw) => z.object({ pid: z.number().int() }).parse(raw),
+      "profile:get",
+      { caseId },
+      (raw) => z.object({ profile: CaseProfileSchema.nullable() }).parse(raw).profile,
+    );
+  },
+  profileSet(caseId: string, profile: CaseProfileInput): Promise<CaseProfile | null> {
+    return invoke("profile:set", { caseId, profile }, (raw) =>
+      CaseProfileSchema.nullable().parse(raw),
+    );
+  },
+
+  // Recorder (WS4/M14; main resolves project baseUrl + the case profile).
+  startRecorder(caseId: string): Promise<{ pid: number }> {
+    return invoke("recorder:start", { caseId }, (raw) =>
+      z.object({ pid: z.number().int() }).parse(raw),
     );
   },
   stopRecorder(): Promise<{ steps: TestStep[]; raw: string }> {

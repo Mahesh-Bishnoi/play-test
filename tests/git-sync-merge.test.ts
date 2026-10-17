@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeEntity, snapshotHash, type Snapshot } from "../src/main/git-sync.js";
+import {
+  SnapshotCaseSchema,
+  mergeEntity,
+  snapshotHash,
+  type Snapshot,
+  type SnapshotCase,
+} from "../src/main/git-sync.js";
 
 function snapshotWithName(name: string): Snapshot {
   return {
@@ -8,6 +14,21 @@ function snapshotWithName(name: string): Snapshot {
     suites: {},
     cases: {},
   };
+}
+
+/** Minimal snapshot case; `profile` is optional (pre-M14 snapshots lack it). */
+function snapCase(profile?: SnapshotCase["profile"]): SnapshotCase {
+  return {
+    id: "c1",
+    name: "Login",
+    steps: [],
+    testData: {},
+    ...(profile !== undefined ? { profile } : {}),
+  };
+}
+
+function snapshotWithCase(c: SnapshotCase): Snapshot {
+  return { project: { id: "p1", name: "quest" }, suites: {}, cases: { [c.id]: c } };
 }
 
 describe("snapshotHash", () => {
@@ -79,5 +100,98 @@ describe("mergeEntity", () => {
     expect(mergeEntity({ base: { v: 0 }, local: { v: 1 }, remote: undefined })).toEqual({
       kind: "conflict",
     });
+  });
+});
+
+describe("SnapshotCaseSchema: profile is optional and untrusted", () => {
+  it("parses a pre-M14 snapshot case with no profile field", () => {
+    const parsed = SnapshotCaseSchema.parse({ id: "c1", name: "Login", steps: [], testData: {} });
+    expect(parsed.profile).toBeUndefined();
+  });
+
+  it("parses a profile on a snapshot case", () => {
+    const parsed = SnapshotCaseSchema.parse({
+      id: "c1",
+      name: "Login",
+      steps: [],
+      testData: {},
+      profile: {
+        device: "Desktop Chrome",
+        viewportW: 1440,
+        viewportH: 900,
+        locale: "en-GB",
+        storageState: "login.json",
+        saveStorageState: "saved.json",
+        dialogPolicy: "accept",
+      },
+    });
+    expect(parsed.profile).toEqual({
+      device: "Desktop Chrome",
+      viewportW: 1440,
+      viewportH: 900,
+      locale: "en-GB",
+      storageState: "login.json",
+      saveStorageState: "saved.json",
+      dialogPolicy: "accept",
+    });
+  });
+
+  it("rejects a profile with a path-escaping filename or out-of-range viewport", () => {
+    expect(() =>
+      SnapshotCaseSchema.parse({
+        id: "c1",
+        name: "Login",
+        steps: [],
+        testData: {},
+        profile: { storageState: "../../etc/passwd" },
+      }),
+    ).toThrow();
+    expect(() =>
+      SnapshotCaseSchema.parse({
+        id: "c1",
+        name: "Login",
+        steps: [],
+        testData: {},
+        profile: { viewportW: 1 },
+      }),
+    ).toThrow();
+  });
+});
+
+describe("mergeEntity: profile is part of the case entity", () => {
+  it("takes the remote when only the remote changed the profile", () => {
+    expect(
+      mergeEntity({
+        base: snapCase({ locale: "en-US" }),
+        local: snapCase({ locale: "en-US" }),
+        remote: snapCase({ locale: "en-GB" }),
+      }),
+    ).toEqual({ kind: "take-remote" });
+  });
+
+  it("keeps local when only local changed the profile", () => {
+    expect(
+      mergeEntity({
+        base: snapCase({ locale: "en-US" }),
+        local: snapCase({ locale: "fr-FR" }),
+        remote: snapCase({ locale: "en-US" }),
+      }),
+    ).toEqual({ kind: "keep-local" });
+  });
+
+  it("conflicts when both sides changed the profile differently", () => {
+    expect(
+      mergeEntity({
+        base: snapCase({ locale: "en-US" }),
+        local: snapCase({ locale: "fr-FR" }),
+        remote: snapCase({ locale: "de-DE" }),
+      }),
+    ).toEqual({ kind: "conflict" });
+  });
+
+  it("treats a profile-only edit as a real case change (hash moves)", () => {
+    expect(snapshotHash(snapshotWithCase(snapCase({ storageState: "a.json" })))).not.toBe(
+      snapshotHash(snapshotWithCase(snapCase())),
+    );
   });
 });

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { createDatabase } from "../src/main/db.js";
 import type { IpcHandleFn } from "../src/main/ipc-register.js";
-import { registerProjectHandlers } from "../src/main/ipc-register.js";
+import { registerProfileHandlers, registerProjectHandlers } from "../src/main/ipc-register.js";
+import { createCase } from "../src/main/ipc-cases.js";
+import { createProject } from "../src/main/ipc-projects.js";
 import { ProjectSchema } from "../src/shared/schema.js";
 
 /** In-memory fake for ipcMain.handle: captures listeners per channel. */
@@ -58,6 +60,41 @@ describe("registerProjectHandlers", () => {
 
       expect(() => ipc.call("project:create", { name: "" })).toThrow();
       expect(() => ipc.call("project:get", { id: "missing" })).toThrow(/not found/);
+    } finally {
+      dbHandle.close();
+    }
+  });
+});
+
+describe("registerProfileHandlers (M14)", () => {
+  it("registers profile:get/profile:set and round-trips a profile", () => {
+    const dbHandle = createDatabase(":memory:");
+    try {
+      const ipc = fakeIpc();
+      registerProfileHandlers(ipc.handle, dbHandle.db);
+      const project = createProject(dbHandle.db, { name: "P" });
+      const testCase = createCase(dbHandle.db, { projectId: project.id, name: "C" });
+
+      expect(ipc.call("profile:get", { caseId: testCase.id })).toEqual({ profile: null });
+
+      const saved = ipc.call("profile:set", {
+        caseId: testCase.id,
+        profile: { device: "iPhone 11", colorScheme: "dark" },
+      }) as { device?: string; colorScheme?: string };
+      expect(saved).toMatchObject({ device: "iPhone 11", colorScheme: "dark" });
+
+      const fetched = ipc.call("profile:get", { caseId: testCase.id }) as {
+        profile: { device?: string } | null;
+      };
+      expect(fetched.profile?.device).toBe("iPhone 11");
+
+      // An all-empty profile clears the row (back to defaults).
+      expect(ipc.call("profile:set", { caseId: testCase.id, profile: {} })).toBeNull();
+      expect(ipc.call("profile:get", { caseId: testCase.id })).toEqual({ profile: null });
+
+      // A profile hangs off a case — an unknown id must not write a row.
+      expect(() => ipc.call("profile:set", { caseId: "ghost", profile: {} })).toThrow(/not found/);
+      expect(() => ipc.call("profile:get", {})).toThrow();
     } finally {
       dbHandle.close();
     }
