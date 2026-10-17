@@ -7,7 +7,8 @@
  * is rejected in the UI with the same edit guidance instead of creating a
  * step that can only fail at run time. Unknown-but-CSS selectors fall
  * through to `page.locator` exactly like the runner, so they are accepted
- * as-is.
+ * as-is. Frame chains (`page.frameLocator(...).getByRole(...)`, nested
+ * `frameLocator`) validate segment-by-segment like any other factory chain.
  */
 
 import {

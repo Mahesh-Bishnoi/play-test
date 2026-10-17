@@ -1,8 +1,14 @@
 import { z } from "zod";
 
 import type { IpcChannel } from "../shared/ipc-contract.js";
-import { RunFinishedEvent, RunLogEvent, RunStepUpdateEvent } from "../shared/ipc-contract.js";
+import {
+  RecorderStopResultSchema,
+  RunFinishedEvent,
+  RunLogEvent,
+  RunStepUpdateEvent,
+} from "../shared/ipc-contract.js";
 import type {
+  RecorderStopResult,
   RunFinishedEvent as RunFinished,
   RunLogEvent as RunLog,
   RunStepUpdateEvent as RunStepUpdate,
@@ -12,7 +18,6 @@ import { ProjectSchema } from "../shared/schema.js";
 import type { CaseProfile, CaseProfileInput } from "../shared/schema.js";
 import type { Project, StepRow, Suite, TestCase } from "../shared/schema.js";
 import type { RunMode } from "../shared/schema.js";
-import { TestStepSchema } from "../shared/step-types.js";
 import type { TestStep } from "../shared/step-types.js";
 
 async function invoke<T>(
@@ -219,10 +224,8 @@ export const api = {
       z.object({ pid: z.number().int() }).parse(raw),
     );
   },
-  stopRecorder(): Promise<{ steps: TestStep[]; raw: string }> {
-    return invoke("recorder:stop", {}, (raw) =>
-      z.object({ steps: z.array(TestStepSchema), raw: z.string() }).parse(raw),
-    );
+  stopRecorder(): Promise<RecorderStopResult> {
+    return invoke("recorder:stop", {}, (raw) => RecorderStopResultSchema.parse(raw));
   },
 
   // Runner (WS5; streams progress over run:* events, payloads frozen in v1).

@@ -219,7 +219,7 @@ describe("renderer api case wrappers (M14)", () => {
   });
 });
 
-describe("renderer api recorder wrappers (M9/M14, PLAN §18.2)", () => {
+describe("renderer api recorder wrappers (M9/M14/M15, PLAN §18.2)", () => {
   it("starts the recorder from the case id only (M14)", async () => {
     const calls = stubPlaytest(() => Promise.resolve({ pid: 4242 }));
     await expect(api.startRecorder("c1")).resolves.toEqual({ pid: 4242 });
@@ -229,6 +229,36 @@ describe("renderer api recorder wrappers (M9/M14, PLAN §18.2)", () => {
   it("rejects a malformed recorder response", async () => {
     stubPlaytest(() => Promise.resolve({ pid: "nope" }));
     await expect(api.startRecorder("c1")).rejects.toThrow();
+  });
+
+  it("stops the recorder and parses steps + unsupported + raw (M15)", async () => {
+    const calls = stubPlaytest((channel) => {
+      expect(channel).toBe("recorder:stop");
+      return Promise.resolve({
+        steps: [{ order: 0, action: "goto", value: "https://shop.test" }],
+        unsupported: [
+          {
+            line: "page.request.get('https://api.test')",
+            reason: "page.request.get(...) is not supported — add a manual step",
+          },
+        ],
+        raw: "await page.goto('https://shop.test');",
+      });
+    });
+    const result = await api.stopRecorder();
+    expect(result.steps).toHaveLength(1);
+    expect(result.steps[0]?.action).toBe("goto");
+    expect(result.unsupported).toHaveLength(1);
+    expect(result.unsupported[0]?.line).toContain("page.request.get");
+    expect(result.raw).toContain("page.goto");
+    expect(calls).toEqual([{ channel: "recorder:stop", payload: {} }]);
+  });
+
+  it("rejects a malformed unsupported entry", async () => {
+    stubPlaytest(() =>
+      Promise.resolve({ steps: [], unsupported: [{ line: 42, reason: "x" }], raw: "" }),
+    );
+    await expect(api.stopRecorder()).rejects.toThrow();
   });
 });
 

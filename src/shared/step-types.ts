@@ -27,6 +27,16 @@ export const STEP_ACTIONS = [
   "assert-url",
   "assert-title",
   "wait",
+  // M15 additions (25 → 33): exact-match text, attributes, attachment, history
+  // navigation, file upload, and drag-to-target.
+  "assert-text-exact",
+  "assert-attribute",
+  "assert-attached",
+  "reload",
+  "go-back",
+  "go-forward",
+  "upload",
+  "drag",
 ] as const;
 
 export const StepActionSchema = z.enum(STEP_ACTIONS);

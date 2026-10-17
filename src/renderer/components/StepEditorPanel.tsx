@@ -46,6 +46,15 @@ const ACTION_HINTS: Record<StepAction, string> = {
   "assert-count": "Needs a Selector plus the expected count in Value.",
   "assert-url": "Value = the exact page URL, or /regex/ to pattern-match it.",
   "assert-title": "Value = the exact page title, or /regex/ to pattern-match it.",
+  "assert-text-exact":
+    "Needs a Selector plus the exact text in Value (JSON array matches several elements).",
+  "assert-attribute": "Needs a Selector plus name=expected in Value (/re/ patterns match).",
+  "assert-attached": "Needs a Selector to assert it is attached to the page.",
+  reload: "Reloads the current page.",
+  "go-back": "Goes back one entry in the page history.",
+  "go-forward": "Goes forward one entry in the page history.",
+  upload: "Needs a Selector plus one file path in Value (JSON array uploads several).",
+  drag: "Needs a Selector (source) plus the target locator in Value.",
   wait: "Value = milliseconds to sleep, or a Selector to wait for.",
 };
 

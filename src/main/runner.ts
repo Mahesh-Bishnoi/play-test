@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { chromium, devices } from "playwright";
 import { expect } from "playwright/test";
-import type { Browser, BrowserContext, Locator, Page } from "playwright";
+import type { Browser, BrowserContext, FrameLocator, Locator, Page } from "playwright";
 
 import type {
   RunnerCancelPayload,
@@ -21,7 +21,12 @@ import {
 } from "../shared/ipc-contract.js";
 import { RunStepUpdateEvent } from "../shared/ipc-contract.js";
 import type { CaseProfile, RunMode, StepRow } from "../shared/schema.js";
-import { CHAIN_METHODS, PAGE_FACTORY_METHODS, splitTopLevel } from "../shared/locator-allowlist.js";
+import {
+  CHAIN_METHODS,
+  PAGE_FACTORY_METHODS,
+  isRegexStart,
+  splitTopLevel,
+} from "../shared/locator-allowlist.js";
 import { MissingTestDataKeyError, substituteTestDataValue } from "../shared/step-types.js";
 import type { StepStatus } from "../shared/step-types.js";
 import type { AppDatabase } from "./db.js";
@@ -43,6 +48,8 @@ export interface ClickStepOptions {
   button?: "left" | "right" | "middle";
   modifiers?: Array<"Alt" | "Control" | "ControlOrMeta" | "Meta" | "Shift">;
   force?: boolean;
+  /** Recorded `clickCount` (M15); `2` is normalised to the `double` path below. */
+  clickCount?: number;
 }
 
 export interface RunPage {
@@ -51,7 +58,7 @@ export interface RunPage {
   dblclick(selector: string, timeoutMs?: number): Promise<void>;
   fill(selector: string, value: string, timeoutMs?: number): Promise<void>;
   type(selector: string, value: string, timeoutMs?: number): Promise<void>;
-  selectOption(selector: string, value: string | string[], timeoutMs?: number): Promise<void>;
+  selectOption(selector: string, value: SelectOptionInput, timeoutMs?: number): Promise<void>;
   check(selector: string, timeoutMs?: number): Promise<void>;
   uncheck(selector: string, timeoutMs?: number): Promise<void>;
   hover(selector: string, timeoutMs?: number): Promise<void>;
@@ -70,6 +77,22 @@ export interface RunPage {
   assertCount(selector: string, expected: number, timeoutMs?: number): Promise<void>;
   assertUrl(value: string, timeoutMs?: number): Promise<void>;
   assertTitle(value: string, timeoutMs?: number): Promise<void>;
+  /** Exact text match — a list matches several elements (M15). */
+  assertTextExact(selector: string, value: string | string[], timeoutMs?: number): Promise<void>;
+  /** `name=expected`; `expected` keeps `/re/flags` as RegExp (M15). */
+  assertAttribute(
+    selector: string,
+    name: string,
+    expected: string | RegExp,
+    timeoutMs?: number,
+  ): Promise<void>;
+  assertAttached(selector: string, timeoutMs?: number): Promise<void>;
+  reload(timeoutMs?: number): Promise<void>;
+  /** Resolves false when there is no history entry (M15). */
+  goBack(timeoutMs?: number): Promise<boolean>;
+  goForward(timeoutMs?: number): Promise<boolean>;
+  upload(selector: string, files: string | string[], timeoutMs?: number): Promise<void>;
+  drag(source: string, target: string, timeoutMs?: number): Promise<void>;
   waitForTimeout(ms: number): Promise<void>;
   screenshot(path: string): Promise<void>;
 }
@@ -293,6 +316,10 @@ export function parseClickValue(value: string | undefined): {
       if (parsed["force"] === true) {
         out.force = true;
       }
+      const count = parsed["clickCount"];
+      if (typeof count === "number" && Number.isInteger(count) && count >= 1) {
+        out.clickCount = count;
+      }
       if (parsed["double"] === true || parsed["clickCount"] === 2) {
         return { double: true, options: out };
       }
@@ -356,11 +383,67 @@ export function parseStringList(value: string): string | string[] {
 }
 
 /**
- * Select `value` encoding (no schema change): a JSON array selects multiple
- * options (`["a", "b"]`), anything else selects the single named value/label.
+ * Select-option encodings the parser emits for `selectOption({label|value|index})`
+ * (M15). A JSON object or an array of objects selects by label/value/index; the
+ * array form drives a multi-select. Values pass straight through to Playwright.
  */
-export function parseSelectValue(value: string): string | string[] {
-  return parseStringList(value);
+export interface SelectOptionValue {
+  label?: string;
+  value?: string;
+  index?: number;
+}
+
+export type SelectOptionInput = string | string[] | SelectOptionValue | SelectOptionValue[];
+
+function isSelectOptionValue(value: unknown): value is SelectOptionValue {
+  if (!isOptions(value)) {
+    return false;
+  }
+  const keys = Object.keys(value);
+  if (keys.length === 0 || keys.some((k) => k !== "label" && k !== "value" && k !== "index")) {
+    return false;
+  }
+  if ("label" in value && typeof value["label"] !== "string") {
+    return false;
+  }
+  if ("value" in value && typeof value["value"] !== "string") {
+    return false;
+  }
+  if (
+    "index" in value &&
+    (typeof value["index"] !== "number" || !Number.isInteger(value["index"]))
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Select `value` encoding (no schema change): a JSON array of strings selects
+ * multiple options (`["a", "b"]`), a JSON object / array of objects selects by
+ * `{label|value|index}` (M15, parser encoding), anything else selects the single
+ * named value/label.
+ */
+export function parseSelectValue(value: string): SelectOptionInput {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        if (parsed.every((v) => typeof v === "string")) {
+          return parsed as string[];
+        }
+        if (parsed.length > 0 && parsed.every(isSelectOptionValue)) {
+          return parsed as SelectOptionValue[];
+        }
+      } else if (isSelectOptionValue(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // Not JSON — fall through to the single-value form.
+    }
+  }
+  return value;
 }
 
 /** Step-error budget — big enough for Playwright's diff + call log, bounded for the DB. */
@@ -649,13 +732,92 @@ export async function executeStep(
       await page.assertText(step.selector, step.value, timeoutMs);
       return;
     }
-    case "wait": {
-      // Recorder fallback stores unparseable codegen lines as raw `value`
-      // (PLAN §7) — those cannot auto-execute, so fail with guidance.
-      if (step.value === undefined || !/^\d+$/.test(step.value.trim())) {
+    case "assert-text-exact": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      if (step.value === undefined) {
+        throw new StepExecutionError(`${label} needs expected text in value`);
+      }
+      await page.assertTextExact(step.selector, parseStringList(step.value), timeoutMs);
+      return;
+    }
+    case "assert-attribute": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      if (step.value === undefined) {
+        throw new StepExecutionError(`${label} value must be name=expected (e.g. href=/login/)`);
+      }
+      // Split at the first `=`: the attribute name is the trimmed left side, the
+      // rest is the expected value (`/re/flags` stays a RegExp).
+      const separator = step.value.indexOf("=");
+      const name = separator === -1 ? "" : step.value.slice(0, separator).trim();
+      if (separator === -1 || name === "") {
+        throw new StepExecutionError(`${label} value must be name=expected (e.g. href=/login/)`);
+      }
+      await page.assertAttribute(
+        step.selector,
+        name,
+        parseAssertMatcher(step.value.slice(separator + 1)),
+        timeoutMs,
+      );
+      return;
+    }
+    case "assert-attached": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      await page.assertAttached(step.selector, timeoutMs);
+      return;
+    }
+    case "reload": {
+      await page.reload(timeoutMs);
+      return;
+    }
+    case "go-back": {
+      if (!(await page.goBack(timeoutMs))) {
+        throw new StepExecutionError(`${label} — no page history to go back to`);
+      }
+      return;
+    }
+    case "go-forward": {
+      if (!(await page.goForward(timeoutMs))) {
+        throw new StepExecutionError(`${label} — no page history to go forward to`);
+      }
+      return;
+    }
+    case "upload": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a selector`);
+      }
+      if (step.value === undefined || step.value === "") {
+        throw new StepExecutionError(`${label} needs a file path in value`);
+      }
+      const files = parseStringList(step.value);
+      const paths = Array.isArray(files) ? files : [files];
+      const missing = paths.filter((path) => !existsSync(path));
+      if (missing.length > 0) {
         throw new StepExecutionError(
-          `${label} needs a duration in ms in value (recorded raw actions cannot auto-run — edit the step)`,
+          `${label} upload path not found: ${missing.join(", ")} — fix the step or record the upload again`,
         );
+      }
+      await page.upload(step.selector, files, timeoutMs);
+      return;
+    }
+    case "drag": {
+      if (step.selector === undefined || step.selector === "") {
+        throw new StepExecutionError(`${label} needs a source selector`);
+      }
+      if (step.value === undefined || step.value === "") {
+        throw new StepExecutionError(`${label} needs a target locator in value`);
+      }
+      await page.drag(step.selector, step.value, timeoutMs);
+      return;
+    }
+    case "wait": {
+      if (step.value === undefined || !/^\d+$/.test(step.value.trim())) {
+        throw new StepExecutionError(`${label} needs a duration in ms in value (e.g. 500)`);
       }
       await page.waitForTimeout(Number.parseInt(step.value.trim(), 10));
       return;
@@ -1264,14 +1426,20 @@ function firstMissingKey(
  * Resolve a stored step selector to a Playwright Locator.
  *
  * The recorder keeps codegen chains verbatim (`getByRole('link', …)`,
- * `getByText(…)`, `locator('…')`), which `page.locator(string)` cannot parse —
- * it expects CSS/XPath and throws `Unsupported token "{" …`. Plain CSS (or
- * Playwright engine syntax like `text=…`) falls through to `page.locator`.
+ * `getByText(…)`, `locator('…')`, `frameLocator('…')`), which
+ * `page.locator(string)` cannot parse — it expects CSS/XPath and throws
+ * `Unsupported token "{" …`. Plain CSS (or Playwright engine syntax like
+ * `text=…`) falls through to `page.locator`.
+ *
+ * A chain may enter an iframe (`page.frameLocator('#f')`) but must end on a
+ * Locator — a FrameLocator is not actionable, so a chain that stops on the
+ * frame fails with guidance.
  *
  * Never `eval`s the selector: the chain name allowlist below plus the strict
  * literal parser (strings/numbers/booleans/regex/objects/arrays only — no
- * calls, no identifiers) keep recorder content from becoming code execution
- * in the main process.
+ * calls, no identifiers, except a nested locator chain passed to
+ * `filter({ has })` which is resolved recursively as data) keep recorder
+ * content from becoming code execution in the main process.
  */
 export function resolveLocator(page: Page, selector: string): Locator {
   const segments = splitLocatorChain(selector);
@@ -1281,14 +1449,28 @@ export function resolveLocator(page: Page, selector: string): Locator {
   const [first, ...rest] = segments;
   if (first === undefined) {
     throw new StepExecutionError(
-      `unsupported selector "${selector}": empty — edit the step to a CSS selector or a getByRole/getByText/locator chain`,
+      `unsupported selector "${selector}": empty — edit the step to a CSS selector or a getByRole/getByText/locator/frameLocator chain`,
     );
   }
-  let current = applyFactory(page, first, selector);
-  for (const segment of rest) {
-    current = applyChainStep(current, segment, selector);
+  let current: LocatorNode;
+  const factory = parseCall(first, selector);
+  if (factory.name === "frameLocator") {
+    current = {
+      kind: "frame",
+      value: page.frameLocator(frameLocatorSelector(factory.args, selector)),
+    };
+  } else {
+    current = { kind: "locator", value: applyFactory(page, first, selector) };
   }
-  return current;
+  for (const segment of rest) {
+    current = applyChainStep(current, segment, selector, page);
+  }
+  if (current.kind === "frame") {
+    throw new StepExecutionError(
+      `unsupported selector "${selector}": a frame is not actionable — add a locator inside it (e.g. .getByRole(…))`,
+    );
+  }
+  return current.value;
 }
 
 function unsupportedSelector(full: string, detail: string): StepExecutionError {
@@ -1407,7 +1589,105 @@ class LiteralParser {
     if (ch === "-" || (ch !== undefined && /[0-9]/.test(ch))) {
       return this.parseNumber();
     }
+    // A nested locator chain (`filter({ has: page.getByText('x') })`) is data:
+    // keep it as a string and resolve it later through the same allowlisted
+    // parser — never eval it.
+    if (this.startsLocatorChain()) {
+      return this.parseChainText();
+    }
     return this.parseKeyword();
+  }
+
+  /** True when the upcoming token is `page.…` or a factory call (`getByText(…`). */
+  private startsLocatorChain(): boolean {
+    const match = /^([A-Za-z_$][\w$]*)/.exec(this.text.slice(this.pos));
+    if (match === null) {
+      return false;
+    }
+    const name = match[1] as string;
+    if (name !== "page" && !PAGE_FACTORY_METHODS.has(name)) {
+      return false;
+    }
+    let next = this.pos + name.length;
+    while (next < this.text.length && /\s/.test(this.text[next] as string)) {
+      next++;
+    }
+    const ch = this.text[next];
+    return name === "page" ? ch === "." : ch === "(" || ch === ".";
+  }
+
+  /**
+   * Consume a balanced locator-chain expression (strings/regex/parens/braces
+   * tracked) up to a top-level `,` / `}` / `]` and return it verbatim.
+   */
+  private parseChainText(): string {
+    const start = this.pos;
+    let depth = 0;
+    let quote: string | null = null;
+    let escaped = false;
+    let inRegex = false;
+    let inRegexClass = false;
+    while (this.pos < this.text.length) {
+      const ch = this.text[this.pos] as string;
+      if (quote !== null) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === "\\") {
+          escaped = true;
+        } else if (ch === quote) {
+          quote = null;
+        }
+        this.pos++;
+        continue;
+      }
+      if (inRegex) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === "\\") {
+          escaped = true;
+        } else if (ch === "[") {
+          inRegexClass = true;
+        } else if (ch === "]") {
+          inRegexClass = false;
+        } else if (ch === "/" && !inRegexClass) {
+          inRegex = false;
+          while (
+            this.pos + 1 < this.text.length &&
+            /[a-z]/i.test(this.text[this.pos + 1] as string)
+          ) {
+            this.pos++;
+          }
+        }
+        this.pos++;
+        continue;
+      }
+      if (ch === "'" || ch === '"' || ch === "`") {
+        quote = ch;
+        this.pos++;
+        continue;
+      }
+      if (ch === "/" && isRegexStart(this.text, this.pos)) {
+        inRegex = true;
+        this.pos++;
+        continue;
+      }
+      if (ch === "(" || ch === "[" || ch === "{") {
+        depth++;
+      } else if (ch === ")" || ch === "]" || ch === "}") {
+        if (depth === 0 && (ch === "]" || ch === "}")) {
+          break;
+        }
+        depth--;
+      } else if (ch === "," && depth === 0) {
+        break;
+      }
+      this.pos++;
+    }
+    const chain = this.text.slice(start, this.pos).trim();
+    if (chain === "") {
+      throw unsupportedSelector(this.full, "empty locator chain");
+    }
+    return chain;
   }
 
   private parseString(): string {
@@ -1668,98 +1948,37 @@ class LiteralParser {
   }
 }
 
-function applyFactory(page: Page, segment: string, full: string): Locator {
-  const { name, args } = parseCall(segment, full);
-  switch (name) {
-    case "getByRole": {
-      const [role, options] = args;
-      if (typeof role !== "string" || (options !== undefined && !isOptions(options))) {
-        throw unsupportedSelector(full, `getByRole needs (role, options?)`);
-      }
-      return page.getByRole(
-        role as Parameters<Page["getByRole"]>[0],
-        options as Parameters<Page["getByRole"]>[1],
-      );
-    }
-    case "getByText": {
-      const [text, options] = args;
-      if (
-        (typeof text !== "string" && !(text instanceof RegExp)) ||
-        (options !== undefined && !isOptions(options))
-      ) {
-        throw unsupportedSelector(full, `getByText needs (text, options?)`);
-      }
-      return page.getByText(text, options as Parameters<Page["getByText"]>[1]);
-    }
-    case "getByLabel": {
-      const [text, options] = args;
-      if (
-        (typeof text !== "string" && !(text instanceof RegExp)) ||
-        (options !== undefined && !isOptions(options))
-      ) {
-        throw unsupportedSelector(full, `getByLabel needs (text, options?)`);
-      }
-      return page.getByLabel(text, options as Parameters<Page["getByLabel"]>[1]);
-    }
-    case "getByPlaceholder": {
-      const [text, options] = args;
-      if (
-        (typeof text !== "string" && !(text instanceof RegExp)) ||
-        (options !== undefined && !isOptions(options))
-      ) {
-        throw unsupportedSelector(full, `getByPlaceholder needs (text, options?)`);
-      }
-      return page.getByPlaceholder(text, options as Parameters<Page["getByPlaceholder"]>[1]);
-    }
-    case "getByAltText": {
-      const [text, options] = args;
-      if (
-        (typeof text !== "string" && !(text instanceof RegExp)) ||
-        (options !== undefined && !isOptions(options))
-      ) {
-        throw unsupportedSelector(full, `getByAltText needs (text, options?)`);
-      }
-      return page.getByAltText(text, options as Parameters<Page["getByAltText"]>[1]);
-    }
-    case "getByTitle": {
-      const [text, options] = args;
-      if (
-        (typeof text !== "string" && !(text instanceof RegExp)) ||
-        (options !== undefined && !isOptions(options))
-      ) {
-        throw unsupportedSelector(full, `getByTitle needs (text, options?)`);
-      }
-      return page.getByTitle(text, options as Parameters<Page["getByTitle"]>[1]);
-    }
-    case "getByTestId": {
-      const [id] = args;
-      if (typeof id !== "string" && !(id instanceof RegExp)) {
-        throw unsupportedSelector(full, `getByTestId needs (testId)`);
-      }
-      return page.getByTestId(id);
-    }
-    case "locator": {
-      const [sel, options] = args;
-      if (typeof sel !== "string" || (options !== undefined && !isOptions(options))) {
-        throw unsupportedSelector(full, `locator needs (selector, options?)`);
-      }
-      rejectLocatorOptions(options, full);
-      return page.locator(sel, options as Parameters<Page["locator"]>[1]);
-    }
-    default:
-      throw unsupportedSelector(full, `"${name}(…)" is not a locator`);
+/** A resolved chain node — a Locator (actionable) or a FrameLocator (waypoint). */
+type LocatorNode = { kind: "frame"; value: FrameLocator } | { kind: "locator"; value: Locator };
+
+/** `frameLocator('css')` needs a non-empty selector string. */
+function frameLocatorSelector(args: unknown[], full: string): string {
+  const [selector] = args;
+  if (typeof selector !== "string" || selector === "") {
+    throw unsupportedSelector(full, `frameLocator needs a selector`);
   }
+  return selector;
 }
 
-function applyChainStep(current: Locator, segment: string, full: string): Locator {
-  const { name, args } = parseCall(segment, full);
+/**
+ * Dispatch the shared `getBy*` factories on a Page, Locator, or FrameLocator
+ * (all three expose identical signatures and return a Locator). Returns null
+ * when `name` is not a `getBy*` method so the caller can handle its own steps.
+ */
+function applyGetBy(
+  host: Page | Locator | FrameLocator,
+  name: string,
+  args: unknown[],
+  full: string,
+): Locator | null {
+  const target = host as Locator;
   switch (name) {
     case "getByRole": {
       const [role, options] = args;
       if (typeof role !== "string" || (options !== undefined && !isOptions(options))) {
         throw unsupportedSelector(full, `getByRole needs (role, options?)`);
       }
-      return current.getByRole(
+      return target.getByRole(
         role as Parameters<Locator["getByRole"]>[0],
         options as Parameters<Locator["getByRole"]>[1],
       );
@@ -1772,7 +1991,7 @@ function applyChainStep(current: Locator, segment: string, full: string): Locato
       ) {
         throw unsupportedSelector(full, `getByText needs (text, options?)`);
       }
-      return current.getByText(text, options as Parameters<Locator["getByText"]>[1]);
+      return target.getByText(text, options as Parameters<Locator["getByText"]>[1]);
     }
     case "getByLabel": {
       const [text, options] = args;
@@ -1782,7 +2001,7 @@ function applyChainStep(current: Locator, segment: string, full: string): Locato
       ) {
         throw unsupportedSelector(full, `getByLabel needs (text, options?)`);
       }
-      return current.getByLabel(text, options as Parameters<Locator["getByLabel"]>[1]);
+      return target.getByLabel(text, options as Parameters<Locator["getByLabel"]>[1]);
     }
     case "getByPlaceholder": {
       const [text, options] = args;
@@ -1792,7 +2011,7 @@ function applyChainStep(current: Locator, segment: string, full: string): Locato
       ) {
         throw unsupportedSelector(full, `getByPlaceholder needs (text, options?)`);
       }
-      return current.getByPlaceholder(text, options as Parameters<Locator["getByPlaceholder"]>[1]);
+      return target.getByPlaceholder(text, options as Parameters<Locator["getByPlaceholder"]>[1]);
     }
     case "getByAltText": {
       const [text, options] = args;
@@ -1802,7 +2021,7 @@ function applyChainStep(current: Locator, segment: string, full: string): Locato
       ) {
         throw unsupportedSelector(full, `getByAltText needs (text, options?)`);
       }
-      return current.getByAltText(text, options as Parameters<Locator["getByAltText"]>[1]);
+      return target.getByAltText(text, options as Parameters<Locator["getByAltText"]>[1]);
     }
     case "getByTitle": {
       const [text, options] = args;
@@ -1812,30 +2031,142 @@ function applyChainStep(current: Locator, segment: string, full: string): Locato
       ) {
         throw unsupportedSelector(full, `getByTitle needs (text, options?)`);
       }
-      return current.getByTitle(text, options as Parameters<Locator["getByTitle"]>[1]);
+      return target.getByTitle(text, options as Parameters<Locator["getByTitle"]>[1]);
     }
     case "getByTestId": {
       const [id] = args;
       if (typeof id !== "string" && !(id instanceof RegExp)) {
         throw unsupportedSelector(full, `getByTestId needs (testId)`);
       }
-      return current.getByTestId(id);
+      return target.getByTestId(id);
     }
+    default:
+      return null;
+  }
+}
+
+function applyFactory(page: Page, segment: string, full: string): Locator {
+  const { name, args } = parseCall(segment, full);
+  const found = applyGetBy(page, name, args, full);
+  if (found !== null) {
+    return found;
+  }
+  if (name === "locator") {
+    const [sel, options] = args;
+    if (typeof sel !== "string" || (options !== undefined && !isOptions(options))) {
+      throw unsupportedSelector(full, `locator needs (selector, options?)`);
+    }
+    return page.locator(
+      sel,
+      resolveLocatorOptions(options, full, page) as Parameters<Page["locator"]>[1],
+    );
+  }
+  throw unsupportedSelector(full, `"${name}(…)" is not a locator`);
+}
+
+/**
+ * Apply one chain segment to the current node. A `FrameLocator` chain keeps
+ * only the frame methods (`getBy*`, `locator`, nested `frameLocator`, `first`,
+ * `last`, `nth` — no `filter`); a `Locator` chain keeps the full set.
+ */
+function applyChainStep(
+  current: LocatorNode,
+  segment: string,
+  full: string,
+  page: Page,
+): LocatorNode {
+  const { name, args } = parseCall(segment, full);
+  if (current.kind === "frame") {
+    return applyFrameChainStep(current.value, name, args, full, page);
+  }
+  return { kind: "locator", value: applyLocatorChainStep(current.value, name, args, full, page) };
+}
+
+function applyFrameChainStep(
+  current: FrameLocator,
+  name: string,
+  args: unknown[],
+  full: string,
+  page: Page,
+): LocatorNode {
+  if (name === "frameLocator") {
+    return { kind: "frame", value: current.frameLocator(frameLocatorSelector(args, full)) };
+  }
+  if (name === "first") {
+    if (args.length !== 0) {
+      throw unsupportedSelector(full, `first takes no arguments`);
+    }
+    return { kind: "frame", value: current.first() };
+  }
+  if (name === "last") {
+    if (args.length !== 0) {
+      throw unsupportedSelector(full, `last takes no arguments`);
+    }
+    return { kind: "frame", value: current.last() };
+  }
+  if (name === "nth") {
+    const [index] = args;
+    if (typeof index !== "number" || !Number.isInteger(index) || index < 0) {
+      throw unsupportedSelector(full, `nth needs a non-negative integer`);
+    }
+    return { kind: "frame", value: current.nth(index) };
+  }
+  if (name === "locator") {
+    const [sel, options] = args;
+    if (typeof sel !== "string" || (options !== undefined && !isOptions(options))) {
+      throw unsupportedSelector(full, `locator needs (selector, options?)`);
+    }
+    return {
+      kind: "locator",
+      value: current.locator(
+        sel,
+        resolveLocatorOptions(options, full, page) as Parameters<FrameLocator["locator"]>[1],
+      ),
+    };
+  }
+  const found = applyGetBy(current, name, args, full);
+  if (found !== null) {
+    return { kind: "locator", value: found };
+  }
+  if (name === "filter") {
+    throw unsupportedSelector(
+      full,
+      `a frame cannot be filtered — locate an element inside the frame instead`,
+    );
+  }
+  throw unsupportedSelector(full, `"${name}(…)" is not a supported frame locator step`);
+}
+
+function applyLocatorChainStep(
+  current: Locator,
+  name: string,
+  args: unknown[],
+  full: string,
+  page: Page,
+): Locator {
+  const found = applyGetBy(current, name, args, full);
+  if (found !== null) {
+    return found;
+  }
+  switch (name) {
     case "locator": {
       const [sel, options] = args;
       if (typeof sel !== "string" || (options !== undefined && !isOptions(options))) {
         throw unsupportedSelector(full, `locator needs (selector, options?)`);
       }
-      rejectLocatorOptions(options, full);
-      return current.locator(sel, options as Parameters<Locator["locator"]>[1]);
+      return current.locator(
+        sel,
+        resolveLocatorOptions(options, full, page) as Parameters<Locator["locator"]>[1],
+      );
     }
     case "filter": {
       const [options] = args;
       if (options !== undefined && !isOptions(options)) {
         throw unsupportedSelector(full, `filter needs ({ hasText?, … })`);
       }
-      rejectLocatorOptions(options, full);
-      return current.filter(options as Parameters<Locator["filter"]>[0]);
+      return current.filter(
+        resolveLocatorOptions(options, full, page) as Parameters<Locator["filter"]>[0],
+      );
     }
     case "first": {
       if (args.length !== 0) {
@@ -1865,17 +2196,51 @@ function isOptions(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Locator/filter option keys the parser may emit; anything else is rejected. */
+const ALLOWED_LOCATOR_OPTION_KEYS: ReadonlySet<string> = new Set([
+  "has",
+  "hasNot",
+  "hasText",
+  "hasNotText",
+  "visible",
+]);
+
 /**
- * `has`/`hasNot` take a Locator, which the literal parser cannot produce —
- * reject them with guidance instead of passing garbage to Playwright.
+ * `has`/`hasNot` take a Locator, which the literal parser cannot produce — the
+ * parser emits a nested locator chain string instead (M15). Resolve that chain
+ * against the page (still no eval, same allowlist/parser) and hand Playwright a
+ * real Locator. Unknown option keys are still rejected so recorder content
+ * cannot smuggle arbitrary options through.
  */
-function rejectLocatorOptions(options: unknown, full: string): void {
-  if (isOptions(options) && ("has" in options || "hasNot" in options)) {
-    throw unsupportedSelector(
-      full,
-      `filter/locator "has" needs a locator — split into two steps or use hasText`,
-    );
+function resolveLocatorOptions(
+  options: unknown,
+  full: string,
+  page: Page,
+): Record<string, unknown> | undefined {
+  if (options === undefined) {
+    return undefined;
   }
+  if (!isOptions(options)) {
+    throw unsupportedSelector(full, `locator options must be an object`);
+  }
+  const resolved: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(options)) {
+    if (!ALLOWED_LOCATOR_OPTION_KEYS.has(key)) {
+      throw unsupportedSelector(full, `unknown locator option "${key}"`);
+    }
+    if (key === "has" || key === "hasNot") {
+      if (typeof value !== "string" || value.trim() === "") {
+        throw unsupportedSelector(
+          full,
+          `${key} needs a locator chain string (e.g. ${key}: page.getByText('x'))`,
+        );
+      }
+      resolved[key] = resolveLocator(page, value);
+    } else {
+      resolved[key] = value;
+    }
+  }
+  return resolved;
 }
 
 // --- Production Playwright adapter -----------------------------------------------
@@ -1922,7 +2287,7 @@ class PlaywrightRunPage implements RunPage {
 
   async selectOption(
     selector: string,
-    value: string | string[],
+    value: SelectOptionInput,
     timeoutMs?: number,
   ): Promise<void> {
     await this.loc(selector).selectOption(value, { timeout: timeoutMs });
@@ -2007,6 +2372,48 @@ class PlaywrightRunPage implements RunPage {
 
   async assertText(selector: string, value: string, timeoutMs?: number): Promise<void> {
     await expect(this.loc(selector)).toContainText(value, this.assertTimeout(timeoutMs));
+  }
+
+  async assertTextExact(
+    selector: string,
+    value: string | string[],
+    timeoutMs?: number,
+  ): Promise<void> {
+    await expect(this.loc(selector)).toHaveText(value, this.assertTimeout(timeoutMs));
+  }
+
+  async assertAttribute(
+    selector: string,
+    name: string,
+    expected: string | RegExp,
+    timeoutMs?: number,
+  ): Promise<void> {
+    await expect(this.loc(selector)).toHaveAttribute(name, expected, this.assertTimeout(timeoutMs));
+  }
+
+  async assertAttached(selector: string, timeoutMs?: number): Promise<void> {
+    await expect(this.loc(selector)).toBeAttached(this.assertTimeout(timeoutMs));
+  }
+
+  async reload(timeoutMs?: number): Promise<void> {
+    await this.page.reload({ timeout: timeoutMs });
+  }
+
+  /** `false` when there is no history entry to navigate to (M15). */
+  async goBack(timeoutMs?: number): Promise<boolean> {
+    return (await this.page.goBack({ timeout: timeoutMs })) !== null;
+  }
+
+  async goForward(timeoutMs?: number): Promise<boolean> {
+    return (await this.page.goForward({ timeout: timeoutMs })) !== null;
+  }
+
+  async upload(selector: string, files: string | string[], timeoutMs?: number): Promise<void> {
+    await this.loc(selector).setInputFiles(files, { timeout: timeoutMs });
+  }
+
+  async drag(source: string, target: string, timeoutMs?: number): Promise<void> {
+    await this.loc(source).dragTo(this.loc(target), { timeout: timeoutMs });
   }
 
   /** Web-first matchers default to 30 s, overridable per step (PLAN §2). */

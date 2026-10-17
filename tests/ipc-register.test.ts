@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { createDatabase } from "../src/main/db.js";
 import type { IpcHandleFn } from "../src/main/ipc-register.js";
-import { registerProfileHandlers, registerProjectHandlers } from "../src/main/ipc-register.js";
+import {
+  registerProfileHandlers,
+  registerProjectHandlers,
+  registerRecorderHandlers,
+} from "../src/main/ipc-register.js";
+import { CodegenRecorder } from "../src/main/recorder.js";
+import type { CodegenChild, RecorderDeps } from "../src/main/recorder.js";
 import { createCase } from "../src/main/ipc-cases.js";
 import { createProject } from "../src/main/ipc-projects.js";
 import { ProjectSchema } from "../src/shared/schema.js";
@@ -21,6 +27,16 @@ function fakeIpc(): { handle: IpcHandleFn; call: (channel: string, payload: unkn
       }
       return listener(payload);
     },
+  };
+}
+
+/** Minimal live codegen child (never exits) for the recorder fakes. */
+function fakeChild(): CodegenChild {
+  return {
+    pid: 7,
+    kill: () => true,
+    hasExited: () => false,
+    stderrTail: () => "",
   };
 }
 
@@ -95,6 +111,57 @@ describe("registerProfileHandlers (M14)", () => {
       // A profile hangs off a case — an unknown id must not write a row.
       expect(() => ipc.call("profile:set", { caseId: "ghost", profile: {} })).toThrow(/not found/);
       expect(() => ipc.call("profile:get", {})).toThrow();
+    } finally {
+      dbHandle.close();
+    }
+  });
+});
+
+describe("registerRecorderHandlers (M15)", () => {
+  const CODE = [
+    "await page.goto('https://example.com');",
+    "await page.request.get('https://api.test/health');",
+  ].join("\n");
+
+  /** A real recorder over injected fakes so the handler envelope is exercised. */
+  function recorderWith(code: string): CodegenRecorder {
+    const deps: RecorderDeps = {
+      spawnCodegen: () => fakeChild(),
+      readOutput: () => code,
+      discardOutput: () => undefined,
+      makeOutputPath: () => "/tmp/playtest-codegen-ipc.js",
+      waitMs: () => Promise.resolve(),
+      startGracePeriodMs: 0,
+    };
+    return new CodegenRecorder(deps);
+  }
+
+  it("resolves recorder:start async and returns steps + unsupported + raw from recorder:stop", async () => {
+    const dbHandle = createDatabase(":memory:");
+    try {
+      const ipc = fakeIpc();
+      const project = createProject(dbHandle.db, { name: "P", baseUrl: "https://example.com" });
+      const testCase = createCase(dbHandle.db, { projectId: project.id, name: "C" });
+      const recorder = recorderWith(CODE);
+      registerRecorderHandlers(ipc.handle, dbHandle.db, {
+        artifactsRoot: "/tmp/playtest-artifacts",
+        recorder,
+      });
+
+      await expect(ipc.call("recorder:start", { caseId: testCase.id })).resolves.toEqual({
+        pid: 7,
+      });
+
+      const stopped = ipc.call("recorder:stop", {}) as {
+        steps: unknown[];
+        unsupported: Array<{ line: string; reason: string }>;
+        raw: string;
+      };
+      expect(stopped.steps).toHaveLength(1);
+      expect(stopped.unsupported).toHaveLength(1);
+      expect(stopped.unsupported[0]?.line).toContain("page.request.get");
+      expect(stopped.unsupported[0]?.reason).toContain("is not supported");
+      expect(stopped.raw).toContain("page.goto");
     } finally {
       dbHandle.close();
     }

@@ -124,6 +124,32 @@ class FakePage implements RunPage {
   async assertTitle(): Promise<void> {
     await this.enter("assertTitle");
   }
+  async assertTextExact(): Promise<void> {
+    await this.enter("assertTextExact");
+  }
+  async assertAttribute(): Promise<void> {
+    await this.enter("assertAttribute");
+  }
+  async assertAttached(): Promise<void> {
+    await this.enter("assertAttached");
+  }
+  async reload(): Promise<void> {
+    await this.enter("reload");
+  }
+  async goBack(): Promise<boolean> {
+    await this.enter("goBack");
+    return true;
+  }
+  async goForward(): Promise<boolean> {
+    await this.enter("goForward");
+    return true;
+  }
+  async upload(): Promise<void> {
+    await this.enter("upload");
+  }
+  async drag(): Promise<void> {
+    await this.enter("drag");
+  }
   async waitForTimeout(): Promise<void> {
     await this.enter("waitForTimeout");
   }

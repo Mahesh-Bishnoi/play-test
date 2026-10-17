@@ -20,6 +20,7 @@ import {
   resolveTracePath,
 } from "../src/main/trace-viewer.js";
 import type { TraceViewerDeps } from "../src/main/trace-viewer.js";
+import { buildPlaywrightCliSpawn } from "../src/main/playwright-cli.js";
 import { extractTraceTargets } from "../src/renderer/pages/RunReportPage.js";
 
 let openHandles: DatabaseHandle[] = [];
@@ -77,6 +78,24 @@ function seedRun() {
     .run();
   return { db, project, c0 };
 }
+
+describe("playwright-cli spawn line (M15)", () => {
+  it("runs the resolved CLI through Electron-as-Node for show-trace", () => {
+    const built = buildPlaywrightCliSpawn(
+      "/app/node_modules/playwright/cli.js",
+      ["show-trace", "/tmp/trace.zip"],
+      { detached: true },
+    );
+    expect(built.command).toBe(process.execPath);
+    expect(built.args).toEqual([
+      "/app/node_modules/playwright/cli.js",
+      "show-trace",
+      "/tmp/trace.zip",
+    ]);
+    expect(built.env["ELECTRON_RUN_AS_NODE"]).toBe("1");
+    expect(built.env["PATH"]).toBe(process.env["PATH"]);
+  });
+});
 
 describe("resolveTracePath", () => {
   it("accepts an in-root trace.zip that exists", () => {

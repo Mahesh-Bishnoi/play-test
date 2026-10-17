@@ -181,6 +181,11 @@ export const TestDataSetPayload = z.object({
 // Values must never look like flags (no leading `-`): even though spawn
 // uses an argv array (no shell), minimist would still eat a `--foo` value
 // as a flag — so shape checks below reject them at the trust boundary.
+//
+// M15 (SPECS §2/§5): `recorder:stop` also reports `unsupported` — codegen
+// lines the parser could not map to a step (unknown `page.*` / `expect(...)`
+// statements). They are surfaced to the user to add as manual steps instead of
+// being silently converted to a `wait` step.
 
 const noFlagPrefix = (label: string) =>
   z
@@ -211,6 +216,26 @@ export const RecorderStartPayload = z.object({
 });
 
 export const RecorderStopPayload = z.object({});
+
+/**
+ * One codegen line the parser could not map to a step (M15). `line` is the
+ * trimmed statement, `reason` a short human explanation — both shown in the
+ * import preview so the user adds a manual step.
+ */
+export const RecorderUnsupportedSchema = z.object({
+  line: z.string().max(10000),
+  reason: z.string().max(1000),
+});
+
+/**
+ * `recorder:stop` return envelope (M15): parsed steps + the lines that could
+ * not be mapped + the raw codegen file for debugging.
+ */
+export const RecorderStopResultSchema = z.object({
+  steps: z.array(TestStepSchema),
+  unsupported: z.array(RecorderUnsupportedSchema),
+  raw: z.string(),
+});
 
 // --- Case profile (M14) ------------------------------------------------------
 
@@ -417,6 +442,10 @@ export type RecorderStartPayload = z.infer<typeof RecorderStartPayload>;
 /** Emulation/auth options resolved from the case profile in main (M14). */
 export type RecorderStartOptions = z.infer<typeof RecorderStartOptionsSchema>;
 export type RecorderStopPayload = z.infer<typeof RecorderStopPayload>;
+/** One unmapped codegen line reported by `recorder:stop` (M15). */
+export type RecorderUnsupported = z.infer<typeof RecorderUnsupportedSchema>;
+/** `recorder:stop` return envelope (M15). */
+export type RecorderStopResult = z.infer<typeof RecorderStopResultSchema>;
 export type RunnerRunSinglePayload = z.infer<typeof RunnerRunSinglePayload>;
 export type RunnerRunSuitePayload = z.infer<typeof RunnerRunSuitePayload>;
 export type RunnerResumePayload = z.infer<typeof RunnerResumePayload>;

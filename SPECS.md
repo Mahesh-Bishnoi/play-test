@@ -25,10 +25,11 @@ self-contained HTML + PDF reports → re-run failures. Local-first, Chromium onl
 - Recording: external `playwright codegen` window (not embedded), launched via the resolved
   Playwright CLI through Electron-as-Node (`ELECTRON_RUN_AS_NODE=1`, `npx` fallback) so spawn
   failures and codegen stderr surface in the UI. Parse output → editable steps; unsupported
-  codegen lines are reported, never silently converted (M15).
-- Steps: 25 actions today, 33 after M15 (see `STEP_ACTIONS` in `src/shared/step-types.ts`);
+  codegen lines are reported (never silently converted) for the user to add as manual steps.
+- Steps: 33 actions (see `STEP_ACTIONS` in `src/shared/step-types.ts`);
   table + linear graph; green=pass, red=fail, grey=skipped, blue=running. Click variants
-  (button/modifiers/force) and multi-select encode in `value`.
+  (button/modifiers/force/clickCount) and select options (`label`/`value`/`index`, single or
+  multi) encode in `value`.
 - Execution: suite-parallel (`workers = min(cpu/2, cases)`); direct `playwright` library plus
   `playwright/test`'s `expect` matchers (no test runner — so no UI mode / sharding /
   multi-browser; see Non-goals). One Chromium per runner/suite worker, fresh context per case.
@@ -85,7 +86,8 @@ src/
     recorder.ts / runner.ts / suite-runner.ts
     reports.ts / trace-viewer.ts / browser-setup.ts
     transfer.ts / git-sync.ts
-    ipc-profiles.ts / playwright-cli.ts   # planned (M14 / M15)
+    ipc-profiles.ts
+    playwright-cli.ts             // shared CLI resolve/spawn (recorder + trace viewer)
   preload/preload.ts            // allowlisted invoke + run:* subscribe only
   renderer/
     api.ts / main.tsx / App.tsx / styles.css / theme.ts
@@ -111,8 +113,8 @@ the query builder only; there is no migration runner.
   recording start URL; when empty the recording falls back to the project `baseUrl`
 - `suite_test_cases(suiteId, caseId)` — PK(suiteId, caseId)
 - `test_steps(id, caseId, order, action, selector, value, timeoutMs, editedAt)` —
-  `action` is plain text; valid values = `STEP_ACTIONS` (25 today, 33 after M15 — see
-  `PLAN.md`). Click variants and multi-select
+  `action` is plain text; valid values = `STEP_ACTIONS` (33 — see
+  `src/shared/step-types.ts`). Click variants and select options
   encode in `value` (`parseClickValue` / `parseSelectValue` in `runner.ts`).
 - `test_data(caseId, key, value, source)` — `source='kv'` today.
 - `case_profiles(caseId, device, viewportW, viewportH, colorScheme, locale, timezone,
@@ -133,7 +135,8 @@ Artifacts: `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/step-<NN>.png, fail
 - Recorder: `recorder:start({caseId})` — main resolves the case `url` (falling back to the
   project `baseUrl`), then the case profile
   (M14; previously explicit emulation/storage fields). `recorder:stop() → {steps, unsupported:
-  [{line, reason}], raw}` (M15 adds `unsupported`).
+  [{line, reason}], raw}` — `unsupported` lists codegen lines the parser skipped, shown in the
+  import preview so the user can add them as manual steps.
 - Runner: `runner:runSingle({caseId, mode, actionDelayMs?})`, `runner:runSuite({suiteId, caseIds[], mode:'unsupervised'})`,
   `runner:resumeFromStep`, `runner:rerunFailed`, `runner:rerunLastFailed`, `runner:cancel`.
 - Reports: `report:getHtml`, `report:exportPdf`, `report:openTrace({caseRunId} | {tracePath})`.
@@ -164,11 +167,16 @@ The approved M14–M16 changes live in `PLAN.md`. Where that plan conflicts with
 plan wins until the milestone lands; this section describes the code as it is today.
 
 - Recorder: argv-only flag builder (`buildCodegenArgs`, allowlisted; viewport `"W,H"` comma,
-  locale → `--lang`, unknown device rejects). Parser: goto/fill/select/check/uncheck/press/
-  dblclick/type/hover/focus/click/asserts; unknown statements → `wait` + raw fallback, never
-  drop data (M15 changes this: unsupported statements are reported to the user instead of
-  becoming `wait`). Resolver `resolveLocator` allowlists `getBy*`/locator chains;
-  `page.evaluate` / `frameLocator` fail with edit guidance (`frameLocator` support is M15).
+  locale → `--lang`, unknown device rejects); spawn via `playwright-cli.ts` (resolved CLI +
+  Electron-as-Node, `npx` fallback) with a post-spawn grace check that surfaces codegen stderr.
+  Parser: goto/fill/select (incl. `{label|value|index}`)/check/uncheck/press/dblclick/type/
+  hover/focus/click (options in `value`)/reload/go-back/go-forward/upload (`setInputFiles`)/
+  drag (`dragTo`)/asserts — `toContainText`→`assert-text`, `toHaveText`→`assert-text-exact`,
+  `toHaveAttribute`→`assert-attribute`, `toBeAttached`→`assert-attached`. Unrecognised
+  statements are returned as `unsupported` (never become a `wait` step). Resolver
+  `resolveLocator` allowlists `getBy*`/`locator`/`frameLocator` chains (incl. nested frames) and
+  recursive `filter({has|hasNot})`; `page.evaluate` and other non-locator heads fail with edit
+  guidance.
 - Runner: `SingleCaseRunner` (supervised pause/resume in same context; cancel settles between
   steps) + `SuiteRunner` (worker pool, missing-key pre-scan, fail→skip-rest, settle
   failed > cancelled > passed, best-effort HTML). Screenshot: animations disabled, caret
@@ -200,8 +208,9 @@ table appears without touching old rows).
 
 ## 10. Known Limits
 
-Packaged-app headed path and Win/macOS install behavior unverified; M15 replaces `npx` for
-codegen and adds `ELECTRON_RUN_AS_NODE` to the trace-viewer spawn — both need one packaged
-smoke test; open case tabs keep mounted state after sync pull (refresh on revisit); pending
+Packaged-app headed path and Win/macOS install behavior unverified; the recorder and trace
+viewer now spawn the resolved Playwright CLI via Electron-as-Node (`ELECTRON_RUN_AS_NODE`) with
+an `npx` fallback — the packaged path for both still needs one smoke test; open case tabs keep
+mounted state after sync pull (refresh on revisit); pending
 sync conflicts surface on pull, not status refresh. Toolchain: `typescript@7.0.2` ↔
 `oxlint-tsgolint@7.0.2004` version-locked, upgrade together.

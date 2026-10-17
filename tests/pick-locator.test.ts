@@ -46,9 +46,29 @@ describe("validatePastedLocator (M10 pick-locator)", () => {
     }
   });
 
+  it("accepts frameLocator chains (page-level and nested, M15)", () => {
+    const pageLevel = "page.frameLocator('#payment-frame').getByRole('button', { name: 'Pay' })";
+    expect(validatePastedLocator(pageLevel)).toEqual({ ok: true, selector: pageLevel });
+    expect(validatePastedLocator("frameLocator('iframe').getByText('Continue')").ok).toBe(true);
+    expect(
+      validatePastedLocator("page.frameLocator('#outer').frameLocator('#inner').locator('button')")
+        .ok,
+    ).toBe(true);
+  });
+
+  it("rejects an unsupported segment inside a frameLocator chain", () => {
+    const result = validatePastedLocator(
+      "frameLocator('#f').getByRole('button').evaluate(() => 1)",
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/unsupported selector/);
+    }
+  });
+
   it("rejects non-locator chains instead of executing them", () => {
     for (const bad of [
-      "frameLocator('#f').getByRole('button')",
+      "frameLocator('#f').evaluate(() => 1)",
       "locator('#a').evaluate(() => 1)",
       "getByRole('x'); process.exit(1)",
     ]) {

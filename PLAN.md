@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | M13 — Playwright `expect` assertions + diagnostics | done | all items 1–7 landed |
 | M14 — Case profiles: recorded environment applied at run time | done | all items 1–9 landed |
-| M15 — Recorder & locator coverage + new actions | not started | after M14 |
+| M15 — Recorder & locator coverage + new actions | done 2026-10-17 | 6 items; 3 parallel workstreams; verify + e2e green |
 | M16 — Runtime parity: popups and downloads | not started | after M15 |
 
 Completed: M1–M10, M12–M13; file transfer (import/export) and Phase-2 git-sync core;
@@ -157,43 +157,55 @@ refactor.
 
 ## M15 — Recorder & locator coverage + new actions
 
-Status: not started · Next: item 1 (parser `unsupported` reporting) — after M14
+Status: done (2026-10-17) · all 6 items landed. `step-types.ts` 25 → 33 actions.
+New actions: `assert-text-exact`, `assert-attribute`, `assert-attached`, `reload`,
+`go-back`, `go-forward`, `upload`, `drag`. Resolver adds `frameLocator` (incl. nested frames)
+and recursive `filter({has|hasNot})`. Parser reports `unsupported` lines instead of a `wait`
+fallback. New `src/main/playwright-cli.ts` (resolved CLI + `ELECTRON_RUN_AS_NODE`, `npx`
+fallback) shared by recorder + trace viewer. Verified: `npm run verify` green, `npm run test:e2e`
+green (6 files / 27 tests). Workstream split (same working tree, disjoint files):
+- A → items 3 + 4 runner side: `runner.ts`, `StepEditorPanel.tsx`, runner/suite-runner/shared-contracts/locator-resolve tests.
+- B → items 1 + 2 + 5 recorder side: `recorder.ts`, `ipc-contract.ts`, `ipc-register.ts`, `api.ts`, `RecorderImportPreview.tsx`, `CaseDetailPage.tsx`, recorder/ipc-register/renderer-api tests.
+- C → item 5 CLI/trace (`playwright-cli.ts` new, `trace-viewer.ts`) + item 4 shared allowlist/`pick-locator.ts` + their tests.
+Orchestrator follow-up: added `clickCount` passthrough for counts ≥ 3 (triple-click fidelity).
 
 Goal: imported codegen either runs faithfully or is loudly rejected; the step vocabulary
 covers common real-app interactions.
 
-- [ ] **1.** Parser (`src/main/recorder.ts`): `parseCodegenOutput` returns `{ steps, unsupported:
+- [x] **1.** Parser (`src/main/recorder.ts`): `parseCodegenOutput` returns `{ steps, unsupported:
       [{ line, reason }] }`; unknown `expect(...)` / `page.*` statements go to `unsupported`
       (never `assert-visible`, never a raw `wait` step). `recorder:stop` carries the list;
       `RecorderImportPreview` shows the lines so users add manual steps.
-- [ ] **2.** New mappings: click modifiers/`clickCount`/`button` → existing click value
+- [x] **2.** New mappings: click modifiers/`clickCount`/`button` → existing click value
       encoding; `toHaveText` → `assert-text-exact`; `toHaveAttribute` → `assert-attribute`
       (`name=expected`, `/re/` stays RegExp); `toBeAttached` → `assert-attached`;
       `reload`/`goBack`/`goForward` → actions; `setInputFiles` → `upload` (path or JSON array);
       `dragTo` → `drag` (selector = source locator, value = target locator; needs two-locator
       extraction in the parser); `selectOption({label|value|index})` → JSON object value
       (extend `parseSelectValue`).
-- [ ] **3.** Actions 25 → 33 in `src/shared/step-types.ts`, `executeStep` / `RunPage` /
+- [x] **3.** Actions 25 → 33 in `src/shared/step-types.ts`, `executeStep` / `RunPage` /
       `PlaywrightRunPage`, and `StepEditorPanel` labels/hints:
       - `assert-text-exact` (`toHaveText`; JSON array = multi-element), `assert-attribute`,
         `assert-attached`;
       - `reload`, `go-back`, `go-forward` (guidance when there is no history);
       - `upload` (clear error when the path does not exist);
       - `drag` (`locator.dragTo(target, { timeout })`).
-- [ ] **4.** Resolver/allowlist (`src/shared/locator-allowlist.ts`, `runner.ts`,
+- [x] **4.** Resolver/allowlist (`src/shared/locator-allowlist.ts`, `runner.ts`,
       `src/renderer/components/pick-locator.ts`): `page.frameLocator(...)` factory with
       `FrameLocator` chains (`getBy*`, `locator`, nested `frameLocator`); `filter({ has | hasNot })`
       with a recursively parsed locator; `or()/and()` only if the literal parser stays clean.
       Keep the no-eval guarantees (arg length/nesting caps).
-- [ ] **5.** CLI spawn hardening: new `src/main/playwright-cli.ts` — resolve `playwright/cli.js`
+- [x] **5.** CLI spawn hardening: new `src/main/playwright-cli.ts` — resolve `playwright/cli.js`
       via `createRequire`, spawn `process.execPath` with `ELECTRON_RUN_AS_NODE=1` (detached for
       the viewer, piped stderr for codegen). Recorder falls back to `npx playwright codegen`
       when resolution fails, captures a stderr tail, and `start()` waits a short injectable
       grace period (~1.5 s), throwing `RecorderStartError(stderrTail)` if the child already
       exited. `trace-viewer.ts` uses the same helper (fixes the missing env).
-- [ ] **6.** Tests — parser (new mappings + unsupported reporting), locator-resolve
+- [x] **6.** Tests — parser (new mappings + unsupported reporting), locator-resolve
       (frameLocator, filter has), `shared-contracts` (33 actions), runner/suite fakes for the
-      new actions, pick-locator, trace-viewer env.
+      new actions, pick-locator, trace-viewer env. Plus `tests/recorder-runner-contract.test.ts`
+      (M15 acceptance): a codegen iframe/upload/drag/reload flow parses and every step passes
+      the runner's own `executeStep` validation — covers the "Done when" criterion end to end.
 
 **Done when:** a flow with an iframe, an upload, a drag, and a reload imports into runnable
 steps, and an unsupported assertion is visible before running rather than silently skipped.

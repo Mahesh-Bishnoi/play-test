@@ -18,9 +18,13 @@ export const PAGE_FACTORY_METHODS: ReadonlySet<string> = new Set([
   "getByTitle",
   "getByTestId",
   "locator",
+  "frameLocator",
 ]);
 
-/** Chainable methods supported after the factory call. */
+/**
+ * Chainable methods supported after the factory call (`frameLocator` is
+ * inherited from `PAGE_FACTORY_METHODS`, so iframe chains nest freely).
+ */
 export const CHAIN_METHODS: ReadonlySet<string> = new Set([
   ...PAGE_FACTORY_METHODS,
   "filter",

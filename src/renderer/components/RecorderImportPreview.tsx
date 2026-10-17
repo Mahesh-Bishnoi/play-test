@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import type { RecorderUnsupported } from "../../shared/ipc-contract.js";
 import type { TestStep } from "../../shared/step-types.js";
 
 export interface RecorderImportSelection {
@@ -9,6 +10,7 @@ export interface RecorderImportSelection {
 
 interface Props {
   steps: TestStep[];
+  unsupported: RecorderUnsupported[];
   raw: string;
   busy: boolean;
   onAccept: (selected: TestStep[]) => void;
@@ -16,10 +18,13 @@ interface Props {
 }
 
 /**
- * Import preview modal (WS4 / M4, PLAN §7): accept/edit-before-save.
+ * Import preview modal (WS4 / M4, PLAN §7; M15 reports unsupported lines):
+ * accept/edit-before-save, with the codegen lines the parser could not map
+ * listed so the user adds them as manual steps.
  */
 export default function RecorderImportPreview({
   steps,
+  unsupported,
   raw,
   busy,
   onAccept,
@@ -72,9 +77,24 @@ export default function RecorderImportPreview({
         <div className="pt-section-head">
           <h3>Import recorded steps ({steps.length})</h3>
         </div>
+        {unsupported.length > 0 && (
+          <div className="pt-mb-10" role="status">
+            <p className="pt-warn-text">
+              These recorded lines are not supported — add them as manual steps.
+            </p>
+            <ul className="pt-hint">
+              {unsupported.map((entry, index) => (
+                <li key={`${index}-${entry.line}`}>
+                  <code className="pt-mono">{entry.line}</code> — {entry.reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {steps.length === 0 ? (
           <p className="pt-empty">
             Codegen produced no importable steps.
+            {unsupported.length > 0 ? " The lines above were not recognised." : ""}
             {raw === "" ? " The window may have been closed without acting." : ""}
           </p>
         ) : (

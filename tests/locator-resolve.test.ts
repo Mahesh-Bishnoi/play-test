@@ -23,8 +23,14 @@ class FakeLocator {
   getByText(text: unknown, options?: unknown): this {
     return this.record(`getByText(${JSON.stringify(text)},${JSON.stringify(options ?? null)})`);
   }
+  getByTestId(id: unknown): this {
+    return this.record(`getByTestId(${JSON.stringify(id)})`);
+  }
   locator(sel: unknown): this {
     return this.record(`locator(${JSON.stringify(sel)})`);
+  }
+  frameLocator(sel: unknown): this {
+    return this.record(`frameLocator(${JSON.stringify(sel)})`);
   }
   filter(options: unknown): this {
     this.filterArgs.push(options);
@@ -56,6 +62,10 @@ class FakePage extends FakeLocator {
   override getByText(text: unknown, options?: unknown): this {
     this.pageCalls.push("page.getByText");
     return super.getByText(text, options);
+  }
+  override frameLocator(sel: unknown): this {
+    this.pageCalls.push(`page.frameLocator(${JSON.stringify(sel)})`);
+    return super.frameLocator(sel);
   }
 }
 
@@ -92,7 +102,7 @@ describe("resolveLocator (recorder getBy* chains)", () => {
 
   it("rejects non-locator JS instead of executing it", () => {
     expect(() => resolve("page.evaluate(() => 1)")).toThrow(/unsupported selector/);
-    expect(() => resolve("frameLocator('#f').getByRole('button')")).toThrow(/unsupported selector/);
+    expect(() => resolve("contentFrame()")).toThrow(/unsupported selector/);
     // Would exit the process if ever eval'd — must throw instead.
     expect(() => resolve("getByRole('x'); process.exit(1)")).toThrow(/unsupported selector/);
     expect(() => resolve("locator('#a').evaluate(() => 1)")).toThrow(/unsupported selector/);
@@ -116,5 +126,46 @@ describe("resolveLocator (recorder getBy* chains)", () => {
 
     const positional = resolve("locator('li').nth(2)");
     expect(positional.steps).toEqual(['locator("li")', "nth(2)"]);
+  });
+
+  it("resolves frameLocator chains, including nested frames and positional steps", () => {
+    const page = resolve("page.frameLocator('#f').getByRole('button')");
+    expect(page.pageCalls).toEqual(['page.frameLocator("#f")', "page.getByRole"]);
+    expect(page.steps).toEqual(['frameLocator("#f")', 'getByRole("button",null)']);
+
+    const nested = resolve("frameLocator('#f').frameLocator('#g').locator('.row')");
+    expect(nested.steps).toEqual(['frameLocator("#f")', 'frameLocator("#g")', 'locator(".row")']);
+
+    const positional = resolve("frameLocator('#f').first().getByText('Hi')");
+    expect(positional.steps).toEqual(['frameLocator("#f")', "first", 'getByText("Hi",null)']);
+
+    const nth = resolve("frameLocator('#f').nth(1).getByTestId('x')");
+    expect(nth.nthArgs).toEqual([1]);
+  });
+
+  it("rejects a chain that ends on a frame instead of an element", () => {
+    // A FrameLocator is a waypoint, not actionable.
+    expect(() => resolve("frameLocator('#f')")).toThrow(/add a locator inside/i);
+    expect(() => resolve("frameLocator('#f').frameLocator('#g')")).toThrow(/add a locator inside/i);
+  });
+
+  it("resolves a nested locator chain passed to filter({ has | hasNot })", () => {
+    const page = resolve("getByRole('listitem').filter({ has: page.getByText('Product 2') })");
+    expect(page.steps).toContain("filter");
+    // The inner chain was resolved against the page (recorded as a page call),
+    // not passed through as a raw string.
+    expect(page.pageCalls).toEqual(["page.getByRole", "page.getByText"]);
+    const options = page.filterArgs[0] as { has: unknown };
+    expect(options.has).toBeInstanceOf(FakeLocator);
+
+    const css = resolve("locator('.row').filter({ hasNot: page.locator('.hidden') })");
+    expect(css.pageCalls).toEqual(['page.locator(".row")', 'page.locator(".hidden")']);
+  });
+
+  it("rejects a non-chain value for has/hasNot and unknown locator options", () => {
+    expect(() => resolve("locator('.row').filter({ has: 3 })")).toThrow(/locator chain/);
+    expect(() => resolve("locator('.row').filter({ mystery: true })")).toThrow(
+      /unknown locator option/,
+    );
   });
 });

@@ -1,12 +1,11 @@
 import { existsSync } from "node:fs";
-import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
 import { isAbsolute, join, normalize, relative, resolve } from "node:path";
 
 import { eq } from "drizzle-orm";
 
 import type { AppDatabase } from "./db.js";
 import { caseTracePath } from "./artifacts.js";
+import { resolvePlaywrightCli, spawnPlaywrightCli } from "./playwright-cli.js";
 import { caseRuns, suiteRuns, testCases, testSuites } from "./schema.js";
 
 /**
@@ -52,27 +51,20 @@ export function defaultTraceViewerDeps(artifactsRoot: string): TraceViewerDeps {
 
 /**
  * Spawn `playwright show-trace` detached via Electron's Node
- * (same CLI resolution as browser-setup.ts — no `npx` on PATH required).
+ * (shared CLI resolution from playwright-cli.ts — no `npx` on PATH required).
  * Throws `TraceViewerError` with a manual fallback when the CLI is missing
  * or the spawn itself fails.
  */
 export function defaultSpawnShowTrace(tracePath: string): void {
-  let cliPath: string;
-  try {
-    const anchor = typeof __filename === "string" ? __filename : process.cwd();
-    cliPath = createRequire(anchor).resolve("playwright/cli.js");
-  } catch {
+  const cliPath = resolvePlaywrightCli();
+  if (cliPath === null) {
     throw new TraceViewerError(
       `Cannot locate the Playwright CLI from the packaged app. ` +
         `Run \`npx playwright show-trace "${tracePath}"\` manually.`,
     );
   }
   try {
-    const child = spawn(process.execPath, [cliPath, "show-trace", tracePath], {
-      detached: true,
-      stdio: "ignore",
-    });
-    child.unref();
+    spawnPlaywrightCli(cliPath, ["show-trace", tracePath], { detached: true });
   } catch (err) {
     throw new TraceViewerError(
       `Trace viewer failed to start (${err instanceof Error ? err.message : String(err)}). ` +

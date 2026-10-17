@@ -7,6 +7,7 @@ import { IPC_PAYLOADS } from "../shared/ipc-contract.js";
 import {
   RecorderStartPayload,
   RecorderStopPayload,
+  RecorderUnsupportedSchema,
   ReportExportPdfPayload,
   ReportGetHtmlPayload,
   ReportOpenTracePayload,
@@ -601,11 +602,14 @@ export function resolveRecorderStartOptions(
 }
 
 /**
- * Recorder channels (WS4, PLAN §7). The recorder is process-wide (one codegen
- * window per app), so handlers take it as a param — default the shared
- * instance in prod, inject a fake in tests. `artifactsRoot` locates the
- * per-project auth-state directory the profile's storage filenames resolve
- * under (M14).
+ * Recorder channels (WS4, PLAN §7; M15 item 5 makes `start` async). The
+ * recorder is process-wide (one codegen window per app), so handlers take it
+ * as a param — default the shared instance in prod, inject a fake in tests.
+ * `artifactsRoot` locates the per-project auth-state directory the profile's
+ * storage filenames resolve under (M14). `recorder:start` returns the
+ * recorder's promise (Electron's `ipcMain.handle` awaits it) so a launch
+ * failure rejects the renderer call; `recorder:stop` also carries the
+ * `unsupported` codegen lines (M15).
  */
 export function registerRecorderHandlers(
   handle: IpcHandleFn,
@@ -628,8 +632,12 @@ export function registerRecorderHandlers(
         case "recorder:stop": {
           RecorderStopPayload.parse(rawPayload);
           const result = recorder.stop();
-          // Re-validate parsed steps at the trust boundary before sending out.
-          return { steps: z.array(TestStepSchema).parse(result.steps), raw: result.raw };
+          // Re-validate parsed steps + unsupported entries at the trust boundary.
+          return {
+            steps: z.array(TestStepSchema).parse(result.steps),
+            unsupported: z.array(RecorderUnsupportedSchema).parse(result.unsupported),
+            raw: result.raw,
+          };
         }
       }
     });

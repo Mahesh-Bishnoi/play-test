@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import type { RecorderUnsupported } from "../../shared/ipc-contract.js";
 import type { CaseProfile, CaseProfileInput, RunMode } from "../../shared/schema.js";
 import type { StepAction, StepStatus } from "../../shared/step-types.js";
 import type { TestStep } from "../../shared/step-types.js";
@@ -147,7 +148,11 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
   const [caseUrl, setCaseUrl] = useState("");
   const savedCaseUrlRef = useRef<string>(JSON.stringify(normalizeCaseUrl("")));
   const urlPrefilledForRef = useRef<string | null>(null);
-  const [preview, setPreview] = useState<{ steps: TestStep[]; raw: string } | null>(null);
+  const [preview, setPreview] = useState<{
+    steps: TestStep[];
+    unsupported: RecorderUnsupported[];
+    raw: string;
+  } | null>(null);
   const [activeRun, setActiveRun] = useState<{
     suiteRunId: string;
     caseRunId: string;
@@ -1121,6 +1126,7 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
           {preview !== null && (
             <RecorderImportPreview
               steps={preview.steps}
+              unsupported={preview.unsupported}
               raw={preview.raw}
               busy={busy}
               onAccept={importRecorded}

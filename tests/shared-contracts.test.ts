@@ -9,6 +9,7 @@ import {
 } from "../src/shared/ipc-contract.js";
 import {
   MissingTestDataKeyError,
+  STEP_ACTIONS,
   TestStepSchema,
   listTestDataKeys,
   substituteTestDataValue,
@@ -39,6 +40,22 @@ describe("step-types substitution (PLAN §10)", () => {
 
   it("rejects unknown actions at the boundary", () => {
     expect(() => TestStepSchema.parse({ order: 0, action: "drag-and-drop" })).toThrow();
+  });
+
+  it("lists 33 actions including the M15 vocabulary", () => {
+    expect(STEP_ACTIONS).toHaveLength(33);
+    for (const action of [
+      "assert-text-exact",
+      "assert-attribute",
+      "assert-attached",
+      "reload",
+      "go-back",
+      "go-forward",
+      "upload",
+      "drag",
+    ] as const) {
+      expect(STEP_ACTIONS).toContain(action);
+    }
   });
 });
 

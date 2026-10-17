@@ -12,6 +12,7 @@ import type {
   RunContext,
   RunPage,
   RunEventChannel,
+  SelectOptionInput,
 } from "../src/main/runner.js";
 import {
   captureStepScreenshot,
@@ -56,6 +57,9 @@ class FakePage implements RunPage {
   failMessage = "boom";
   /** Number of upcoming `screenshot` calls to fail (navigation-race simulation). */
   screenshotFailuresRemaining = 0;
+  /** Whether a history navigation finds an entry (`go-back` / `go-forward`). */
+  goBackResult = true;
+  goForwardResult = true;
   gate: Promise<void> | null = null;
   private gated = false;
 
@@ -87,7 +91,7 @@ class FakePage implements RunPage {
   }
   async selectOption(
     selector: string,
-    value: string | string[],
+    value: SelectOptionInput,
     timeoutMs?: number,
   ): Promise<void> {
     await this.enter("selectOption", [selector, value, timeoutMs]);
@@ -145,6 +149,41 @@ class FakePage implements RunPage {
   }
   async assertTitle(value: string, timeoutMs?: number): Promise<void> {
     await this.enter("assertTitle", [value, timeoutMs]);
+  }
+  async assertTextExact(
+    selector: string,
+    value: string | string[],
+    timeoutMs?: number,
+  ): Promise<void> {
+    await this.enter("assertTextExact", [selector, value, timeoutMs]);
+  }
+  async assertAttribute(
+    selector: string,
+    name: string,
+    expected: string | RegExp,
+    timeoutMs?: number,
+  ): Promise<void> {
+    await this.enter("assertAttribute", [selector, name, expected, timeoutMs]);
+  }
+  async assertAttached(selector: string, timeoutMs?: number): Promise<void> {
+    await this.enter("assertAttached", [selector, timeoutMs]);
+  }
+  async reload(timeoutMs?: number): Promise<void> {
+    await this.enter("reload", [timeoutMs]);
+  }
+  async goBack(timeoutMs?: number): Promise<boolean> {
+    await this.enter("goBack", [timeoutMs]);
+    return this.goBackResult;
+  }
+  async goForward(timeoutMs?: number): Promise<boolean> {
+    await this.enter("goForward", [timeoutMs]);
+    return this.goForwardResult;
+  }
+  async upload(selector: string, files: string | string[], timeoutMs?: number): Promise<void> {
+    await this.enter("upload", [selector, files, timeoutMs]);
+  }
+  async drag(source: string, target: string, timeoutMs?: number): Promise<void> {
+    await this.enter("drag", [source, target, timeoutMs]);
   }
   async waitForTimeout(ms: number): Promise<void> {
     await this.enter("waitForTimeout", [ms, undefined]);
@@ -412,6 +451,12 @@ describe("executeStep mapping", () => {
     expect(parseClickValue(undefined)).toEqual({ double: false, options: {} });
     expect(parseClickValue("dblclick").double).toBe(true);
     expect(parseClickValue("right").options).toMatchObject({ button: "right" });
+    // M15: a recorded `clickCount` above 2 survives as a passthrough (faithful triple-click).
+    expect(parseClickValue('{"clickCount":3}')).toEqual({
+      double: false,
+      options: { clickCount: 3 },
+    });
+    expect(parseClickValue('{"clickCount":2}').double).toBe(true);
     expect(parseClickValue('{"button":"right"}')).toEqual({
       double: false,
       options: { button: "right" },
@@ -538,6 +583,157 @@ describe("executeStep mapping", () => {
     await expect(
       executeStep(page, { order: 2, action: "wait", value: "page.screenshot()" }),
     ).rejects.toThrow(/duration in ms/);
+  });
+
+  it("drives the new M15 actions with the right page calls", async () => {
+    const dir = join(tmpdir(), `playtest-upload-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "upload.txt");
+    writeFileSync(file, "data");
+    const page = new FakePage();
+    await executeStep(page, {
+      order: 0,
+      action: "assert-text-exact",
+      selector: "#t",
+      value: "Hello",
+    });
+    await executeStep(page, {
+      order: 1,
+      action: "assert-text-exact",
+      selector: ".row",
+      value: '["a", "b"]',
+    });
+    await executeStep(page, {
+      order: 2,
+      action: "assert-attribute",
+      selector: "#a",
+      value: "href=/login/",
+    });
+    await executeStep(page, {
+      order: 3,
+      action: "assert-attribute",
+      selector: "#b",
+      value: "data-state=open",
+    });
+    await executeStep(page, { order: 4, action: "assert-attached", selector: "#c" });
+    await executeStep(page, { order: 5, action: "reload" });
+    await executeStep(page, { order: 6, action: "go-back" });
+    await executeStep(page, { order: 7, action: "go-forward" });
+    await executeStep(page, { order: 8, action: "upload", selector: "#file", value: file });
+    await executeStep(page, { order: 9, action: "drag", selector: "#card", value: "#drop" });
+    expect(page.calls.map((c) => c.method)).toEqual([
+      "assertTextExact",
+      "assertTextExact",
+      "assertAttribute",
+      "assertAttribute",
+      "assertAttached",
+      "reload",
+      "goBack",
+      "goForward",
+      "upload",
+      "drag",
+    ]);
+    // assert-text-exact: a plain string stays a string, a JSON array stays an array.
+    expect(page.calls[0]?.args).toEqual(["#t", "Hello", undefined]);
+    expect(page.calls[1]?.args).toEqual([".row", ["a", "b"], undefined]);
+    // assert-attribute: `/re/` becomes a RegExp; anything else stays literal.
+    const attrCall = page.calls[2]?.args;
+    const attr = attrCall?.[2];
+    expect(attrCall?.[0]).toBe("#a");
+    expect(attrCall?.[1]).toBe("href");
+    expect(attr).toBeInstanceOf(RegExp);
+    expect((attr as RegExp).source).toBe("login");
+    expect(page.calls[3]?.args).toEqual(["#b", "data-state", "open", undefined]);
+    // upload passes the resolved path; drag passes source + target locators.
+    expect(page.calls[8]?.args).toEqual(["#file", file, undefined]);
+    expect(page.calls[9]?.args).toEqual(["#card", "#drop", undefined]);
+  });
+
+  it("rejects the new M15 actions with missing or malformed fields", async () => {
+    const page = new FakePage();
+    await expect(
+      executeStep(page, { order: 0, action: "assert-text-exact", selector: "#t" }),
+    ).rejects.toThrow(/value/);
+    await expect(
+      executeStep(page, { order: 1, action: "assert-text-exact", value: "x" }),
+    ).rejects.toThrow(/selector/);
+    await expect(
+      executeStep(page, { order: 2, action: "assert-attribute", selector: "#a" }),
+    ).rejects.toThrow(/name=expected/);
+    await expect(
+      executeStep(page, {
+        order: 3,
+        action: "assert-attribute",
+        selector: "#a",
+        value: "no-equals",
+      }),
+    ).rejects.toThrow(/name=expected/);
+    await expect(
+      executeStep(page, { order: 4, action: "assert-attribute", selector: "#a", value: "=x" }),
+    ).rejects.toThrow(/name=expected/);
+    await expect(executeStep(page, { order: 5, action: "assert-attached" })).rejects.toThrow(
+      /selector/,
+    );
+    await expect(
+      executeStep(page, { order: 6, action: "upload", selector: "#f", value: "/no/such/file.png" }),
+    ).rejects.toThrow(/upload path not found: \/no\/such\/file\.png/);
+    await expect(executeStep(page, { order: 7, action: "upload", selector: "#f" })).rejects.toThrow(
+      /value/,
+    );
+    await expect(executeStep(page, { order: 8, action: "drag", selector: "#a" })).rejects.toThrow(
+      /target/,
+    );
+    await expect(executeStep(page, { order: 9, action: "drag", value: "#b" })).rejects.toThrow(
+      /selector/,
+    );
+  });
+
+  it("reports every missing upload path in one error", async () => {
+    const page = new FakePage();
+    await expect(
+      executeStep(page, {
+        order: 0,
+        action: "upload",
+        selector: "#f",
+        value: '["/missing/a.txt", "/missing/b.txt"]',
+      }),
+    ).rejects.toThrow(/\/missing\/a\.txt, \/missing\/b\.txt/);
+  });
+
+  it("fails go-back/go-forward with guidance when there is no history", async () => {
+    const page = new FakePage();
+    page.goBackResult = false;
+    await expect(executeStep(page, { order: 0, action: "go-back" })).rejects.toThrow(
+      /no page history/,
+    );
+    page.goForwardResult = false;
+    await expect(executeStep(page, { order: 1, action: "go-forward" })).rejects.toThrow(
+      /no page history/,
+    );
+  });
+
+  it("parses select values as objects and arrays of objects (M15)", () => {
+    expect(parseSelectValue('{"label":"IN"}')).toEqual({ label: "IN" });
+    expect(parseSelectValue('{"value":"IN"}')).toEqual({ value: "IN" });
+    expect(parseSelectValue('{"index":2}')).toEqual({ index: 2 });
+    expect(parseSelectValue('[{"label":"A"},{"index":1}]')).toEqual([{ label: "A" }, { index: 1 }]);
+    // String and array-of-strings encodings are unchanged.
+    expect(parseSelectValue('["a", "b"]')).toEqual(["a", "b"]);
+    expect(parseSelectValue("2025-26")).toBe("2025-26");
+    // Unknown keys / wrong value types fall back to the raw string.
+    expect(parseSelectValue('{"nope":"x"}')).toBe('{"nope":"x"}');
+    expect(parseSelectValue('{"label":3}')).toBe('{"label":3}');
+  });
+
+  it("passes a parsed select-option object through to selectOption", async () => {
+    const page = new FakePage();
+    await executeStep(page, {
+      order: 0,
+      action: "select",
+      selector: "#s",
+      value: '{"label":"IN"}',
+    });
+    expect(page.calls[0]?.args).toEqual(["#s", { label: "IN" }, undefined]);
   });
 });
 
