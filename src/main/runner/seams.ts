@@ -55,7 +55,8 @@ export interface RunPage {
   press(selector: string | undefined, key: string, timeoutMs?: number): Promise<void>;
   assertVisible(selector: string, timeoutMs?: number): Promise<void>;
   assertHidden(selector: string, timeoutMs?: number): Promise<void>;
-  assertText(selector: string, value: string, timeoutMs?: number): Promise<void>;
+  /** `toContainText` — a list asserts several elements' text (M18). */
+  assertText(selector: string, value: string | string[], timeoutMs?: number): Promise<void>;
   assertValue(selector: string, value: string, timeoutMs?: number): Promise<void>;
   assertChecked(selector: string, timeoutMs?: number): Promise<void>;
   assertUnchecked(selector: string, timeoutMs?: number): Promise<void>;

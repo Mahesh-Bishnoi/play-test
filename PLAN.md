@@ -15,6 +15,7 @@
 | M15 — Recorder & locator coverage + new actions | done 2026-10-17 | 6 items; 3 parallel workstreams; verify + e2e green |
 | M16 — Runtime parity: popups and downloads | done 2026-10-17 | 4 items; 3 parallel workstreams; verify + e2e green |
 | M17 — Flakiness gaps: wait-url, scroll, input/nav parity, sessionStorage | done 2026-10-17 | P1–P4 landed; `step-types.ts` 33 → 35 actions; verify + unit green |
+| M18 — Playwright-native hardening (second docs audit) | done 2026-10-18 | no schema/action changes; recorder correctness, native locators, flake hints, auth-state flush, video fixes |
 
 Completed: M1–M10, M12–M13; file transfer (import/export) and Phase-2 git-sync core;
 input/assertion parity (9 → 25 actions). M11 closed as wont-do (`SPECS.md` §2).
@@ -284,6 +285,77 @@ Files: `src/shared/step-types.ts`, `src/shared/schema.ts`, `src/shared/export-fo
 
 Note: the new `case_profiles.session_state` column only reaches fresh databases — an existing
 `~/PlayTestData/playtest.db` must be deleted and re-seeded (no migration runner, `SPECS.md` §2).
+
+## M18 — Playwright-native hardening (second docs audit)
+
+Status: done 2026-10-18 · no schema, IPC, or action-vocabulary changes. A second
+playwright.dev audit (codegen/intro, input, actionability, locators, other-locators,
+navigations, assertions, auth, best-practices, debug, trace viewer, videos, running tests,
+parameterize, reporters) found the native APIs already in use (web-first `expect`,
+auto-waiting actions, `waitForURL`, storageState, tracing groups/chunks, `Video.saveAs/delete`,
+`addInitScript`). The gaps below were real bugs or silent divergences, not missing features.
+
+- [x] **1. Recorder negation was silently inverted.** `expect(...).not.toBeVisible()` parsed as
+      `assert-visible`, `.not.toBeEnabled()` as `assert-enabled`, `.not.toBeChecked()` as
+      `assert-checked`. `isNegatedExpect` (statement.ts) + `negatedAssertion` (parse-line.ts)
+      now map only exact inverses (`toBeVisible`→`assert-hidden`, `toBeHidden`→`assert-visible`,
+      `toBeEnabled`→`assert-disabled`, `toBeDisabled`→`assert-enabled`,
+      `toBeChecked`→`assert-unchecked`); every other negated matcher (text/value/url/attribute/
+      attached/focused/editable) is reported as `unsupported` with edit guidance.
+- [x] **2. `locator.waitFor({ state })` collapsed to visible.** `attached` now maps to
+      `assert-attached`, `hidden` to `assert-hidden`, default/`visible` to `assert-visible`;
+      `detached` is reported as unsupported (no step action means "gone from the DOM").
+- [x] **3. `click({ trial: true })` replayed as a real click.** Both `click` and `dblclick`
+      trial forms are now reported as unsupported instead of performing the action.
+- [x] **4. Native locator operators.** The allowlist/resolver accept `and`, `or`, `within`,
+      and `describe` on Locator chains; locator arguments are resolved through the same
+      allowlisted literal parser (no eval), e.g.
+      `getByRole('cell').nth(2).within(page.getByRole('row'))`. `FrameLocator` chains reject
+      them with guidance.
+- [x] **5. Flake hints before running.** `runner/flake-hints.ts` logs one warning per fixed
+      `wait` step (capped at 3 + a count) and per forced click in both runners. This surfaces
+      Playwright's own "never wait for timeout" / "force bypasses actionability" guidance at
+      the point of use instead of failing silently.
+- [x] **6. `--save-storage` was lost on stop.** Codegen flushes storage state in its **SIGINT**
+      handler; the recorder sent SIGTERM, so saved auth state (and the last throttled output
+      write) could be missing. `CodegenRecorder.stop()` is now async: SIGINT → poll
+      `hasExited()` for up to 3 s → SIGTERM fallback (Windows has no POSIX SIGINT delivery), then read/parse.
+      `recorder:stop` returns the same envelope and the IPC handler awaits it.
+- [x] **7. Failure video fixes.** `recordVideo.size` now follows the device preset viewport
+      (explicit viewport still wins) instead of always 1280×720; after a `popup` click the
+      saved/deleted video is the adopted page's recording, not the original idle tab's.
+- [x] **8. Page-error diagnostics.** `page.on('pageerror')` is attached to the run page and to
+      an adopted popup, logging `page error: …` at error level. Uncaught app exceptions are
+      the usual hidden cause of a downstream step failure; the trace viewer has them, the live
+      run log did not.
+- [x] **9. `assert-text` lists.** A JSON array in `assert-text` now goes to
+      `toContainText(string[])` (multi-element) instead of being matched literally as
+      `["a","b"]`; a plain string keeps the single-substring behavior.
+- [x] **10. Small correctness/UI.** `assert-attached`-style frame rules stay intact; the step
+      editor's `wait` hint no longer claims a Selector is supported; tests for every item.
+
+Files: `src/main/recorder/{statement,parse-line,codegen-shell}.ts`,
+`src/main/runner/{locator-resolve,playwright-context,playwright-page,seams,execute-step}.ts`,
+`src/main/runner/flake-hints.ts` (new), `src/main/runner/{single-runner}.ts`,
+`src/main/suite-runner/case-execution.ts`, `src/main/ipc/recorder.ts`,
+`src/shared/locator-allowlist.ts`, `src/renderer/components/StepEditorPanel.tsx`,
+`tests/{recorder,locator-resolve,runner,ipc-register,playwright-context}.test.ts`.
+
+Checks: `npm run typecheck`; `npm test` (294 unit + 32 skipped); `npm run test:e2e`
+(8 files, real Chromium); `npm run lint`; `npm run format`.
+
+Docs audit notes (kept here so the next agent does not re-derive them):
+- The **library** default action/navigation timeout is 30 s (`DEFAULT_PLAYWRIGHT_TIMEOUT`);
+  the 5 s figure is the test runner's assertion default. Our per-assertion 30 s is deliberate.
+- Codegen's recordable assertion palette is only visibility/text/value; `--target` defaults to
+  `playwright-test` and its wrappers are ignored by the parser.
+- Test-runner-only items deliberately not adopted: UI mode, `--project`, sharding, reporters,
+  `expect.soft`, `test.step`, config-based `trace`/`video` retention, parameterized projects.
+  Library equivalents are already used (own runner/report, `tracing`, `Video.saveAs`).
+- Native candidates left for a future re-plan (all need new UI/schema or are deferred in
+  `SPECS.md` §2): `page.clock`, live tracing (`tracing.start({ live: true })`), HAR capture
+  (`startHar`), `goto`/`reload` `waitUntil` encodings, `serviceWorkers: 'block'`,
+  `httpCredentials`/`ignoreHTTPSErrors`, `assert-in-viewport`, CSV/JSON/JUnit export.
 
 ## Notes
 

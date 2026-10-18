@@ -368,6 +368,29 @@ function applyLocatorChainStep(
       }
       return current.nth(index);
     }
+    case "and":
+    case "or":
+    case "within": {
+      const [chain] = args;
+      if (args.length !== 1 || typeof chain !== "string" || chain.trim() === "") {
+        throw unsupportedSelector(
+          full,
+          `${name} needs a locator chain (e.g. ${name}(page.getByText('x')))`,
+        );
+      }
+      const other = resolveLocator(page, chain);
+      if (name === "or") {
+        return current.or(other);
+      }
+      return name === "and" ? current.and(other) : current.within(other);
+    }
+    case "describe": {
+      const [description] = args;
+      if (args.length !== 1 || typeof description !== "string" || description.trim() === "") {
+        throw unsupportedSelector(full, `describe needs a description string`);
+      }
+      return current.describe(description);
+    }
     default:
       throw unsupportedSelector(full, `"${name}(…)" is not a supported locator step`);
   }

@@ -10,6 +10,7 @@ import { resolveLocator } from "../src/main/runner/locator-resolve.js";
 class FakeLocator {
   readonly steps: string[] = [];
   filterArgs: unknown[] = [];
+  combinatorArgs: unknown[] = [];
   nthArgs: unknown[] = [];
 
   private record(step: string): this {
@@ -35,6 +36,21 @@ class FakeLocator {
   filter(options: unknown): this {
     this.filterArgs.push(options);
     return this.record("filter");
+  }
+  and(other: unknown): this {
+    this.combinatorArgs.push(other);
+    return this.record("and");
+  }
+  or(other: unknown): this {
+    this.combinatorArgs.push(other);
+    return this.record("or");
+  }
+  within(other: unknown): this {
+    this.combinatorArgs.push(other);
+    return this.record("within");
+  }
+  describe(description: unknown): this {
+    return this.record(`describe(${JSON.stringify(description)})`);
   }
   first(): this {
     return this.record("first");
@@ -167,5 +183,34 @@ describe("resolveLocator (recorder getBy* chains)", () => {
     expect(() => resolve("locator('.row').filter({ mystery: true })")).toThrow(
       /unknown locator option/,
     );
+  });
+
+  it("resolves locator combinator chains (and/or) to real locators (M18)", () => {
+    const either = resolve("locator('#a').or(page.getByText('b'))");
+    // The fake returns itself from every factory, so the nested chain's call
+    // appears on the same recorder before the combinator (real Playwright
+    // hands back a separate Locator).
+    expect(either.steps).toEqual(['locator("#a")', 'getByText("b",null)', "or"]);
+    expect(either.pageCalls).toEqual(['page.locator("#a")', "page.getByText"]);
+    expect(either.combinatorArgs[0]).toBe(either);
+
+    const both = resolve("getByRole('button').and(locator('.primary'))");
+    expect(both.steps).toEqual(['getByRole("button",null)', 'locator(".primary")', "and"]);
+    expect(both.combinatorArgs[0]).toBe(both);
+
+    const scoped = resolve("getByRole('cell').nth(2).within(page.getByRole('row'))");
+    expect(scoped.steps).toEqual([
+      'getByRole("cell",null)',
+      "nth(2)",
+      'getByRole("row",null)',
+      "within",
+    ]);
+
+    const described = resolve("getByRole('button').describe('Subscribe button')");
+    expect(described.steps).toEqual(['getByRole("button",null)', 'describe("Subscribe button")']);
+
+    expect(() => resolve("locator('#a').or(3)")).toThrow(/locator chain/);
+    expect(() => resolve("locator('#a').describe(3)")).toThrow(/description string/);
+    expect(() => resolve("frameLocator('#f').or(locator('.x'))")).toThrow(/frame locator/);
   });
 });

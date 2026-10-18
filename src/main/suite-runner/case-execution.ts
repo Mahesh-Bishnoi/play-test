@@ -12,6 +12,7 @@ import { getProject } from "../ipc-projects.js";
 import { getTestData, listSteps } from "../ipc-steps.js";
 import { formatStepError } from "../runner/errors.js";
 import { executeStep } from "../runner/execute-step.js";
+import { flakeHints } from "../runner/flake-hints.js";
 import { contextLaunchOptionsFromProfile } from "../runner/launcher.js";
 import type { RunWriter } from "../runner/run-writer.js";
 import type { BrowserHandle, RunContext } from "../runner/seams.js";
@@ -64,6 +65,11 @@ export async function runOneCase(
     deps.runs.log("error", `${prefix} missing test-data key: ${missingKey.key}`);
     deps.runs.finishCaseRun(caseRunId, "failed", startedAt);
     return;
+  }
+
+  // Same Playwright best-practice warnings as the single-case runner (M18).
+  for (const hint of flakeHints(steps)) {
+    deps.runs.log("warn", `${prefix} ${hint}`);
   }
 
   const caseDir = ensureCaseDir(deps.artifactsRoot, testCase.projectId, suiteRunId, caseId);

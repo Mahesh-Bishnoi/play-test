@@ -32,6 +32,7 @@ import { getProject } from "../ipc-projects.js";
 import { getTestData, listSteps } from "../ipc-steps.js";
 import { ContextClosedError, RunAlreadyActiveError, formatStepError } from "./errors.js";
 import { executeStep } from "./execute-step.js";
+import { flakeHints } from "./flake-hints.js";
 import { contextLaunchOptionsFromProfile } from "./launcher.js";
 import { RunWriter } from "./run-writer.js";
 import type { BrowserHandle, BrowserLauncher, EmitRunEvent, RunContext } from "./seams.js";
@@ -170,6 +171,12 @@ export class SingleCaseRunner {
         this.artifactsRoot,
       );
       return { suiteRunId, caseRunId, done: Promise.resolve() };
+    }
+
+    // Surface the steps that bypass Playwright's native waiting (M18) before
+    // launching, so the warning is visible even when the browser fails.
+    for (const hint of flakeHints(steps)) {
+      this.runs.log("warn", hint);
     }
 
     // Resolve the run environment (M14) before writing any run row: a missing

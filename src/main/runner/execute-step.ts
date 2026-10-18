@@ -225,7 +225,9 @@ export async function executeStep(
       if (step.value === undefined) {
         throw new StepExecutionError(`${label} needs expected text in value`);
       }
-      await page.assertText(step.selector, step.value, timeoutMs);
+      // A JSON array asserts several elements' text (Playwright's
+      // `toContainText(string[])`); a plain string stays a single substring.
+      await page.assertText(step.selector, parseStringList(step.value), timeoutMs);
       return;
     }
     case "assert-text-exact": {

@@ -122,13 +122,14 @@ export function registerRecorderHandlers(
         }
         case "recorder:stop": {
           RecorderStopPayload.parse(rawPayload);
-          const result = recorder.stop();
-          // Re-validate parsed steps + unsupported entries at the trust boundary.
-          return {
+          // `stop` waits for codegen's graceful exit so --save-storage and the
+          // output file are flushed before parsing (M18).
+          return recorder.stop().then((result) => ({
+            // Re-validate parsed steps + unsupported entries at the trust boundary.
             steps: z.array(TestStepSchema).parse(result.steps),
             unsupported: z.array(RecorderUnsupportedSchema).parse(result.unsupported),
             raw: result.raw,
-          };
+          }));
         }
       }
     });

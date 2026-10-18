@@ -50,14 +50,27 @@ export interface RecorderDeps {
   readOutput: (outputPath: string) => string | null;
   discardOutput: (outputPath: string) => void;
   makeOutputPath: () => string;
-  /** Sleep, injectable so the start grace period is deterministic in tests. */
+  /** Sleep, injectable so the start/stop grace periods are deterministic in tests. */
   waitMs?: (ms: number) => Promise<void>;
   /** Start grace period in ms (default {@link START_GRACE_PERIOD_MS}); 0 = check immediately. */
   startGracePeriodMs?: number;
+  /** Stop grace period in ms (default {@link STOP_GRACE_PERIOD_MS}); 0 = no wait. */
+  stopGracePeriodMs?: number;
 }
 
 /** How long codegen gets to prove it stayed alive before `start` resolves. */
 export const START_GRACE_PERIOD_MS = 1500;
+
+/**
+ * How long a graceful SIGINT gets before the recorder falls back to SIGTERM.
+ * Codegen saves `--save-storage` and flushes its output file in its SIGINT
+ * handler, so this wait is what makes saved auth state and the last recorded
+ * actions reach disk.
+ */
+export const STOP_GRACE_PERIOD_MS = 3000;
+
+/** Poll interval while waiting for the codegen child to exit. */
+const STOP_POLL_INTERVAL_MS = 50;
 
 /** Bound on the captured codegen stderr tail (chars). */
 const CODEGEN_STDERR_TAIL_LIMIT = 2000;
@@ -178,21 +191,47 @@ export class CodegenRecorder {
     return { pid: child.pid };
   }
 
-  stop(): ParsedRecording {
+  /**
+   * Stop codegen gracefully (M18). Codegen's SIGINT handler saves
+   * `--save-storage` and flushes the output file; SIGTERM bypasses it. Wait
+   * for that handler (bounded), then fall back to SIGTERM (Windows has no
+   * POSIX SIGINT delivery).
+   */
+  async stop(): Promise<ParsedRecording> {
     const session = this.active;
     if (session === null) {
       throw new RecorderNotRunningError();
     }
     this.active = null;
     try {
-      session.child.kill("SIGTERM");
+      session.child.kill("SIGINT");
     } catch {
       // The user may have closed codegen manually — parse what was written.
+    }
+    await this.waitForExit(session.child);
+    if (!session.child.hasExited()) {
+      try {
+        session.child.kill("SIGTERM");
+      } catch {
+        // Already gone — parse what was written.
+      }
     }
     const raw = this.deps.readOutput(session.outputPath) ?? "";
     this.deps.discardOutput(session.outputPath);
     const { steps, unsupported } = parseCodegenOutput(raw);
     return { steps, unsupported, raw };
+  }
+
+  /** Poll `hasExited` until the stop grace period expires. */
+  private async waitForExit(child: CodegenChild): Promise<void> {
+    const timeoutMs = this.deps.stopGracePeriodMs ?? STOP_GRACE_PERIOD_MS;
+    const waitMs = this.deps.waitMs ?? defaultWaitMs;
+    for (let waited = 0; waited < timeoutMs; waited += STOP_POLL_INTERVAL_MS) {
+      if (child.hasExited()) {
+        return;
+      }
+      await waitMs(STOP_POLL_INTERVAL_MS);
+    }
   }
 }
 

@@ -70,6 +70,7 @@ function fakeDeps(code: string, log: string[]): RecorderDeps {
     // Deterministic start: no real timer, and an immediate exit check.
     waitMs: () => Promise.resolve(),
     startGracePeriodMs: 0,
+    stopGracePeriodMs: 0,
   };
 }
 
@@ -523,6 +524,68 @@ describe("parseCodegenOutput (PLAN §7, M15)", () => {
     );
   });
 
+  it("maps negated assertions to their exact inverse and reports the rest (M18)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "await expect(page.locator('#a')).not.toBeVisible();",
+        "await expect(page.locator('#b')).not.toBeHidden();",
+        "await expect(page.locator('#c')).not.toBeEnabled();",
+        "await expect(page.locator('#d')).not.toBeDisabled();",
+        "await expect(page.locator('#e')).not.toBeChecked();",
+        "await expect(page.locator('#f')).not.toHaveText('x');",
+        "await expect(page).not.toHaveURL('/dashboard');",
+      ].join("\n"),
+    );
+    expect(steps.map((s) => s.action)).toEqual([
+      "assert-hidden",
+      "assert-visible",
+      "assert-disabled",
+      "assert-enabled",
+      "assert-unchecked",
+    ]);
+    expect(steps[0]?.selector).toBe("locator('#a')");
+    // No exact inverse action exists for these — report, never invert silently.
+    expect(unsupported.map((u) => u.reason)).toEqual([
+      "expect(...).not.toHaveText() has no step equivalent — add a manual step",
+      "expect(...).not.toHaveURL() has no step equivalent — add a manual step",
+    ]);
+  });
+
+  it("maps locator.waitFor() states instead of collapsing them to visible (M18)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "await page.locator('#a').waitFor();",
+        "await page.locator('#b').waitFor({ state: 'visible' });",
+        "await page.locator('#c').waitFor({ state: 'hidden' });",
+        "await page.locator('#d').waitFor({ state: 'attached' });",
+        "await page.locator('#e').waitFor({ state: 'detached' });",
+      ].join("\n"),
+    );
+    expect(steps.map((s) => s.action)).toEqual([
+      "assert-visible",
+      "assert-visible",
+      "assert-hidden",
+      "assert-attached",
+    ]);
+    expect(unsupported).toHaveLength(1);
+    expect(unsupported[0]?.reason).toContain("detached");
+  });
+
+  it("reports trial clicks instead of replaying them as real clicks (M18)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "await page.locator('#a').click({ trial: true });",
+        "await page.locator('#b').dblclick({ trial: true });",
+        "await page.locator('#c').click();",
+      ].join("\n"),
+    );
+    expect(steps.map((s) => s.action)).toEqual(["click"]);
+    expect(steps[0]?.selector).toBe("locator('#c')");
+    expect(unsupported).toHaveLength(2);
+    expect(unsupported[0]?.reason).toContain("trial");
+    expect(unsupported[1]?.reason).toContain("dblclick");
+  });
+
   it("skips boilerplate and returns dense orders", () => {
     const { steps, unsupported } = parseCodegenOutput(
       "import { test } from 'x';\n\ntest('t', async () => {\n});\n",
@@ -544,11 +607,12 @@ describe("CodegenRecorder lifecycle", () => {
       RecorderAlreadyRunningError,
     );
 
-    const result = recorder.stop();
+    const result = await recorder.stop();
     expect(result.steps).toHaveLength(11);
     expect(result.unsupported).toEqual([]);
     expect(result.raw).toContain("page.goto");
     expect(recorder.isRunning()).toBe(false);
+    expect(log).toContain("kill:SIGINT");
     expect(log).toContain("kill:SIGTERM");
     expect(log.some((entry) => entry.startsWith("discard:"))).toBe(true);
   });
@@ -559,7 +623,7 @@ describe("CodegenRecorder lifecycle", () => {
     deps.readOutput = () => null;
     const recorder = new CodegenRecorder(deps);
     await recorder.start("https://example.com");
-    const result = recorder.stop();
+    const result = await recorder.stop();
     expect(result.steps).toEqual([]);
     expect(result.unsupported).toEqual([]);
     expect(result.raw).toBe("");
@@ -595,9 +659,34 @@ describe("CodegenRecorder lifecycle", () => {
     await expect(recorder.start("https://example.com")).rejects.toThrow(/no pid/);
   });
 
-  it("throws when stopping with no active session", () => {
+  it("throws when stopping with no active session", async () => {
     const recorder = new CodegenRecorder(fakeDeps("", []));
-    expect(() => recorder.stop()).toThrow(RecorderNotRunningError);
+    await expect(recorder.stop()).rejects.toThrow(RecorderNotRunningError);
+  });
+
+  it("uses SIGINT and waits for a graceful exit before falling back (M18)", async () => {
+    let exited = false;
+    const kills: string[] = [];
+    const recorder = new CodegenRecorder({
+      ...fakeDeps(SAMPLE, []),
+      spawnCodegen: () =>
+        fakeChild([], {
+          kill: (signal) => {
+            kills.push(signal ?? "");
+            if (signal === "SIGINT") {
+              exited = true;
+            }
+            return true;
+          },
+          hasExited: () => exited,
+        }),
+      stopGracePeriodMs: 1000,
+      waitMs: () => Promise.resolve(),
+    });
+    await recorder.start("https://example.com");
+    const result = await recorder.stop();
+    expect(result.steps.length).toBeGreaterThan(0);
+    expect(kills).toEqual(["SIGINT"]);
   });
 });
 
@@ -653,7 +742,11 @@ describe("registerRecorderHandlers", () => {
       expect(() => start?.({ caseId: "ghost" })).toThrow();
       expect(() => start?.({ caseId: "" })).toThrow();
 
-      const result = stop?.({}) as { steps: unknown[]; unsupported: unknown[]; raw: string };
+      const result = (await stop?.({})) as {
+        steps: unknown[];
+        unsupported: unknown[];
+        raw: string;
+      };
       expect(result.steps).toHaveLength(11);
       expect(result.unsupported).toEqual([]);
       expect(result.raw).toContain("page.goto");
@@ -755,7 +848,7 @@ describe("CodegenRecorder options pass-through (M9)", () => {
     });
     expect(log.some((entry) => entry.includes('"viewport":{"width":390,"height":844}'))).toBe(true);
     expect(log.some((entry) => entry.includes('"colorScheme":"dark"'))).toBe(true);
-    recorder.stop();
+    await recorder.stop();
   });
 
   it("records with iPhone-ish viewport + dark scheme and parses the same steps", async () => {
@@ -765,7 +858,7 @@ describe("CodegenRecorder options pass-through (M9)", () => {
       device: undefined,
       colorScheme: "dark",
     });
-    const result = recorder.stop();
+    const result = await recorder.stop();
     expect(result.steps.map((s) => s.action)).toEqual([
       "goto",
       "fill",
@@ -834,7 +927,7 @@ describe("registerRecorderHandlers profile resolution (M14)", () => {
       });
       // The save-state target directory is created so codegen can write it.
       expect(existsSync(authDir)).toBe(true);
-      recorder.stop();
+      await recorder.stop();
     } finally {
       fx.handle.close();
     }
@@ -900,7 +993,7 @@ describe("registerRecorderHandlers profile resolution (M14)", () => {
       await start?.({ caseId: fx.caseId });
       expect(seen[0]?.viewport).toBeUndefined();
       expect(seen[0]?.device).toBe("iPhone 11");
-      recorder.stop();
+      await recorder.stop();
 
       // The payload carries only `{caseId}` (M14) — empty or mistyped rejects.
       expect(() => start?.({})).toThrow();

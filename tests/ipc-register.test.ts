@@ -129,6 +129,7 @@ describe("registerRecorderHandlers (M15)", () => {
       makeOutputPath: () => "/tmp/playtest-codegen-ipc.js",
       waitMs: () => Promise.resolve(),
       startGracePeriodMs: 0,
+      stopGracePeriodMs: 0,
     };
     return new CodegenRecorder(deps);
   }
@@ -149,7 +150,7 @@ describe("registerRecorderHandlers (M15)", () => {
         pid: 7,
       });
 
-      const stopped = ipc.call("recorder:stop", {}) as {
+      const stopped = (await ipc.call("recorder:stop", {})) as {
         steps: unknown[];
         unsupported: Array<{ line: string; reason: string }>;
         raw: string;

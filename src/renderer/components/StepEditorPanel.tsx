@@ -56,7 +56,7 @@ const ACTION_HINTS: Record<StepAction, string> = {
   "go-forward": "Goes forward one entry in the page history.",
   upload: "Needs a Selector plus one file path in Value (JSON array uploads several).",
   drag: "Needs a Selector (source) plus the target locator in Value.",
-  wait: "Value = milliseconds to sleep, or a Selector to wait for.",
+  wait: "Value = milliseconds to sleep. Prefer assert-* or wait-url — fixed sleeps are flaky.",
   "wait-url":
     "Value = a glob like **/login, or /regex/ — waits until the page URL matches (assert-url checks immediately instead).",
   "scroll-into-view":

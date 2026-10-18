@@ -14,6 +14,7 @@ import {
   attributeValueFrom,
   clickValueFrom,
   expectTarget,
+  isNegatedExpect,
   locatorSource,
   pageChainSource,
   terminalArgs,
@@ -29,6 +30,44 @@ import {
 export type ParsedLine =
   | { kind: "step"; step: Omit<TestStep, "order"> }
   | { kind: "unsupported"; entry: RecorderUnsupported };
+
+/**
+ * Negated matchers that have an exact positive action already in the runner
+ * vocabulary. Everything else negated is reported as unsupported rather than
+ * silently replayed as the positive assertion (M18).
+ */
+const NEGATED_ASSERTIONS: Readonly<Record<string, TestStep["action"]>> = {
+  toBeVisible: "assert-hidden",
+  toBeHidden: "assert-visible",
+  toBeEnabled: "assert-disabled",
+  toBeDisabled: "assert-enabled",
+  toBeChecked: "assert-unchecked",
+};
+
+function negatedAssertion(stmt: string, target: string | undefined): ParsedLine {
+  const matcher = /\.not\s*\.\s*([A-Za-z][A-Za-z0-9]*)\s*\(/.exec(stmt)?.[1];
+  const action = matcher === undefined ? undefined : NEGATED_ASSERTIONS[matcher];
+  if (action !== undefined) {
+    return { kind: "step", step: { action, selector: target } };
+  }
+  return {
+    kind: "unsupported",
+    entry: {
+      line: stmt,
+      reason: `expect(...).not.${matcher ?? "…"}() has no step equivalent — add a manual step`,
+    },
+  };
+}
+
+function unsupportedTrial(stmt: string, terminal: string): ParsedLine {
+  return {
+    kind: "unsupported",
+    entry: {
+      line: stmt,
+      reason: `${terminal}({ trial: true }) only checks actionability — record the real action or add a manual step`,
+    },
+  };
+}
 
 /**
  * Parse one codegen statement. Distinguishes three cases (M15):
@@ -153,6 +192,9 @@ export function parseLine(line: string, event?: ClickEventMarker): ParsedLine | 
   }
   // Click: locator.click() — options (button/modifiers/force/clickCount) as JSON.
   if (/\.click\(/.test(stmt)) {
+    if (/trial:\s*true/.test(stmt)) {
+      return unsupportedTrial(stmt, "click");
+    }
     return asStep({
       action: "click",
       selector: locatorSource(stmt, "click"),
@@ -164,16 +206,34 @@ export function parseLine(line: string, event?: ClickEventMarker): ParsedLine | 
     const num = /waitForTimeout\(\s*(\d+)/.exec(stmt)?.[1];
     return asStep({ action: "wait", value: num });
   }
-  // Visibility wait: locator.waitFor() — hidden/detached waits assert absence.
+  // Locator waits: keep the recorded state (attached/detached differ from
+  // visible/hidden); only `detached` has no equivalent step action (M18).
   if (/\.waitFor\(/.test(stmt)) {
-    if (/state:\s*['"](hidden|detached)['"]/.test(stmt)) {
-      return asStep({ action: "assert-hidden", selector: locatorSource(stmt, "waitFor") });
+    const selector = locatorSource(stmt, "waitFor");
+    const state = /state:\s*['"](attached|detached|visible|hidden)['"]/.exec(stmt)?.[1];
+    if (state === "attached") {
+      return asStep({ action: "assert-attached", selector });
     }
-    return asStep({ action: "assert-visible", selector: locatorSource(stmt, "waitFor") });
+    if (state === "detached") {
+      return {
+        kind: "unsupported",
+        entry: {
+          line: stmt,
+          reason: 'waitFor({ state: "detached" }) has no step equivalent — add a manual step',
+        },
+      };
+    }
+    if (state === "hidden") {
+      return asStep({ action: "assert-hidden", selector });
+    }
+    return asStep({ action: "assert-visible", selector });
   }
   // Assertions: expect(locator).toBeVisible() / toContainText('…') / …
   if (stmt.includes("expect(")) {
     const target = expectTarget(stmt);
+    if (isNegatedExpect(stmt)) {
+      return negatedAssertion(stmt, target);
+    }
     if (/toBeHidden/.test(stmt)) {
       return asStep({ action: "assert-hidden", selector: target });
     }
@@ -241,6 +301,9 @@ export function parseLine(line: string, event?: ClickEventMarker): ParsedLine | 
   }
   // dblclick is first-class (legacy click+value:"dblclick" still runs).
   if (/\.dblclick\(/.test(stmt)) {
+    if (/trial:\s*true/.test(stmt)) {
+      return unsupportedTrial(stmt, "dblclick");
+    }
     return asStep({ action: "dblclick", selector: locatorSource(stmt, "dblclick") });
   }
 

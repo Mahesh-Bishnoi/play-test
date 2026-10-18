@@ -12,27 +12,29 @@ import type { BrowserHandle, ContextLaunchOptions, RunContext, RunPage } from ".
 
 export class PlaywrightRunContext implements RunContext {
   private readonly context: BrowserContext;
-  private readonly rawPage: Page;
+  /** Kept typed so the video follows a popup adopted by a `popup` click (M18). */
+  private readonly runPage: PlaywrightRunPage;
   readonly page: RunPage;
   private closed = false;
 
   constructor(context: BrowserContext, page: Page, o: ContextLaunchOptions) {
     this.context = context;
-    this.rawPage = page;
-    this.page = new PlaywrightRunPage(context, page, {
+    this.runPage = new PlaywrightRunPage(context, page, {
       downloadsDir: o.downloadsDir,
       onLog: o.onLog,
       dialogPolicy: o.dialogPolicy,
     });
+    this.page = this.runPage;
   }
 
   async saveVideo(dest: string): Promise<void> {
     // Finalize the recording first: Playwright's saveAs needs the browser
     // connection (it dies in browser close), and the artifact is only complete
-    // once the context closes. Read the Video via the held page — the object
-    // outlives the context.
+    // once the context closes. Read the Video via the current page — the object
+    // outlives the context, and after popup adoption the current page's
+    // recording is the one that shows the rest of the run.
     await this.close();
-    const video = this.rawPage.video();
+    const video = this.runPage.currentPage().video();
     if (video !== null) {
       await video.saveAs(dest);
     }
@@ -40,7 +42,7 @@ export class PlaywrightRunContext implements RunContext {
 
   async discardVideo(): Promise<void> {
     await this.close();
-    const video = this.rawPage.video();
+    const video = this.runPage.currentPage().video();
     if (video !== null) {
       await video.delete();
     }
@@ -103,7 +105,7 @@ export class PlaywrightBrowserHandle implements BrowserHandle {
       ...(o.timezoneId !== undefined ? { timezoneId: o.timezoneId } : {}),
       ...(o.storageState !== undefined ? { storageState: o.storageState } : {}),
       ...(o.baseURL !== undefined ? { baseURL: o.baseURL } : {}),
-      recordVideo: { dir: o.videoDir, size: o.viewport ?? { width: 1280, height: 720 } },
+      recordVideo: { dir: o.videoDir, size: resolveRecordVideoSize(o) },
     });
     try {
       await context.tracing.start({ screenshots: true, snapshots: true, title: o.title });
@@ -131,4 +133,25 @@ export class PlaywrightBrowserHandle implements BrowserHandle {
   async close(): Promise<void> {
     await this.browser.close();
   }
+}
+
+/**
+ * Video size for a context (M18). An explicit viewport wins; otherwise use the
+ * device preset's viewport, so a mobile recording is not letterboxed into the
+ * 1280×720 default (Playwright records the viewport, not the full page).
+ */
+export function resolveRecordVideoSize(o: {
+  viewport?: { width: number; height: number };
+  device?: string;
+}): { width: number; height: number } {
+  if (o.viewport !== undefined) {
+    return o.viewport;
+  }
+  if (o.device !== undefined) {
+    const preset = devices[o.device];
+    if (preset?.viewport != null) {
+      return { width: preset.viewport.width, height: preset.viewport.height };
+    }
+  }
+  return { width: 1280, height: 720 };
 }

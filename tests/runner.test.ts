@@ -133,7 +133,7 @@ class FakePage implements RunPage {
   async assertHidden(selector: string, timeoutMs?: number): Promise<void> {
     await this.enter("assertHidden", [selector, timeoutMs]);
   }
-  async assertText(selector: string, value: string, timeoutMs?: number): Promise<void> {
+  async assertText(selector: string, value: string | string[], timeoutMs?: number): Promise<void> {
     await this.enter("assertText", [selector, value, timeoutMs]);
   }
   async assertValue(selector: string, value: string, timeoutMs?: number): Promise<void> {
@@ -740,6 +740,17 @@ describe("executeStep mapping", () => {
     expect(page.calls[9]?.args).toEqual(["#card", "#drop", undefined]);
   });
 
+  it("keeps a JSON array as a list for multi-element assert-text (M18)", async () => {
+    const page = new FakePage();
+    await executeStep(page, {
+      order: 0,
+      action: "assert-text",
+      selector: ".row",
+      value: '["a","b"]',
+    });
+    expect(page.calls[0]?.args).toEqual([".row", ["a", "b"], undefined]);
+  });
+
   it("rejects the new M15 actions with missing or malformed fields", async () => {
     const page = new FakePage();
     await expect(
@@ -1035,6 +1046,20 @@ describe("popup / download clicks (M16)", () => {
       undefined,
       { popup: true },
     ]);
+  });
+
+  it("warns about fixed waits and forced clicks before running (M18)", async () => {
+    const fx = track(
+      makeFixture([
+        { action: "wait", value: "100" },
+        { action: "click", selector: "#go", value: "force" },
+      ]),
+    );
+    const started = fx.runner.runSingle({ caseId: fx.caseId, mode: "unsupervised" });
+    await started.done;
+    const warnings = warnMessages(fx);
+    expect(warnings.some((msg) => msg.includes("prefer assert-* or wait-url"))).toBe(true);
+    expect(warnings.some((msg) => msg.includes("forces the click"))).toBe(true);
   });
 });
 

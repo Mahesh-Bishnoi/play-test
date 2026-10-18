@@ -47,6 +47,16 @@ export class PlaywrightRunPage implements RunPage {
     },
   ) {
     this.page = page;
+    attachPageDiagnostics(page, deps.onLog);
+  }
+
+  /**
+   * The page currently being driven (M18). `PlaywrightRunContext` reads its
+   * video, so after a `popup` click the failure recording comes from the tab
+   * the rest of the run used, not the original (now idle) page.
+   */
+  currentPage(): Page {
+    return this.page;
   }
 
   /** Recorder chains (`getByRole(…)`) need dispatch; plain CSS passes through. */
@@ -73,11 +83,13 @@ export class PlaywrightRunPage implements RunPage {
         loc.click({ timeout: timeoutMs, ...clickOptions }),
       ]);
       // Adopt the opened page: tracing is context-level, but the profile's
-      // dialog policy is attached per page, so re-attach it to the new one.
+      // dialog policy and error reporting are attached per page, so re-attach
+      // them to the new one.
       this.page = next;
       if (this.deps.dialogPolicy !== undefined && this.deps.dialogPolicy !== "default") {
         attachDialogPolicy(next, this.deps.dialogPolicy);
       }
+      attachPageDiagnostics(next, this.deps.onLog);
       this.deps.onLog("info", `popup opened: ${next.url()}`);
       return;
     }
@@ -204,7 +216,7 @@ export class PlaywrightRunPage implements RunPage {
     await expect(this.page).toHaveTitle(parseAssertMatcher(value), this.assertTimeout(timeoutMs));
   }
 
-  async assertText(selector: string, value: string, timeoutMs?: number): Promise<void> {
+  async assertText(selector: string, value: string | string[], timeoutMs?: number): Promise<void> {
     await expect(this.loc(selector)).toContainText(value, this.assertTimeout(timeoutMs));
   }
 
@@ -281,6 +293,20 @@ export function attachDialogPolicy(page: Page, policy: ContextLaunchOptions["dia
   } else if (policy === "dismiss") {
     page.on("dialog", (dialog) => void dialog.dismiss());
   }
+}
+
+/**
+ * Surface uncaught page exceptions in the run log (M18). Playwright's trace
+ * viewer already records them, but the live run pane otherwise shows only the
+ * failed step — the JS exception that broke the page is the missing cause.
+ */
+export function attachPageDiagnostics(
+  page: Page,
+  onLog: (level: RunLogLevel, message: string) => void,
+): void {
+  page.on("pageerror", (error) => {
+    onLog("error", `page error: ${error.message}`);
+  });
 }
 
 /**

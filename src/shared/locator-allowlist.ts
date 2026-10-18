@@ -31,6 +31,13 @@ export const CHAIN_METHODS: ReadonlySet<string> = new Set([
   "first",
   "last",
   "nth",
+  // Locator combinators and scoping (M18): each takes a locator, resolved
+  // through the same allowlisted parser (`getByRole('a').or(getByText('b'))`).
+  "and",
+  "or",
+  "within",
+  // Debug label used by the trace viewer/reports (returns the same locator).
+  "describe",
 ]);
 
 /** Split on a separator at nesting depth 0, ignoring strings/regex/parens. */

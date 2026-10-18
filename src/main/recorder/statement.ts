@@ -110,6 +110,25 @@ export function expectTarget(stmt: string): string | undefined {
   return pageChainSource(trimmed);
 }
 
+/**
+ * True when the assertion is negated: `expect(locator).not.toBeVisible()`.
+ * Only the text after `expect(...)` is inspected, so a `.not.` inside the
+ * locator's own arguments (e.g. `getByText('.not.')`) is not misread.
+ */
+export function isNegatedExpect(stmt: string): boolean {
+  const marker = "expect(";
+  const idx = stmt.indexOf(marker);
+  if (idx === -1) {
+    return false;
+  }
+  const start = idx + marker.length;
+  const inner = balancedCallInner(stmt, start);
+  if (inner === undefined) {
+    return false;
+  }
+  return /^\s*\.\s*not\s*\./.test(stmt.slice(start + inner.length + 1));
+}
+
 /** The `page.`-relative locator chain of an expression, e.g. a `dragTo` target. */
 export function pageChainSource(expr: string): string | undefined {
   const trimmed = expr.trim();

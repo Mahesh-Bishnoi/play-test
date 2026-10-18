@@ -190,7 +190,8 @@ Artifacts: `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/step-<NN>.png, fail
   project `baseUrl`), then the case profile
   (M14; previously explicit emulation/storage fields). `recorder:stop() → {steps, unsupported:
   [{line, reason}], raw}` — `unsupported` lists codegen lines the parser skipped, shown in the
-  import preview so the user can add them as manual steps.
+  import preview so the user can add them as manual steps. Stop is async since M18: it lets
+  codegen's SIGINT handler flush `--save-storage`/the output file (bounded) before parsing.
 - Runner: `runner:runSingle({caseId, mode, actionDelayMs?})`, `runner:runSuite({suiteId, caseIds[], mode:'unsupervised'})`,
   `runner:resumeFromStep`, `runner:rerunFailed`, `runner:rerunLastFailed`, `runner:cancel`.
 - Reports: `report:getHtml`, `report:exportPdf`, `report:openTrace({caseRunId} | {tracePath})`.
@@ -218,23 +219,29 @@ Artifacts: `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/step-<NN>.png, fail
 
 ## 7. Behavior Notes (current, not history)
 
-The approved M14–M17 changes live in `PLAN.md`. Where that plan conflicts with §6–§7 the
+The approved M14–M18 changes live in `PLAN.md`. Where that plan conflicts with §6–§7 the
 plan wins until the milestone lands; this section describes the code as it is today.
 
 - Recorder: argv-only flag builder (`buildCodegenArgs`, allowlisted; viewport `"W,H"` comma,
   locale → `--lang`, unknown device rejects); spawn via `playwright-cli.ts` (resolved CLI +
   Electron-as-Node, `npx` fallback) with a post-spawn grace check that surfaces codegen stderr.
+  Stop is graceful (M18): SIGINT lets codegen flush `--save-storage` and the throttled output
+  file, then a bounded wait and a SIGTERM fallback (Windows has no POSIX SIGINT delivery).
   Parser: goto/fill/select (incl. `{label|value|index}`)/check/uncheck/press/dblclick/type/
   hover/focus/click (options in `value`)/reload/go-back/go-forward/upload (`setInputFiles`)/
   drag (`dragTo`)/`waitForTimeout`/`waitForURL`→`wait-url`/`scrollIntoViewIfNeeded`→
   `scroll-into-view`/asserts — `toContainText`→`assert-text`, `toHaveText`→`assert-text-exact`,
   `toHaveAttribute`→`assert-attribute`, `toBeAttached`→`assert-attached`. Click `position` and a
   `pressSequentially`/`type` `{delay}` option are encoded into the same JSON `value` the runner
-  parses. Unrecognised statements are returned as `unsupported` (never become a `wait` step).
+  parses. Negated assertions map only to exact inverses (visible↔hidden, enabled↔disabled,
+  checked→unchecked); other `.not.*` matchers, `click`/`dblclick` `{trial:true}`, and
+  `waitFor({state:'detached'})` are reported as `unsupported` rather than silently replayed
+  (M18). `waitFor` states map to `assert-visible`/`assert-hidden`/`assert-attached`.
+  Unrecognised statements are returned as `unsupported` (never become a `wait` step).
   Resolver
-  `resolveLocator` allowlists `getBy*`/`locator`/`frameLocator` chains (incl. nested frames) and
-  recursive `filter({has|hasNot})`; `page.evaluate` and other non-locator heads fail with edit
-  guidance.
+  `resolveLocator` allowlists `getBy*`/`locator`/`frameLocator` chains (incl. nested frames),
+  recursive `filter({has|hasNot})`, and Locator `and`/`or`/`within`/`describe` (M18);
+  `page.evaluate` and other non-locator heads fail with edit guidance.
 - Runner: `SingleCaseRunner` (supervised pause/resume in same context; cancel settles between
   steps) + `SuiteRunner` (worker pool, missing-key pre-scan, fail→skip-rest, settle
   failed > cancelled > passed, best-effort HTML). Screenshot: animations disabled, caret
@@ -242,6 +249,12 @@ plan wins until the milestone lands; this section describes the code as it is to
   to skipped bucket. `go-back`/`go-forward` fail with edit guidance when there is no history
   entry; Back/Forward Cache restores are not a concern — Playwright disables BFCache by default
   (and a restore would desynchronise the `Page` anyway, so it is out of scope).
+  Flake hints (M18): each case logs warnings for fixed `wait` steps (max 3 + count) and forced
+  clicks before launch, in both runners. `assert-text` accepts a JSON array and passes it to
+  `toContainText(string[])`. Uncaught page exceptions are logged as `page error: …` through
+  `page.on('pageerror')` on the run page and an adopted popup. Video size follows the device
+  preset when no explicit viewport is set; after popup adoption the saved/deleted video is the
+  adopted page's.
 - Profile seeding (M17): `storageState` loads a saved auth file, `sessionState` reads a JSON
   object of string → string and seeds `sessionStorage` through `addInitScript`, scoped to the
   project's base-URL origin (unscoped when the project has no base URL). A malformed seed file
@@ -262,7 +275,7 @@ files. Never copy dependency versions from memory — check live (`npm view`) be
 ## 9. Verification
 
 `npm run typecheck && npm test && npm run package`, plus `npm run test:e2e` when
-runner/recorder/reports change (M14–M17 add e2e files — list them in the `test:e2e` script).
+runner/recorder/reports change (M14–M18 add e2e files — list them in the `test:e2e` script).
 `package` already stops at the unpacked `out/<app>-<platform>-<arch>/` dir; Forge 8 removed the
 `--dir` flag (the command in older notes fails with `unknown option '--dir'`).
 Manual smoke: record 3-step login → supervised run (pause/resume) → unsupervised suite of 2
@@ -282,4 +295,6 @@ sync conflicts surface on pull, not status refresh. Toolchain: `typescript@7.0.2
 file is produced by the tester (DevTools `JSON.stringify(sessionStorage)`). The M17
 `case_profiles.session_state` column is part of the bootstrap DDL only: an existing
 `~/PlayTestData/playtest.db` must be deleted and re-seeded (no migration runner or ALTER
-support, §2).
+support, §2). The M18 graceful recorder stop relies on SIGINT delivery: on Windows the
+SIGTERM fallback can terminate codegen before `--save-storage` is written, so save-state
+there still needs a smoke test (and a platform-specific graceful stop if it fails).
