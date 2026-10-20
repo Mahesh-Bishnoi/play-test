@@ -1,4 +1,5 @@
 import ConfirmDialog from "../components/ConfirmDialog.js";
+import RunProgressPanel from "../components/run-progress/RunProgressPanel.js";
 import CaseMembershipCard from "./suite-detail/CaseMembershipCard.js";
 import RunSuiteDialog from "./suite-detail/RunSuiteDialog.js";
 import SuiteListCard from "./suite-detail/SuiteListCard.js";
@@ -19,6 +20,10 @@ interface Props {
   refreshToken?: number;
   /** IDE shell: notify the explorer to reload after CRUD. */
   onChanged?: () => void;
+  /** App-owned run id so progress survives tab switches (M21). */
+  activeRunId?: string | null;
+  onRunStarted?: (suiteRunId: string) => void;
+  onRunDismissed?: (suiteRunId: string) => void;
 }
 
 /**
@@ -35,6 +40,9 @@ export default function SuiteDetailPage({
   onSuiteFocus,
   refreshToken,
   onChanged,
+  activeRunId,
+  onRunStarted,
+  onRunDismissed,
 }: Props): React.JSX.Element {
   const s = useSuiteDetail({
     projectId,
@@ -43,6 +51,7 @@ export default function SuiteDetailPage({
     onSuiteFocus,
     onCaseDeleted,
     onChanged,
+    onRunStarted,
   });
 
   const { selectedSuite } = s;
@@ -115,6 +124,14 @@ export default function SuiteDetailPage({
         </p>
       )}
 
+      {activeRunId !== null && activeRunId !== undefined && (
+        <RunProgressPanel
+          suiteRunId={activeRunId}
+          onViewReport={onViewReport}
+          onDismiss={onRunDismissed}
+        />
+      )}
+
       <SuiteListCard
         suites={s.suites}
         suiteId={s.suiteId}
@@ -156,8 +173,6 @@ export default function SuiteDetailPage({
           onRerunFailed={s.rerunLastFailed}
           onOpenCase={onOpenCase}
           onRequestDeleteCase={s.requestDeleteCase}
-          lastSuiteRunId={s.lastSuiteRunId}
-          onViewReport={onViewReport}
         />
       )}
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { api, formatApiError } from "../api.js";
+import RunProgressPanel from "../components/run-progress/RunProgressPanel.js";
 
 interface Props {
   suiteRunId: string;
@@ -151,6 +152,11 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
           {notice}
         </p>
       )}
+      <RunProgressPanel
+        suiteRunId={suiteRunId}
+        hideWhenFinished
+        note="The report below is a snapshot from when you opened it. Refresh re-renders it, and it refreshes automatically when the run finishes."
+      />
       <div className="pt-row">
         <button type="button" className="pt-btn pt-btn-sm" onClick={refresh} disabled={busy}>
           Refresh

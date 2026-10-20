@@ -148,7 +148,9 @@ export function getSuiteReport(
   });
   const passed = cases.filter((c) => c.status === "passed").length;
   const failed = cases.filter((c) => c.status === "failed").length;
-  // Contract summary has no cancelled bucket — cancellation counts as skipped.
+  // Contract summary has no cancelled/running buckets — cancellation counts as
+  // skipped, and a mid-run preview's pending/running cases do too. The M21 live
+  // progress panel is the place for the accurate split.
   const skipped = cases.length - passed - failed;
   return {
     suiteRunId,

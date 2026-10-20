@@ -34,18 +34,36 @@ export function writeSuiteHtmlReport(db: AppDatabase, root: string, suiteRunId: 
   return htmlPath;
 }
 
-/** Read a previously written report (regenerating it when absent). */
-export function readSuiteHtmlReport(db: AppDatabase, root: string, suiteRunId: string): string {
-  return readFileSync(ensureSuiteHtmlPath(db, root, suiteRunId), "utf-8");
+/**
+ * Read a written report (regenerating it when absent). `force` rewrites the
+ * file even when it exists — used while a run is still active, so the in-app
+ * Refresh button sees current statuses instead of the first mid-run snapshot.
+ */
+export function readSuiteHtmlReport(
+  db: AppDatabase,
+  root: string,
+  suiteRunId: string,
+  opts: { force?: boolean } = {},
+): string {
+  return readFileSync(ensureSuiteHtmlPath(db, root, suiteRunId, opts), "utf-8");
 }
 
-/** Absolute html path for a run, regenerating the file when absent. */
-export function ensureSuiteHtmlPath(db: AppDatabase, root: string, suiteRunId: string): string {
+/** Absolute html path for a run, regenerating it when absent (or forced). */
+export function ensureSuiteHtmlPath(
+  db: AppDatabase,
+  root: string,
+  suiteRunId: string,
+  opts: { force?: boolean } = {},
+): string {
   const existing = db.select().from(suiteRuns).where(eq(suiteRuns.id, suiteRunId)).all()[0];
   if (existing === undefined) {
     throw new SuiteRunNotFoundError(suiteRunId);
   }
-  if (existing.reportHtmlPath !== null && existsSync(existing.reportHtmlPath)) {
+  if (
+    opts.force !== true &&
+    existing.reportHtmlPath !== null &&
+    existsSync(existing.reportHtmlPath)
+  ) {
     return existing.reportHtmlPath;
   }
   return writeSuiteHtmlReport(db, root, suiteRunId);

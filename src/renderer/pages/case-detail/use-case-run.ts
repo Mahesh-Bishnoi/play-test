@@ -23,15 +23,19 @@ export interface CaseRun {
   runLogs: string[];
   failedOrder: number | null;
   runFinished: string | null;
+  /** Case-level summary from `run:finished` (drives the progress bar's verdict). */
+  lastSummary: RunFinishedEvent["summary"] | null;
+  /** Step count captured when the run started (M21 progress denominator). */
+  runStepTotal: number;
   runBusy: boolean;
   runSpeedMs: number;
   setRunSpeedMs: (ms: number) => void;
   /** Supervised run paused on a failed step — the failed step can be edited. */
   paused: boolean;
-  startRun: (mode: RunMode) => void;
+  startRun: (mode: RunMode, stepCount: number) => void;
   resumeRun: () => void;
   cancelRun: () => void;
-  fullRerun: (mode: RunMode) => void;
+  fullRerun: (mode: RunMode, stepCount: number) => void;
 }
 
 /**
@@ -53,6 +57,8 @@ export function useCaseRun(
   const [runLogs, setRunLogs] = useState<string[]>([]);
   const [failedOrder, setFailedOrder] = useState<number | null>(null);
   const [runFinished, setRunFinished] = useState<string | null>(null);
+  const [lastSummary, setLastSummary] = useState<RunFinishedEvent["summary"] | null>(null);
+  const [runStepTotal, setRunStepTotal] = useState(0);
   const [runBusy, setRunBusy] = useState(false);
   const [runSpeedMs, setRunSpeedMs] = useState<number>(0);
   // Listener state lives in refs so the `run:*` subscriptions can be mounted
@@ -74,6 +80,7 @@ export function useCaseRun(
 
   const applyFinishedEvent = useCallback((event: RunFinishedEvent): void => {
     const s = event.summary;
+    setLastSummary(s);
     setRunFinished(
       `Finished: ${s.passed} passed, ${s.failed} failed, ${s.skipped} skipped (of ${s.total}).`,
     );
@@ -91,6 +98,8 @@ export function useCaseRun(
     setRunLogs([]);
     setFailedOrder(null);
     setRunFinished(null);
+    setLastSummary(null);
+    setRunStepTotal(0);
   }, [caseId]);
 
   // Subscribe once, at mount: the missing-key fast path emits step/log/finish
@@ -136,11 +145,19 @@ export function useCaseRun(
   }, [applyStepEvent, applyLogEvent, applyFinishedEvent]);
 
   const startRun = useCallback(
-    (mode: RunMode): void => {
+    (mode: RunMode, stepCount: number): void => {
       setRunBusy(true);
       onError(null);
       bufferRef.current.clear();
       startingRef.current = true;
+      setRunStepTotal(stepCount);
+      // Clear the previous result immediately: a failed start must not leave
+      // the old run's verdict looking like this run's progress.
+      setStatusByOrder({});
+      setFailedOrder(null);
+      setRunFinished(null);
+      setLastSummary(null);
+      setRunLogs([]);
       const actionDelayMs = mode === "supervised" ? runSpeedMs : undefined;
       api
         .runSingleCase(caseId, mode, actionDelayMs)
@@ -149,6 +166,7 @@ export function useCaseRun(
           setStatusByOrder({});
           setFailedOrder(null);
           setRunFinished(null);
+          setLastSummary(null);
           setRunLogs([]);
           activeRunRef.current = active;
           setActiveRun(active);
@@ -224,9 +242,9 @@ export function useCaseRun(
   }, [activeRun, onError, onNotice]);
 
   const fullRerun = useCallback(
-    (mode: RunMode): void => {
+    (mode: RunMode, stepCount: number): void => {
       if (activeRun === null) {
-        startRun(mode);
+        startRun(mode, stepCount);
         return;
       }
       const { suiteRunId } = activeRun;
@@ -235,7 +253,7 @@ export function useCaseRun(
       api
         .cancelRun(suiteRunId)
         .then(() => {
-          startRun(mode);
+          startRun(mode, stepCount);
         })
         .catch((err: unknown) => {
           onError(formatApiError(err));
@@ -251,6 +269,8 @@ export function useCaseRun(
     runLogs,
     failedOrder,
     runFinished,
+    lastSummary,
+    runStepTotal,
     runBusy,
     runSpeedMs,
     setRunSpeedMs,

@@ -41,6 +41,10 @@ self-contained HTML + PDF reports → re-run failures. Local-first, Chromium onl
 - Execution: suite-parallel (`workers = min(cpu/2, cases)`); direct `playwright` library plus
   `playwright/test`'s `expect` matchers (no test runner — so no UI mode / sharding /
   multi-browser; see Non-goals). One Chromium per runner/suite worker, fresh context per case.
+- Live progress (M21, approved 2026-10-20): an additive read-only
+  `runner:getProgress({suiteRunId})` channel backs the suite panel, global run strip, and report
+  banner. Suite case rows are created `pending` and claimed as `running` by a worker; the state
+  already existed in `CaseRunStatusSchema`, so this is not a schema change (no new table/column).
 - Assertions: every `assert-*` step runs through Playwright web-first matchers. Strict
   matching (no `.first()`; `assert-count` counts all matches). URL/title values go straight to
   `toHaveURL`/`toHaveTitle`: a plain string is matched exactly (whitespace normalised), the way
@@ -90,7 +94,7 @@ self-contained HTML + PDF reports → re-run failures. Local-first, Chromium onl
 ```
 src/
   main/
-    db.ts / schema.ts / artifacts.ts
+    db.ts / schema.ts / artifacts.ts / run-progress.ts
     ipc-projects.ts / ipc-suites.ts / ipc-cases.ts / ipc-steps.ts
     ipc-profiles.ts / main.ts
     ipc/                          // Electron-agnostic handler registration, one file per area
@@ -139,13 +143,15 @@ src/
       profile-form.ts             //   profile form ⇄ CaseProfileInput mapping
       use-record-options.ts       //   debounced profile + case-URL form state
       use-case-run.ts             //   single-case run state + run:* subscription
+      step-progress.ts            //   live step counts/phase → progress bar (M21)
       RecordOptionsPanel.tsx / RunControls.tsx / StepTable.tsx
     pages/suite-detail/           // suite detail page split by concern
       use-suite-detail.ts         //   membership, filtering, run/delete/transfer state
       SuiteListCard.tsx / CaseMembershipCard.tsx / RunSuiteDialog.tsx
     components/StepNode, StepGraph, StepEditorPanel, TestDataEditor,
       RecorderImportPreview, SyncPanel, BrowserBanner, ConfirmDialog,
-      pick-locator.ts, suite-run-filter.ts, workflow-layout.ts
+      pick-locator.ts, suite-run-filter.ts, workflow-layout.ts,
+      RunProgressBar.tsx, run-progress/ (polling hook, panel, model — M21)
   shared/schema.ts / step-types.ts / ipc-contract.ts / export-format.ts
 tests/                          // vitest unit + PLAYTEST_E2E-gated e2e (DummyTax, local site)
 dummy-tax-site/server.js        // zero-dep manual-trial portal (npm run dummy:tax-site)
@@ -194,6 +200,8 @@ Artifacts: `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/step-<NN>.png, fail
   codegen's SIGINT handler flush `--save-storage`/the output file (bounded) before parsing.
 - Runner: `runner:runSingle({caseId, mode, actionDelayMs?})`, `runner:runSuite({suiteId, caseIds[], mode:'unsupervised'})`,
   `runner:resumeFromStep`, `runner:rerunFailed`, `runner:rerunLastFailed`, `runner:cancel`.
+  M21 adds the read-only `runner:getProgress({suiteRunId}) → RunProgress` snapshot used by the
+  live suite/report UI (cases + summary + timestamps, no artifacts).
 - Reports: `report:getHtml`, `report:exportPdf`, `report:openTrace({caseRunId} | {tracePath})`.
 - Transfer: `transfer:exportProject/exportSuite/exportCase`, `transfer:importProject/importSuite/importCase`.
 - Sync: `sync:init/commit/push/pull/status/branch/resolve/clone` (local paths only).
@@ -215,8 +223,15 @@ Artifacts: `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/step-<NN>.png, fail
   session-state seed — dialog policy, persisted
   per case via `profile:get/set`) + import preview + paste-locator
   insert + Supervised (with speed selector) / Unsupervised run + live colors + resume/cancel + log.
+  A live step progress bar shows starting/running/paused/passed/failed/cancelled (M21).
+- SuiteDetailPage: a live run panel after the run starts — overall case bar, per-case
+  pending/running/passed/failed/cancelled badges, elapsed time, Cancel, and View report (M21).
+  The App shell keeps a compact run strip on the case/Sync tabs so a running suite is never lost
+  when the Suites tab unmounts; the run id survives remounts.
 - RunReportPage: suite summary, per-case step grid with thumbnails, Open-trace buttons,
-  Export PDF, Re-run failed.
+  Export PDF, Re-run failed. While the run is still active it shows a live progress banner and
+  an explicit "preview is a snapshot" hint; Refresh re-renders, and the iframe refreshes on
+  `run:finished` (M21).
 - Themes: IntelliJ dark (default) + opt-in Syntax light, persisted, pre-paint no-flash.
 
 ## 7. Behavior Notes (current, not history)
@@ -257,6 +272,14 @@ plan wins until the milestone lands; this section describes the code as it is to
   `page.on('pageerror')` on the run page and an adopted popup. Video size follows the device
   preset when no explicit viewport is set; after popup adoption the saved/deleted video is the
   adopted page's.
+- Live progress (M21): suite case rows are queued as `pending`, claimed as `running` by the
+  worker, then settle to `passed | failed | cancelled`; startup reconciliation and suite settle
+  also close pending rows, so a finished run never keeps a queued case. The renderer polls
+  `runner:getProgress` at ~1 s while a run is active (one panel per visible run; no overlapping
+  requests) and stops at a terminal status. Suite progress is case-level; single-case step
+  progress is derived from `run:step-update`. `report:getHtml` regenerates the HTML while the run
+  is pending/running (the cached file is reused only for finished runs), so the in-app Refresh
+  shows current statuses. Exported HTML/PDF files remain post-run snapshots.
 - Profile seeding (M17): `storageState` loads a saved auth file, `sessionState` reads a JSON
   object of string → string and seeds `sessionStorage` through `addInitScript`, scoped to the
   project's base-URL origin (unscoped when the project has no base URL). A malformed seed file
@@ -278,6 +301,9 @@ files. Never copy dependency versions from memory — check live (`npm view`) be
 
 `npm run typecheck && npm test && npm run package`, plus `npm run test:e2e` when
 runner/recorder/reports change (M14–M18 add e2e files — list them in the `test:e2e` script).
+M21 adds `tests/run-progress.test.ts`, `tests/step-progress.test.ts`,
+`tests/progress-model.test.ts`, and `tests/run-progress-bar.test.ts`; progress affects
+runner/report behaviour, so run e2e too.
 `package` already stops at the unpacked `out/<app>-<platform>-<arch>/` dir; Forge 8 removed the
 `--dir` flag (the command in older notes fails with `unknown option '--dir'`).
 Manual smoke: record 3-step login → supervised run (pause/resume) → unsupervised suite of 2

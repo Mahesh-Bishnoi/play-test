@@ -514,8 +514,12 @@ describe("runSuite (M6)", () => {
       });
       await waitFor(() => fx.launcher.contexts.length === 1, "first context to launch");
       await new Promise((r) => setTimeout(r, 50));
-      // Single worker: the second browser never launches while the first is gated.
+      // Single worker: the second browser never launches while the first is gated,
+      // and its row is still queued (`pending`) rather than pretending to run.
       expect(fx.launcher.contexts).toHaveLength(1);
+      expect(
+        fx.caseRunIdsOf(started.suiteRunId).find((r) => r.caseId === fx.caseIds[1])?.status,
+      ).toBe("pending");
       release();
       await started.done;
       expect(finishedSummary(fx, started.suiteRunId)).toEqual({
@@ -827,7 +831,7 @@ describe("runSuite (M6)", () => {
       expect(rows).toHaveLength(3);
       expect(rows.find((r) => r.caseId === fx.caseIds[1])?.status).toBe("failed");
       expect(rows.find((r) => r.caseId === fx.caseIds[2])?.status).toBe("passed");
-      expect(rows.every((r) => r.status !== "running")).toBe(true);
+      expect(rows.every((r) => r.status !== "running" && r.status !== "pending")).toBe(true);
       const suiteRow = fx.db
         .select()
         .from(suiteRuns)
@@ -896,6 +900,51 @@ describe("cancelRun (suite)", () => {
         .where(eq(suiteRuns.id, started.suiteRunId))
         .all()[0];
       expect(suiteRow?.status).toBe("cancelled");
+    } finally {
+      release();
+    }
+  });
+
+  it("settles cases still queued behind the running one", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    try {
+      const fx = track(
+        makeFixture(
+          [
+            { steps: [{ action: "goto", value: "https://a.test" }] },
+            { steps: [{ action: "goto", value: "https://b.test" }] },
+          ],
+          { workerCount: () => 1 },
+        ),
+      );
+      fx.launcher.gateFirst = gate;
+      const started = fx.suite.runSuite({
+        suiteId: fx.suiteId,
+        caseIds: fx.caseIds,
+        mode: "unsupervised",
+      });
+      await waitFor(() => fx.launcher.contexts.length === 1, "first case to launch");
+      expect(
+        fx.caseRunIdsOf(started.suiteRunId).find((r) => r.caseId === fx.caseIds[1])?.status,
+      ).toBe("pending");
+
+      await fx.suite.cancelRun({ suiteRunId: started.suiteRunId });
+      release();
+      await started.done;
+
+      expect(fx.caseRunIdsOf(started.suiteRunId).map((r) => r.status)).toEqual([
+        "cancelled",
+        "cancelled",
+      ]);
+      expect(finishedSummary(fx, started.suiteRunId)).toEqual({
+        total: 2,
+        passed: 0,
+        failed: 0,
+        skipped: 2,
+      });
     } finally {
       release();
     }
@@ -1109,7 +1158,7 @@ describe("runner + report IPC (M6)", () => {
       },
       artifactsRoot: fx.root,
     });
-    registerRunnerHandlers(handle, single, fx.suite);
+    registerRunnerHandlers(handle, single, fx.suite, fx.db);
     registerReportHandlers(handle, fx.db, {
       artifactsRoot: fx.root,
       renderPdf: (htmlPath: string) => {

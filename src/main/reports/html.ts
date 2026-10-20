@@ -20,6 +20,7 @@ const INLINE_CSS = [
   "th{background:#f4f4f5}",
   ".pass{color:#15803d;font-weight:600}.fail{color:#b91c1c;font-weight:600}",
   ".skipped{color:#6b7280}.running{color:#1d4ed8}",
+  ".pending{color:#6b7280;font-weight:600}.cancelled{color:#b45309;font-weight:600}",
   ".thumb{max-width:320px;border:1px solid #ddd}",
   ".err{white-space:pre-wrap;background:#fef2f2;border:1px solid #fecaca;padding:8px;font-size:12px}",
   ".muted{color:#6b7280;font-size:13px}",

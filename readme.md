@@ -12,6 +12,7 @@ Built with Electron + TypeScript + React + hand-written CSS, SQLite (`better-sql
 - **35 step actions** — `goto | click | dblclick | fill | type | select | check | uncheck | press | hover | focus | assert-visible | assert-hidden | assert-text | assert-value | assert-checked | assert-unchecked | assert-enabled | assert-disabled | assert-editable | assert-focused | assert-count | assert-url | assert-title | wait | assert-text-exact | assert-attribute | assert-attached | reload | go-back | go-forward | upload | drag | wait-url | scroll-into-view` (canonical list: `src/shared/step-types.ts`). Recorder `getBy*`/`locator` chains are resolved without `eval`.
 - **Supervised single-case runs** — headed, one worker, pauses on failure with context kept open. Resume-from-failed-step (re-runs edited step + followers in the same context) or full re-run. Optional pre-run speed control (Instant / 0.6s / 1.5s / 3s pacing between steps).
 - **Unsupervised runs** — single case or whole suite, headless, suite-parallel from day one (`workers = max(1, min(cpu/2, cases))`).
+- **Live run progress** — a case step bar (starting/running/paused/passed/failed), a suite panel with per-case pending/running/passed/failed badges and Cancel/View report, a compact run strip on other tabs, and a live banner while a report is still running. Exported reports remain post-run snapshots.
 - **Artifacts** — screenshot after every step; video + trace retained on failure only. Stored under `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/` (`step-NN.png`, `failed.webm`, `trace.zip`).
 - **Reports** — self-contained single-file HTML (inline CSS, base64 thumbnails, drill-down suite → case → step with error stacks) + PDF export (headless Chromium print). Per suite run, with Re-run-failed-cases-only.
 - **Test data (KV)** — per-case key/value table, `{{key}}` substitution at run time. Missing key fails the step with `missing test-data key: X`. Schema reserves a `source` column for future CSV.
@@ -25,8 +26,8 @@ Built with Electron + TypeScript + React + hand-written CSS, SQLite (`better-sql
 3. **Record steps** — open a case tab, enter the page URL, Record → interact in the codegen window → Stop → tick the steps to import in the preview.
 4. **Edit steps** — click a graph node to edit action/selector/value/timeout; reorder by drag or arrows. Add KV test data (`{{username}}`) in the Test Data section.
 5. **Run**
-   - Case tab → **Run supervised** (headed, pause/resume) or **Run unsupervised** (headless).
-   - Suite page → select cases → **Run Suite** (unsupervised, parallel).
+   - Case tab → **Run supervised** (headed, pause/resume) or **Run unsupervised** (headless); the progress bar shows live step counts and the final verdict.
+   - Suite page → select cases → **Run Suite** (unsupervised, parallel); the run panel shows queued/running/passed/failed cases live and keeps reporting on other tabs.
 6. **Review** — Run Report page: counts/durations, per-case step grid with thumbnails, Export PDF, Re-run failed.
 
 ### Try it with the dummy site

@@ -1,11 +1,14 @@
 import {
   RunnerCancelPayload,
+  RunnerGetProgressPayload,
   RunnerResumePayload,
   RunnerRerunFailedPayload,
   RunnerRerunLastFailedPayload,
   RunnerRunSinglePayload,
   RunnerRunSuitePayload,
 } from "../../shared/ipc-contract.js";
+import type { AppDatabase } from "../db.js";
+import { getRunProgress } from "../run-progress.js";
 import type { SingleCaseRunner } from "../runner/single-runner.js";
 import type { SuiteRunner } from "../suite-runner/suite-runner.js";
 import type { IpcHandleFn } from "./handle.js";
@@ -30,6 +33,7 @@ export function registerRunnerHandlers(
   handle: IpcHandleFn,
   single: SingleCaseRunner,
   suite: SuiteRunner,
+  db: AppDatabase,
 ): void {
   for (const channel of RUNNER_CHANNELS) {
     handle(channel, (rawPayload: unknown) => {
@@ -68,4 +72,10 @@ export function registerRunnerHandlers(
       }
     });
   }
+  // Read-only live progress (M21): polled by the suite panel / global strip /
+  // report banner. The runner objects stay unaware — the DB rows are the truth.
+  handle("runner:getProgress", (rawPayload: unknown) => {
+    const payload = RunnerGetProgressPayload.parse(rawPayload);
+    return getRunProgress(db, payload.suiteRunId);
+  });
 }

@@ -1351,13 +1351,14 @@ describe("suite delegation (M6)", () => {
     const handle: IpcHandleFn = (channel, listener) => {
       listeners.set(channel, listener);
     };
-    registerRunnerHandlers(handle, fx.runner, suite);
+    registerRunnerHandlers(handle, fx.runner, suite, fx.db);
     for (const channel of [
       "runner:runSingle",
       "runner:runSuite",
       "runner:resumeFromStep",
       "runner:rerunFailed",
       "runner:cancel",
+      "runner:getProgress",
     ]) {
       expect(listeners.has(channel)).toBe(true);
     }
@@ -1382,6 +1383,16 @@ describe("suite delegation (M6)", () => {
       await new Promise((r) => setTimeout(r, 1));
     }
     expect(fx.events.filter((e) => e.channel === "run:finished")).toHaveLength(1);
+    // M21: the read-only progress channel reports the settled run.
+    const progress = listeners.get("runner:getProgress")?.({
+      suiteRunId: ids.suiteRunId,
+    }) as { status: string; summary: { passed: number } };
+    expect(progress.status).toBe("passed");
+    expect(progress.summary.passed).toBe(1);
+    expect(() => listeners.get("runner:getProgress")?.({})).toThrow();
+    expect(() => listeners.get("runner:getProgress")?.({ suiteRunId: "ghost" })).toThrow(
+      /not found/,
+    );
     await expect(
       listeners.get("runner:cancel")?.({ suiteRunId: ids.suiteRunId }) as Promise<null>,
     ).resolves.toBeNull();

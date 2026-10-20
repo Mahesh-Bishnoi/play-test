@@ -168,7 +168,9 @@ export class SuiteRunner {
     for (const caseId of caseIds) {
       const caseRunId = this.generateId();
       caseRunIds.set(caseId, caseRunId);
-      this.runs.createCaseRun({ id: caseRunId, suiteRunId, caseId });
+      // Queued up front, claimed by a worker in `runOneCase` → the live panel
+      // can distinguish "waiting for a worker" from "executing".
+      this.runs.createCaseRun({ id: caseRunId, suiteRunId, caseId, status: "pending" });
     }
     this.activeSuiteRunId = suiteRunId;
     const caseDeps: CaseExecutionDeps = {
@@ -224,17 +226,19 @@ export class SuiteRunner {
   private settleSuite(suiteRunId: string): void {
     const cancelledRun = this.cancelled.has(suiteRunId);
     // Defensive: every worker has stopped by the time we settle, so any case
-    // still "running" was crashed/never started. Cancelled runs settle as
-    // cancelled; otherwise failed — never "passed".
-    const pending = this.runs.listCaseRuns(suiteRunId).filter((r) => r.status === "running");
-    for (const row of pending) {
+    // still running (or queued but never claimed) was crashed/never started.
+    // Cancelled runs settle as cancelled; otherwise failed — never "passed".
+    const unsettled = this.runs
+      .listCaseRuns(suiteRunId)
+      .filter((r) => r.status === "running" || r.status === "pending");
+    for (const row of unsettled) {
       this.runs.skipRunningSteps(row.id);
       this.runs.finishCaseRun(row.id, cancelledRun ? "cancelled" : "failed", this.now());
     }
-    if (pending.length > 0 && !cancelledRun) {
+    if (unsettled.length > 0 && !cancelledRun) {
       this.runs.log(
         "error",
-        `${pending.length} case(s) did not settle — marked failed instead of passed`,
+        `${unsettled.length} queued/running case(s) did not settle — marked failed instead of passed`,
       );
     }
     const rows = this.runs.listCaseRuns(suiteRunId);

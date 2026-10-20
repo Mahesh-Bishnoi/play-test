@@ -123,6 +123,7 @@ void app.whenReady().then(() => {
     },
     runner,
     suiteRunner,
+    handle.db,
   );
   registerReportHandlers(
     (channel, listener) => {

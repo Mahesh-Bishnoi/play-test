@@ -79,6 +79,45 @@ describe("renderer api runner wrappers", () => {
     await expect(api.rerunLastFailed("suite-1")).resolves.toEqual({ suiteRunId: "s" });
     expect(calls).toEqual([{ channel: "runner:rerunLastFailed", payload: { suiteId: "suite-1" } }]);
   });
+
+  it("polls runner:getProgress and parses the live snapshot (M21)", async () => {
+    const snapshot = {
+      suiteRunId: "run-1",
+      suiteId: "suite-1",
+      suiteName: "Tax flows",
+      mode: "unsupervised",
+      status: "running",
+      startedAt: 1000,
+      endedAt: null,
+      cases: [
+        {
+          caseRunId: "cr-0",
+          caseId: "c-0",
+          caseName: "Login",
+          status: "pending",
+          durationMs: null,
+        },
+      ],
+      summary: {
+        total: 1,
+        completed: 0,
+        pending: 1,
+        running: 0,
+        passed: 0,
+        failed: 0,
+        cancelled: 0,
+        skipped: 0,
+      },
+    };
+    const calls = stubPlaytest(() => Promise.resolve(snapshot));
+    await expect(api.getRunProgress("run-1")).resolves.toEqual(snapshot);
+    expect(calls).toEqual([{ channel: "runner:getProgress", payload: { suiteRunId: "run-1" } }]);
+  });
+
+  it("rejects malformed progress responses", async () => {
+    stubPlaytest(() => Promise.resolve({ suiteRunId: "run-1", status: "running" }));
+    await expect(api.getRunProgress("run-1")).rejects.toThrow();
+  });
 });
 
 describe("renderer api browser-setup wrappers (M7, PLAN §11)", () => {

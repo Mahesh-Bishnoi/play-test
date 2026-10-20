@@ -160,6 +160,18 @@ describe("renderSuiteHtml", () => {
     const html = renderSuiteHtml(report, () => big, undefined);
     expect(html).not.toContain("data:image/png;base64,");
   });
+
+  it("renders queued/cancelled statuses with matching styles (M21)", () => {
+    const { db } = seed();
+    const report = getSuiteReport(db, "run-1");
+    report.cases[0]!.status = "pending";
+    report.cases[1]!.status = "cancelled";
+    const html = renderSuiteHtml(report);
+    expect(html).toContain('<span class="pending">pending</span>');
+    expect(html).toContain('<span class="cancelled">cancelled</span>');
+    expect(html).toContain(".pending{color:");
+    expect(html).toContain(".cancelled{color:");
+  });
 });
 
 describe("report persistence", () => {
@@ -172,6 +184,9 @@ describe("report persistence", () => {
     const again = ensureSuiteHtmlPath(db, root, "run-1");
     expect(again).toBe(htmlPath);
     expect(readSuiteHtmlReport(db, root, "run-1")).toContain("Checkout");
+    // A live run forces a fresh render instead of serving the cached snapshot.
+    writeFileSync(htmlPath, "stale", "utf-8");
+    expect(readSuiteHtmlReport(db, root, "run-1", { force: true })).toContain("Checkout");
     expect(reportFileExists(htmlPath)).toBe(true);
     expect(reportFileExists(null)).toBe(false);
     expect(reportFileExists(join(root, "nope.png"))).toBe(false);

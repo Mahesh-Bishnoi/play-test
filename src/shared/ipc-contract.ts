@@ -2,10 +2,12 @@ import { z } from "zod";
 
 import {
   CaseProfileInputSchema,
+  CaseRunStatusSchema,
   DeviceNameSchema,
   HttpUrlSchema,
   LocaleSchema,
   RunModeSchema,
+  SuiteRunStatusSchema,
   TimezoneSchema,
 } from "./schema.js";
 import { StepStatusSchema } from "./step-types.js";
@@ -51,6 +53,7 @@ export const IPC_CHANNELS = [
   "runner:rerunFailed",
   "runner:rerunLastFailed",
   "runner:cancel",
+  "runner:getProgress",
   "report:getHtml",
   "report:exportPdf",
   "report:openTrace",
@@ -282,6 +285,45 @@ export const RunnerCancelPayload = z.object({
   suiteRunId: z.string().min(1).max(100),
 });
 
+/**
+ * Read-only live progress for one run (M21). Polled by the suite/case progress
+ * panels while a run is active; the query is a handful of indexed lookups, so
+ * this stays cheap at a ~1 s cadence.
+ */
+export const RunnerGetProgressPayload = z.object({
+  suiteRunId: z.string().min(1).max(100),
+});
+
+export const RunCaseProgressSchema = z.object({
+  caseRunId: z.string().min(1).max(100),
+  caseId: z.string().min(1).max(100),
+  /** Case name at query time; falls back to the case id if the row vanished. */
+  caseName: z.string().min(1).max(200),
+  status: CaseRunStatusSchema,
+  durationMs: z.number().int().min(0).nullable(),
+});
+
+export const RunProgressSchema = z.object({
+  suiteRunId: z.string().min(1).max(100),
+  suiteId: z.string().min(1).max(100).nullable(),
+  suiteName: z.string().min(1).max(200).nullable(),
+  mode: RunModeSchema,
+  status: SuiteRunStatusSchema,
+  startedAt: z.number().int().min(0),
+  endedAt: z.number().int().min(0).nullable(),
+  cases: z.array(RunCaseProgressSchema),
+  summary: z.object({
+    total: z.number().int().min(0),
+    completed: z.number().int().min(0),
+    pending: z.number().int().min(0),
+    running: z.number().int().min(0),
+    passed: z.number().int().min(0),
+    failed: z.number().int().min(0),
+    cancelled: z.number().int().min(0),
+    skipped: z.number().int().min(0),
+  }),
+});
+
 // --- Reports (WS6) -------------------------------------------------------------
 
 export const ReportGetHtmlPayload = z.object({
@@ -453,6 +495,11 @@ export type RunnerResumePayload = z.infer<typeof RunnerResumePayload>;
 export type RunnerRerunFailedPayload = z.infer<typeof RunnerRerunFailedPayload>;
 export type RunnerRerunLastFailedPayload = z.infer<typeof RunnerRerunLastFailedPayload>;
 export type RunnerCancelPayload = z.infer<typeof RunnerCancelPayload>;
+export type RunnerGetProgressPayload = z.infer<typeof RunnerGetProgressPayload>;
+/** One case's live row in a progress snapshot (M21). */
+export type RunCaseProgress = z.infer<typeof RunCaseProgressSchema>;
+/** Live run snapshot returned by `runner:getProgress` (M21). */
+export type RunProgress = z.infer<typeof RunProgressSchema>;
 export type ReportGetHtmlPayload = z.infer<typeof ReportGetHtmlPayload>;
 export type ReportExportPdfPayload = z.infer<typeof ReportExportPdfPayload>;
 export type ReportOpenTracePayload = z.infer<typeof ReportOpenTracePayload>;
@@ -510,6 +557,7 @@ export const IPC_PAYLOADS: Record<string, z.ZodType> = {
   "runner:rerunFailed": RunnerRerunFailedPayload,
   "runner:rerunLastFailed": RunnerRerunLastFailedPayload,
   "runner:cancel": RunnerCancelPayload,
+  "runner:getProgress": RunnerGetProgressPayload,
   "report:getHtml": ReportGetHtmlPayload,
   "report:exportPdf": ReportExportPdfPayload,
   "report:openTrace": ReportOpenTracePayload,

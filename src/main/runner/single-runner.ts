@@ -135,7 +135,12 @@ export class SingleCaseRunner {
         mode: parsed.mode,
         startedAt,
       });
-      this.runs.createCaseRun({ id: caseRunId, suiteRunId, caseId: parsed.caseId });
+      this.runs.createCaseRun({
+        id: caseRunId,
+        suiteRunId,
+        caseId: parsed.caseId,
+        status: "running",
+      });
     };
 
     if (steps.length === 0) {

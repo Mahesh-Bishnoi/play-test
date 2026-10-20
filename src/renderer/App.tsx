@@ -5,6 +5,7 @@ import { applyTheme, getInitialTheme, type AppTheme } from "./theme.js";
 import type { Project } from "../shared/schema.js";
 import BrowserBanner from "./components/BrowserBanner.js";
 import ProjectExplorer from "./components/ProjectExplorer.js";
+import RunProgressPanel from "./components/run-progress/RunProgressPanel.js";
 import SyncPanel from "./components/SyncPanel.js";
 import WelcomeScreen from "./components/WelcomeScreen.js";
 import CaseDetailPage from "./pages/CaseDetailPage.js";
@@ -35,6 +36,8 @@ export default function App(): React.JSX.Element {
   const [activeSuiteId, setActiveSuiteId] = useState<string | null>(null);
   const [openCases, setOpenCases] = useState<OpenCaseTab[]>([]);
   const [reportRunId, setReportRunId] = useState<string | null>(null);
+  /** App-owned so suite progress survives tab switches and page remounts (M21). */
+  const [activeSuiteRunId, setActiveSuiteRunId] = useState<string | null>(null);
   const [active, setActive] = useState<ActiveTab>({ kind: "suites" });
   const [explorerToken, setExplorerToken] = useState(0);
   const [mainToken, setMainToken] = useState(0);
@@ -69,6 +72,7 @@ export default function App(): React.JSX.Element {
     setActiveSuiteId(null);
     setOpenCases([]);
     setReportRunId(null);
+    setActiveSuiteRunId(null);
     setActive({ kind: "suites" });
     try {
       window.localStorage.setItem(LAST_PROJECT_KEY, id);
@@ -113,6 +117,7 @@ export default function App(): React.JSX.Element {
     setActiveSuiteId(null);
     setOpenCases([]);
     setReportRunId(null);
+    setActiveSuiteRunId(null);
     setActive({ kind: "suites" });
     try {
       window.localStorage.removeItem(LAST_PROJECT_KEY);
@@ -367,6 +372,20 @@ export default function App(): React.JSX.Element {
               </div>
             )}
           </div>
+          {/* Suites/Report tabs already render the full run panel; every other
+              tab keeps a compact live strip so a running suite is never lost. */}
+          {activeSuiteRunId !== null && active.kind !== "suites" && active.kind !== "report" && (
+            <div className="pt-run-strip-wrap">
+              <RunProgressPanel
+                suiteRunId={activeSuiteRunId}
+                variant="strip"
+                onViewReport={viewReport}
+                onDismiss={() => {
+                  setActiveSuiteRunId(null);
+                }}
+              />
+            </div>
+          )}
           <main className="pt-main">
             {active.kind === "report" && reportRunId !== null && (
               <RunReportPage
@@ -374,6 +393,7 @@ export default function App(): React.JSX.Element {
                 onBack={closeReport}
                 onRerun={(nextId) => {
                   setReportRunId(nextId);
+                  setActiveSuiteRunId(nextId);
                 }}
               />
             )}
@@ -413,6 +433,11 @@ export default function App(): React.JSX.Element {
                   closeCase(id);
                 }}
                 onViewReport={viewReport}
+                activeRunId={activeSuiteRunId}
+                onRunStarted={setActiveSuiteRunId}
+                onRunDismissed={() => {
+                  setActiveSuiteRunId(null);
+                }}
               />
             )}
             <p className="pt-hint pt-statusbar">

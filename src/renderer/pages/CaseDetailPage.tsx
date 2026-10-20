@@ -8,6 +8,7 @@ import { STEP_ACTIONS } from "../../shared/step-types.js";
 import { api, formatApiError } from "../api.js";
 import type { CaseDetail } from "../api.js";
 import RecorderImportPreview from "../components/RecorderImportPreview.js";
+import RunProgressBar from "../components/RunProgressBar.js";
 import StepEditorPanel from "../components/StepEditorPanel.js";
 import type { StepPatch } from "../components/StepEditorPanel.js";
 import { validatePastedLocator } from "../components/pick-locator.js";
@@ -16,6 +17,8 @@ import TestDataEditor from "../components/TestDataEditor.js";
 import RecordOptionsPanel from "./case-detail/RecordOptionsPanel.js";
 import RunControls from "./case-detail/RunControls.js";
 import StepTable from "./case-detail/StepTable.js";
+import { computeStepProgress } from "./case-detail/step-progress.js";
+import type { StepProgress } from "./case-detail/step-progress.js";
 import { useCaseRun } from "./case-detail/use-case-run.js";
 import { useRecordOptions } from "./case-detail/use-record-options.js";
 
@@ -278,6 +281,13 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
   };
 
   const { activeRun, failedOrder, runFinished, paused } = run;
+  const stepProgress = computeStepProgress({
+    statusByOrder: run.statusByOrder,
+    totalSteps: run.runStepTotal,
+    active: activeRun !== null,
+    paused,
+    summary: run.lastSummary,
+  });
 
   const runBadge = paused ? (
     <span className="pt-badge pt-badge-warn">Paused</span>
@@ -490,12 +500,27 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
                 hasSteps={steps.length > 0}
                 runSpeedMs={run.runSpeedMs}
                 onSpeedChange={run.setRunSpeedMs}
-                onStart={run.startRun}
+                onStart={(mode) => {
+                  run.startRun(mode, steps.length);
+                }}
                 onResume={run.resumeRun}
                 onCancel={run.cancelRun}
-                onFullRerun={run.fullRerun}
+                onFullRerun={(mode) => {
+                  run.fullRerun(mode, steps.length);
+                }}
               />
             </div>
+            {stepProgress.phase !== "idle" && (
+              <div className="pt-mt-12">
+                <RunProgressBar
+                  label="Case run progress"
+                  state={stepProgress.phase}
+                  completed={stepProgress.completed}
+                  total={stepProgress.total}
+                  detail={stepProgressDetail(stepProgress, failedOrder)}
+                />
+              </div>
+            )}
             <p className="pt-hint pt-mt-12">
               Recording starts from the Case URL; when it is empty the project base URL is used
               (recording fails only if both are empty).
@@ -534,4 +559,27 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
       )}
     </section>
   );
+}
+
+/** One sentence for the progress bar, tailored to the run phase. */
+function stepProgressDetail(progress: StepProgress, failedOrder: number | null): string {
+  const counts = `${progress.completed} of ${progress.total} step(s) complete`;
+  const passed = progress.passed > 0 ? ` · ${progress.passed} passed` : "";
+  const failed = progress.failed > 0 ? ` · ${progress.failed} failed` : "";
+  switch (progress.phase) {
+    case "starting":
+      return "Starting the browser and first step…";
+    case "paused":
+      return `Paused at step ${(failedOrder ?? 0) + 1} — edit the step, then Resume. ${counts}${failed}`;
+    case "running":
+      return `${counts}${passed}${failed}`;
+    case "passed":
+      return `Passed — ${counts}.`;
+    case "failed":
+      return `Failed — ${counts}${failed}.`;
+    case "cancelled":
+      return `Cancelled — ${counts}.`;
+    default:
+      return counts;
+  }
 }

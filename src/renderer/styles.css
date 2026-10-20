@@ -47,6 +47,7 @@ html[data-theme="intellij-dark"] {
   --pt-font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --pt-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --pt-shadow: 0 8px 28px rgb(0 0 0 / 0.45);
+  --pt-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 /* Syntax-light tokens: same names, warm paper + near-black + orange.
@@ -1179,6 +1180,177 @@ button.pt-tab-x:focus-visible,
   margin-block-start: 18px;
   padding-block-start: 10px;
   border-block-start: 1px solid var(--pt-border);
+}
+
+/* ---------- live run progress (M21) ---------- */
+
+.pt-progress {
+  display: grid;
+  gap: 6px;
+  min-inline-size: 0;
+}
+
+.pt-progress-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.pt-progress-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--pt-fg-dim);
+}
+
+.pt-progress-value {
+  margin-inline-start: auto;
+  color: var(--pt-muted-fg);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pt-progress-track {
+  position: relative;
+  overflow: clip;
+  block-size: 8px;
+  border-radius: 999px;
+  border: 1px solid var(--pt-border-soft);
+  background: var(--pt-muted);
+}
+
+.pt-progress-fill {
+  display: block;
+  block-size: 100%;
+  border-radius: inherit;
+  background: var(--pt-badge-run-fg);
+}
+
+.pt-progress-pass .pt-progress-fill {
+  background: var(--pt-badge-pass-fg);
+}
+
+.pt-progress-fail .pt-progress-fill {
+  background: var(--pt-badge-fail-fg);
+}
+
+.pt-progress-warn .pt-progress-fill {
+  background: var(--pt-warn);
+}
+
+.pt-progress-mute .pt-progress-fill {
+  background: var(--pt-muted-fg);
+}
+
+.pt-progress-detail {
+  margin: 0;
+  color: var(--pt-muted-fg);
+  font-size: 12.5px;
+}
+
+.pt-progress-indeterminate .pt-progress-fill {
+  inline-size: 35%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pt-progress-fill {
+    transition: inline-size 240ms var(--pt-ease-out, ease-out);
+  }
+
+  .pt-progress-indeterminate .pt-progress-fill {
+    animation: pt-progress-indeterminate 1.2s var(--pt-ease-out, ease-out) infinite;
+  }
+}
+
+@keyframes pt-progress-indeterminate {
+  from {
+    translate: -110% 0;
+  }
+
+  to {
+    translate: 320% 0;
+  }
+}
+
+.pt-run-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.pt-run-panel .pt-section-head {
+  margin: 0;
+}
+
+.pt-run-cases {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  max-block-size: 240px;
+  overflow-y: auto;
+}
+
+.pt-run-case {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+  padding: 4px 6px;
+  border-radius: var(--pt-radius-sm);
+  background: rgb(255 255 255 / 0.02);
+}
+
+.pt-run-case-name {
+  min-inline-size: 0;
+  overflow: clip;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--pt-fg-dim);
+  font-size: 13px;
+}
+
+.pt-run-case-state {
+  font-size: 12px;
+}
+
+.pt-run-case > .pt-count {
+  margin-inline-start: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.pt-run-actions {
+  margin-block-start: 2px;
+}
+
+.pt-run-strip-wrap {
+  background: var(--pt-bg-raised);
+  border-block-end: 1px solid var(--pt-border);
+}
+
+.pt-run-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+}
+
+.pt-run-strip-bar {
+  flex: 1 1 260px;
+  min-inline-size: 200px;
+}
+
+.pt-run-strip .pt-progress-detail {
+  display: none;
+}
+
+.pt-run-strip .pt-row {
+  flex: none;
+}
+
+.pt-run-strip > .pt-hint {
+  flex-basis: 100%;
 }
 
 /* ---------- Project explorer tree ---------- */

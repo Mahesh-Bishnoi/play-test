@@ -21,8 +21,6 @@ interface Props {
   onRerunFailed: () => void;
   onOpenCase?: (caseId: string, name?: string) => void;
   onRequestDeleteCase: (testCase: TestCase) => void;
-  lastSuiteRunId: string | null;
-  onViewReport?: (suiteRunId: string) => void;
 }
 
 /**
@@ -51,8 +49,6 @@ export default function CaseMembershipCard({
   onRerunFailed,
   onOpenCase,
   onRequestDeleteCase,
-  lastSuiteRunId,
-  onViewReport,
 }: Props): React.JSX.Element {
   return (
     <div className="pt-card">
@@ -211,20 +207,6 @@ export default function CaseMembershipCard({
               ))}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {lastSuiteRunId !== null && onViewReport !== undefined && (
-        <div className="pt-mt-12">
-          <button
-            type="button"
-            className="pt-btn pt-btn-sm"
-            onClick={() => {
-              onViewReport(lastSuiteRunId);
-            }}
-          >
-            View last report
-          </button>
         </div>
       )}
     </div>

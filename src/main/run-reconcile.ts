@@ -6,7 +6,7 @@
  * window can read the history.
  */
 
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 import type { AppDatabase } from "./db.js";
 import { inTransaction } from "./db.js";
@@ -26,10 +26,12 @@ export function reconcileInterruptedRuns(db: AppDatabase): ReconcileResult {
       .set({ status: "failed", endedAt: now })
       .where(eq(suiteRuns.status, "running"))
       .run();
+    // Queued suite cases (`pending`) also belong to a run that will never
+    // resume; settle them with the running ones so no row stays forever queued.
     const cases = tx
       .update(caseRuns)
       .set({ status: "failed" })
-      .where(eq(caseRuns.status, "running"))
+      .where(inArray(caseRuns.status, ["running", "pending"]))
       .run();
     const steps = tx
       .update(stepRuns)

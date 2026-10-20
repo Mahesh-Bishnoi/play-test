@@ -65,11 +65,30 @@ export class RunWriter {
       .run();
   }
 
-  createCaseRun(run: { id: string; suiteRunId: string; caseId: string }): void {
+  createCaseRun(run: {
+    id: string;
+    suiteRunId: string;
+    caseId: string;
+    /**
+     * Suites queue every case up front as `pending` and claim it when a worker
+     * starts; a single-case run owns its row immediately (`running`).
+     */
+    status: "pending" | "running";
+  }): void {
     this.db
       .insert(caseRuns)
-      .values({ id: run.id, suiteRunId: run.suiteRunId, caseId: run.caseId, status: "running" })
+      .values({
+        id: run.id,
+        suiteRunId: run.suiteRunId,
+        caseId: run.caseId,
+        status: run.status,
+      })
       .run();
+  }
+
+  /** Claim a queued suite case when its worker actually starts it. */
+  markCaseRunning(caseRunId: string): void {
+    this.db.update(caseRuns).set({ status: "running" }).where(eq(caseRuns.id, caseRunId)).run();
   }
 
   createStepRun(
@@ -151,9 +170,10 @@ export class RunWriter {
   }
 
   /**
-   * Settle a case only if it is still "running". A crashed worker and the
+   * Settle a case only if it has not settled yet. A crashed worker and the
    * suite's final reconciliation must never overwrite a row that already
-   * settled (passed/failed/cancelled).
+   * settled (passed/failed/cancelled). Queued (`pending`) rows are settleable
+   * too: a worker can crash before it ever claims the case.
    */
   settleCaseIfRunning(
     caseRunId: string,
@@ -161,7 +181,7 @@ export class RunWriter {
     startedAt: number,
   ): boolean {
     const row = this.db.select().from(caseRuns).where(eq(caseRuns.id, caseRunId)).all()[0];
-    if (row === undefined || row.status !== "running") {
+    if (row === undefined || (row.status !== "running" && row.status !== "pending")) {
       return false;
     }
     this.finishCaseRun(caseRunId, status, startedAt);

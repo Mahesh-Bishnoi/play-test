@@ -7,6 +7,7 @@ import {
   ReportOpenTracePayload,
 } from "../../shared/ipc-contract.js";
 import { ensureSuiteHtmlPath, readSuiteHtmlReport, writeSuitePdfReport } from "../reports/files.js";
+import { isRunActive } from "../run-progress.js";
 import { defaultSpawnShowTrace, openTrace, openTraceForCase } from "../trace-viewer.js";
 import type { IpcHandleFn } from "./handle.js";
 
@@ -33,7 +34,11 @@ export function registerReportHandlers(
   };
   handle("report:getHtml", (rawPayload: unknown) => {
     const payload = ReportGetHtmlPayload.parse(rawPayload);
-    return readSuiteHtmlReport(db, opts.artifactsRoot, payload.suiteRunId);
+    // A live run's report must be re-rendered on every read; a finished run
+    // keeps the cached file fast path.
+    return readSuiteHtmlReport(db, opts.artifactsRoot, payload.suiteRunId, {
+      force: isRunActive(db, payload.suiteRunId),
+    });
   });
   handle("report:exportPdf", (rawPayload: unknown) => {
     const payload = ReportExportPdfPayload.parse(rawPayload);

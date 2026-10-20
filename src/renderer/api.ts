@@ -5,12 +5,14 @@ import {
   RecorderStopResultSchema,
   RunFinishedEvent,
   RunLogEvent,
+  RunProgressSchema,
   RunStepUpdateEvent,
 } from "../shared/ipc-contract.js";
 import type {
   RecorderStopResult,
   RunFinishedEvent as RunFinished,
   RunLogEvent as RunLog,
+  RunProgress,
   RunStepUpdateEvent as RunStepUpdate,
 } from "../shared/ipc-contract.js";
 import { CaseProfileSchema, StepRowSchema, SuiteSchema, TestCaseSchema } from "../shared/schema.js";
@@ -252,6 +254,10 @@ export const api = {
   },
   cancelRun(suiteRunId: string): Promise<void> {
     return invoke("runner:cancel", { suiteRunId }, () => undefined);
+  },
+  /** Live progress snapshot for one run (M21). Polled only while it is active. */
+  getRunProgress(suiteRunId: string): Promise<RunProgress> {
+    return invoke("runner:getProgress", { suiteRunId }, (raw) => RunProgressSchema.parse(raw));
   },
 
   // Parallel suites (WS6/M6; unsupervised only, payloads frozen in v1).

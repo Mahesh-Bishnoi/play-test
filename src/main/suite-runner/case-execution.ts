@@ -37,6 +37,9 @@ export async function runOneCase(
   caseRunId: string,
 ): Promise<void> {
   const startedAt = deps.now();
+  // The pool has claimed this case from the queue: move it out of "pending"
+  // before preflight so a preflight/launch failure still settles a running row.
+  deps.runs.markCaseRunning(caseRunId);
   // Preflight is inside the per-case failure path: a case deleted mid-run must
   // settle this row, not reject the worker (which would end the suite early).
   let preflight: { testCase: TestCase; steps: StepRow[]; data: Record<string, string> };

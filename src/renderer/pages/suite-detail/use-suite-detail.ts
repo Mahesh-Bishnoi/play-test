@@ -48,7 +48,6 @@ export interface SuiteDetail {
   runBusy: boolean;
   rerunBusy: boolean;
   runDialogCases: TestCase[];
-  lastSuiteRunId: string | null;
   openRunDialog: (ids: string[]) => void;
   /** Snapshot the checked cases / the checked-and-visible ones for a run. */
   runChecked: () => void;
@@ -71,8 +70,18 @@ export function useSuiteDetail(input: {
   onSuiteFocus?: (suiteId: string | null) => void;
   onCaseDeleted?: (caseId: string) => void;
   onChanged?: () => void;
+  /** App owns the active run id so progress survives tab switches (M21). */
+  onRunStarted?: (suiteRunId: string) => void;
 }): SuiteDetail {
-  const { projectId, focusedSuiteId, refreshToken, onSuiteFocus, onCaseDeleted, onChanged } = input;
+  const {
+    projectId,
+    focusedSuiteId,
+    refreshToken,
+    onSuiteFocus,
+    onCaseDeleted,
+    onChanged,
+    onRunStarted,
+  } = input;
 
   const [suites, setSuites] = useState<Suite[]>([]);
   const [suiteId, setSuiteId] = useState<string | null>(null);
@@ -88,7 +97,6 @@ export function useSuiteDetail(input: {
   const [rerunBusy, setRerunBusy] = useState(false);
   /** Case ids snapshotted when the run dialog opens (all checked or filtered). */
   const [runCaseIds, setRunCaseIds] = useState<string[] | null>(null);
-  const [lastSuiteRunId, setLastSuiteRunId] = useState<string | null>(null);
   const [pendingDeleteSuite, setPendingDeleteSuite] = useState<Suite | null>(null);
   const [pendingDeleteCase, setPendingDeleteCase] = useState<TestCase | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -456,10 +464,9 @@ export function useSuiteDetail(input: {
     api
       .runSuite(selectedSuite.id, runCaseIds)
       .then(({ suiteRunId: runId }) => {
-        setLastSuiteRunId(runId);
+        onRunStarted?.(runId);
         setRunDialogOpen(false);
         setRunCaseIds(null);
-        setNotice(`Suite run started (${runCaseIds.length} case(s)). Report: ${runId}`);
       })
       .catch((err: unknown) => {
         setError(formatApiError(err));
@@ -479,8 +486,7 @@ export function useSuiteDetail(input: {
     api
       .rerunLastFailed(selectedSuite.id)
       .then(({ suiteRunId: runId }) => {
-        setLastSuiteRunId(runId);
-        setNotice(`Re-running failed cases from the last finished run. Report: ${runId}`);
+        onRunStarted?.(runId);
       })
       .catch((err: unknown) => {
         setError(formatApiError(err));
@@ -537,7 +543,6 @@ export function useSuiteDetail(input: {
     runBusy,
     rerunBusy,
     runDialogCases,
-    lastSuiteRunId,
     openRunDialog,
     runChecked,
     runFiltered,

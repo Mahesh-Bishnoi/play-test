@@ -14,7 +14,11 @@ describe("reconcileInterruptedRuns (review counted #2)", () => {
         .run();
       handle.db
         .insert(caseRuns)
-        .values({ id: "cr", suiteRunId: "sr", caseId: "case", status: "running" })
+        .values([
+          { id: "cr", suiteRunId: "sr", caseId: "case", status: "running" },
+          // A suite case still queued when the app died must not stay pending.
+          { id: "cr-queued", suiteRunId: "sr", caseId: "case-2", status: "pending" },
+        ])
         .run();
       handle.db
         .insert(stepRuns)
@@ -27,11 +31,17 @@ describe("reconcileInterruptedRuns (review counted #2)", () => {
         })
         .run();
 
-      expect(reconcileInterruptedRuns(handle.db)).toEqual({ suites: 1, cases: 1, steps: 1 });
+      expect(reconcileInterruptedRuns(handle.db)).toEqual({ suites: 1, cases: 2, steps: 1 });
       expect(handle.db.select().from(suiteRuns).all()[0]).toMatchObject({
         status: "failed",
       });
-      expect(handle.db.select().from(caseRuns).all()[0]).toMatchObject({ status: "failed" });
+      expect(
+        handle.db
+          .select()
+          .from(caseRuns)
+          .all()
+          .map((r) => r.status),
+      ).toEqual(["failed", "failed"]);
       expect(handle.db.select().from(stepRuns).all()[0]).toMatchObject({ status: "skipped" });
       // Idempotent: a second launch has nothing to settle.
       expect(reconcileInterruptedRuns(handle.db)).toEqual({ suites: 0, cases: 0, steps: 0 });
