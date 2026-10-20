@@ -182,6 +182,7 @@ describe("report:openTrace IPC", () => {
       {
         artifactsRoot: root,
         renderPdf: () => Promise.resolve(new Uint8Array([1])),
+        showSaveDialog: () => Promise.resolve(null),
         spawnShowTrace: (p) => {
           spawned.push(p);
         },

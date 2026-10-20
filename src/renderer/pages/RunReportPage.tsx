@@ -86,8 +86,10 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
     setNotice(null);
     api
       .exportReportPdf(suiteRunId)
-      .then((path) => {
-        setNotice(`PDF exported: ${path}`);
+      .then((outcome) => {
+        if (outcome.saved) {
+          setNotice(outcome.path !== undefined ? `PDF saved to ${outcome.path}` : "PDF saved.");
+        }
       })
       .catch((err: unknown) => {
         setError(formatApiError(err));

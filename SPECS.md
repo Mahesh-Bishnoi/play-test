@@ -202,7 +202,8 @@ Artifacts: `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/step-<NN>.png, fail
   `runner:resumeFromStep`, `runner:rerunFailed`, `runner:rerunLastFailed`, `runner:cancel`.
   M21 adds the read-only `runner:getProgress({suiteRunId}) → RunProgress` snapshot used by the
   live suite/report UI (cases + summary + timestamps, no artifacts).
-- Reports: `report:getHtml`, `report:exportPdf`, `report:openTrace({caseRunId} | {tracePath})`.
+- Reports: `report:getHtml`, `report:exportPdf({suiteRunId}) → {saved, path?}` (native save
+  dialog; cancel resolves `{saved:false}` and writes nothing), `report:openTrace({caseRunId} | {tracePath})`.
 - Transfer: `transfer:exportProject/exportSuite/exportCase`, `transfer:importProject/importSuite/importCase`.
 - Sync: `sync:init/commit/push/pull/status/branch/resolve/clone` (local paths only).
   `sync:resolve` accepts `entity: 'case' | 'suite' | 'project'`; pending conflicts carry
@@ -229,9 +230,9 @@ Artifacts: `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/step-<NN>.png, fail
   The App shell keeps a compact run strip on the case/Sync tabs so a running suite is never lost
   when the Suites tab unmounts; the run id survives remounts.
 - RunReportPage: suite summary, per-case step grid with thumbnails, Open-trace buttons,
-  Export PDF, Re-run failed. While the run is still active it shows a live progress banner and
-  an explicit "preview is a snapshot" hint; Refresh re-renders, and the iframe refreshes on
-  `run:finished` (M21).
+  Export PDF (native save dialog, user-chosen destination), Re-run failed. While the run is
+  still active it shows a live progress banner and an explicit "preview is a snapshot" hint;
+  Refresh re-renders, and the iframe refreshes on `run:finished` (M21).
 - Themes: IntelliJ dark (default) + opt-in Syntax light, persisted, pre-paint no-flash.
 
 ## 7. Behavior Notes (current, not history)
@@ -285,7 +286,8 @@ plan wins until the milestone lands; this section describes the code as it is to
   project's base-URL origin (unscoped when the project has no base URL). A malformed seed file
   or a missing auth/session file fails loudly, naming the file.
 - Reports: single HTML file (inline CSS, base64 thumbs ≤500KB, step cell `action — detail`,
-  trace hint), PDF via hidden `BrowserWindow`.
+  trace hint), PDF via hidden `BrowserWindow`. Export opens the native save dialog and writes
+  only the chosen path (recorded in `suite_runs.reportPdfPath`); cancel writes nothing.
 - Transfer: versioned JSON, dialogs+fs in main, re-exports byte-equal modulo `exportedAt`.
 - Sync: wholesale object copy for fetch/push/clone; merge-base walk + entity merge; push
   rejects non-FF and checked-out-branch-of-non-bare; untrusted content zod-validated; blob caps.

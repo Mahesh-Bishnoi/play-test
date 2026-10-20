@@ -130,7 +130,18 @@ void app.whenReady().then(() => {
       ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
     },
     handle.db,
-    { artifactsRoot, renderPdf: renderPdfWithElectron },
+    {
+      artifactsRoot,
+      renderPdf: renderPdfWithElectron,
+      async showSaveDialog(defaultFileName: string): Promise<string | null> {
+        const result = await dialog.showSaveDialog({
+          title: "Save report as PDF",
+          defaultPath: join(app.getPath("documents"), defaultFileName),
+          filters: [{ name: "PDF", extensions: ["pdf"] }],
+        });
+        return result.canceled || result.filePath === undefined ? null : result.filePath;
+      },
+    },
   );
   registerTransferHandlers(
     (channel, listener) => {

@@ -1144,10 +1144,15 @@ describe("rerunLastFailed (M12)", () => {
 describe("runner + report IPC (M6)", () => {
   function wired(
     steps: StepDef[],
-  ): Fixture & { listeners: Map<string, (payload: unknown) => unknown> } {
+    saveAnswers: (string | null)[] = [],
+  ): Fixture & {
+    listeners: Map<string, (payload: unknown) => unknown>;
+    dialogs: string[];
+  } {
     const fx = makeFixture([{ steps }]);
     openHandles.push(fx.dbHandle);
     const listeners = new Map<string, (payload: unknown) => unknown>();
+    const dialogs: string[] = [];
     const handle: IpcHandleFn = (channel, listener) => {
       listeners.set(channel, listener);
     };
@@ -1165,8 +1170,14 @@ describe("runner + report IPC (M6)", () => {
         expect(htmlPath.endsWith("report.html")).toBe(true);
         return Promise.resolve(new Uint8Array([0x25, 0x50, 0x44, 0x46]));
       },
+      showSaveDialog: (defaultFileName: string) => {
+        dialogs.push(defaultFileName);
+        return Promise.resolve(
+          saveAnswers.length === 0 ? join(fx.root, "exported.pdf") : (saveAnswers.shift() ?? null),
+        );
+      },
     });
-    return { ...fx, listeners };
+    return { ...fx, listeners, dialogs };
   }
 
   it("runSuite → getHtml → exportPdf round-trips through IPC", async () => {
@@ -1195,9 +1206,15 @@ describe("runner + report IPC (M6)", () => {
     expect(html).toContain("C0");
     expect(html).toContain("passed");
 
-    const pdfPath = (await fx.listeners.get("report:exportPdf")?.({ suiteRunId })) as string;
-    expect(pdfPath.endsWith("report.pdf")).toBe(true);
-    expect(existsSync(pdfPath)).toBe(true);
+    const pdf = (await fx.listeners.get("report:exportPdf")?.({ suiteRunId })) as {
+      saved: boolean;
+      path?: string;
+    };
+    expect(pdf.saved).toBe(true);
+    expect(pdf.path).toBe(join(fx.root, "exported.pdf"));
+    expect(existsSync(pdf.path ?? "")).toBe(true);
+    expect(fx.dialogs).toHaveLength(1);
+    expect(fx.dialogs[0]).toMatch(/^s-.+\.pdf$/);
     // rerunFailed validates synchronously — it throws, not rejects.
     expect(() => fx.listeners.get("runner:rerunFailed")?.({ suiteRunId })).toThrow(
       NoFailedCasesError,
@@ -1213,6 +1230,26 @@ describe("runner + report IPC (M6)", () => {
     ).resolves.toBeNull();
   });
 
+  it("cancelling the PDF save dialog writes nothing", async () => {
+    const fx = wired([], [null]);
+    fx.db
+      .insert(suiteRuns)
+      .values({
+        id: "cancel-run",
+        suiteId: null,
+        mode: "unsupervised",
+        status: "passed",
+        startedAt: 1000,
+        endedAt: 2000,
+      })
+      .run();
+    const outcome = await fx.listeners.get("report:exportPdf")?.({ suiteRunId: "cancel-run" });
+    expect(outcome).toEqual({ saved: false });
+    expect(fx.dialogs).toHaveLength(1);
+    expect(fx.dialogs[0]).toMatch(/^run-report-cancel-run\.pdf$/);
+    expect(existsSync(join(fx.root, "exported.pdf"))).toBe(false);
+  });
+
   it("report channels validate payloads and miss on unknown runs", async () => {
     const fx = wired([{ action: "click", selector: "#a" }]);
     expect(() => fx.listeners.get("report:getHtml")?.({})).toThrow();
@@ -1223,6 +1260,8 @@ describe("runner + report IPC (M6)", () => {
     await expect(fx.listeners.get("report:exportPdf")?.({ suiteRunId: "ghost" })).rejects.toThrow(
       /suite run not found/,
     );
+    // An unknown run fails before an orphan save dialog can open.
+    expect(fx.dialogs).toEqual([]);
   });
 });
 

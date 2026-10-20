@@ -157,6 +157,23 @@ describe("renderer api report wrappers (M8, PLAN §18.1)", () => {
     stubPlaytest(() => Promise.resolve({ opened: false }));
     await expect(api.openTrace({ caseRunId: "cr-0" })).rejects.toThrow();
   });
+
+  it("exports PDFs through report:exportPdf and parses the save outcome", async () => {
+    const calls = stubPlaytest(() => Promise.resolve({ saved: true, path: "/tmp/report.pdf" }));
+    await expect(api.exportReportPdf("run-1")).resolves.toEqual({
+      saved: true,
+      path: "/tmp/report.pdf",
+    });
+    expect(calls).toEqual([{ channel: "report:exportPdf", payload: { suiteRunId: "run-1" } }]);
+  });
+
+  it("accepts a cancelled PDF export and rejects malformed outcomes", async () => {
+    stubPlaytest(() => Promise.resolve({ saved: false }));
+    await expect(api.exportReportPdf("run-1")).resolves.toEqual({ saved: false });
+
+    stubPlaytest(() => Promise.resolve("/tmp/legacy-path.pdf"));
+    await expect(api.exportReportPdf("run-1")).rejects.toThrow();
+  });
 });
 
 describe("renderer api case-profile wrappers (M14, PLAN §M14 item 7)", () => {

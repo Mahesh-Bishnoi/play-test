@@ -281,8 +281,8 @@ export const api = {
   getReportHtml(suiteRunId: string): Promise<string> {
     return invoke("report:getHtml", { suiteRunId }, (raw) => z.string().parse(raw));
   },
-  exportReportPdf(suiteRunId: string): Promise<string> {
-    return invoke("report:exportPdf", { suiteRunId }, (raw) => z.string().parse(raw));
+  exportReportPdf(suiteRunId: string): Promise<ExportOutcome> {
+    return invoke("report:exportPdf", { suiteRunId }, (raw) => ExportOutcomeSchema.parse(raw));
   },
   openTrace(input: { caseRunId: string } | { tracePath: string }): Promise<{ opened: boolean }> {
     return invoke("report:openTrace", input, (raw) =>

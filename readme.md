@@ -14,7 +14,7 @@ Built with Electron + TypeScript + React + hand-written CSS, SQLite (`better-sql
 - **Unsupervised runs** — single case or whole suite, headless, suite-parallel from day one (`workers = max(1, min(cpu/2, cases))`).
 - **Live run progress** — a case step bar (starting/running/paused/passed/failed), a suite panel with per-case pending/running/passed/failed badges and Cancel/View report, a compact run strip on other tabs, and a live banner while a report is still running. Exported reports remain post-run snapshots.
 - **Artifacts** — screenshot after every step; video + trace retained on failure only. Stored under `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/` (`step-NN.png`, `failed.webm`, `trace.zip`).
-- **Reports** — self-contained single-file HTML (inline CSS, base64 thumbnails, drill-down suite → case → step with error stacks) + PDF export (headless Chromium print). Per suite run, with Re-run-failed-cases-only.
+- **Reports** — self-contained single-file HTML (inline CSS, base64 thumbnails, drill-down suite → case → step with error stacks) + PDF export via headless Chromium print, with a save dialog for the destination. Per suite run, with Re-run-failed-cases-only.
 - **Test data (KV)** — per-case key/value table, `{{key}}` substitution at run time. Missing key fails the step with `missing test-data key: X`. Schema reserves a `source` column for future CSV.
 - **First-run browser setup** — checks for Playwright Chromium on boot, banner with install progress; `postinstall` also installs it.
 - **Packaging** — Electron Forge + Forge makers (Squirrel, ZIP, deb, rpm); browsers excluded from asar.
@@ -28,7 +28,7 @@ Built with Electron + TypeScript + React + hand-written CSS, SQLite (`better-sql
 5. **Run**
    - Case tab → **Run supervised** (headed, pause/resume) or **Run unsupervised** (headless); the progress bar shows live step counts and the final verdict.
    - Suite page → select cases → **Run Suite** (unsupervised, parallel); the run panel shows queued/running/passed/failed cases live and keeps reporting on other tabs.
-6. **Review** — Run Report page: counts/durations, per-case step grid with thumbnails, Export PDF, Re-run failed.
+6. **Review** — Run Report page: counts/durations, per-case step grid with thumbnails, Export PDF (choose the destination in the save dialog), Re-run failed.
 
 ### Try it with the dummy site
 

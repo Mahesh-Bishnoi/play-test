@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -20,6 +20,7 @@ import {
   ensureSuiteHtmlPath,
   readSuiteHtmlReport,
   reportFileExists,
+  suggestedPdfFileName,
   suiteReportPaths,
   tryWriteSuiteHtmlReport,
   writeSuiteHtmlReport,
@@ -193,9 +194,39 @@ describe("report persistence", () => {
     expect(resolveReportProjectId(db, "run-1")).toBe(project.id);
     expect(suiteReportPaths(root, "proj", "run-1").dir).toBe(join(root, "proj", "run-1"));
 
-    const pdfPath = writeSuitePdfReport(db, root, "run-1", new Uint8Array([1, 2, 3]));
-    expect(pdfPath.endsWith("report.pdf")).toBe(true);
-    expect(existsSync(pdfPath)).toBe(true);
+    const destination = join(root, "chosen-export.pdf");
+    const pdfPath = writeSuitePdfReport(db, "run-1", destination, new Uint8Array([1, 2, 3]));
+    expect(pdfPath).toBe(destination);
+    expect(existsSync(destination)).toBe(true);
+    expect(readFileSync(destination)).toEqual(Buffer.from([1, 2, 3]));
+    const suiteRow = db
+      .select()
+      .from(suiteRuns)
+      .all()
+      .find((row) => row.id === "run-1");
+    expect(suiteRow?.reportPdfPath).toBe(destination);
+    // Export writes only the chosen destination — no internal report.pdf.
+    expect(existsSync(join(suiteReportPaths(root, project.id, "run-1").dir, "report.pdf"))).toBe(
+      false,
+    );
+  });
+
+  it("suggests a suite-named PDF filename and slugifies the run id", () => {
+    const { db } = seed();
+    expect(suggestedPdfFileName(db, "run-1")).toBe("s-run-1.pdf");
+
+    db.insert(suiteRuns)
+      .values({
+        id: "solo/run",
+        suiteId: null,
+        mode: "supervised",
+        status: "passed",
+        startedAt: 1000,
+        endedAt: 2000,
+      })
+      .run();
+    expect(suggestedPdfFileName(db, "solo/run")).toBe("run-report-solo-run.pdf");
+    expect(() => suggestedPdfFileName(db, "ghost")).toThrow(SuiteRunNotFoundError);
   });
 
   it("tryWrite returns null and warns when the disk write fails", () => {

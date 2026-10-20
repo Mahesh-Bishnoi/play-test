@@ -11,6 +11,7 @@
 | M1–M19 | done | M19 (whole-repo review fixes) landed 2026-10-20; `npm run verify` + `npm run test:e2e` green |
 | M20 | pending | Follow-ups below; clean-code debt partly reduced by M21 |
 | M21 | done | Live suite/case progress landed 2026-10-20; verify + e2e + package green |
+| M22 | done | PDF export save dialog landed 2026-10-20; `npm run verify` green |
 
 Current work: none in progress. `npm run verify` includes coverage thresholds; deferred feature
 work lives in `SPECS.md` §2 and needs a new re-plan.
@@ -40,6 +41,25 @@ Overlap with M20: the live monitor lives in `components/run-progress/` rather th
 `use-suite-detail.ts`, and the stale `lastSuiteRunId` button was removed. The **duplicated
 single/suite runner step loops** and the remaining full `use-suite-detail.ts` split are still
 deferred to the clean-code-debt item.
+
+## M22 — PDF export destination (2026-10-20)
+
+Export PDF previously wrote `report.pdf` under `~/PlayTestData/...` and only told the user where
+it landed. M22 makes the destination the user's choice:
+
+- `report:exportPdf({suiteRunId})` now returns `{saved, path?}` (payload unchanged) and opens the
+  native Electron save dialog with a `.pdf` filter and a suggested
+  `<suite-slug>-<short-run-id>.pdf` name. Cancel returns `{saved:false}` and writes nothing.
+- The PDF is printed after the dialog is confirmed, so cancelling avoids the hidden-window
+  render. Only the chosen path is written; `suite_runs.reportPdfPath` records the last export.
+- The report page shows the saved path and silently no-ops on cancel, matching transfer export.
+- Handler seams (`renderPdf`, `showSaveDialog`) stay injected so `src/main/ipc/report.ts`
+  remains Electron-free.
+- Unit coverage: report file helper/filename tests, IPC success + cancel + unknown-run tests,
+  and renderer response parsing. No schema, DDL, or request-payload changes.
+- Verified 2026-10-20: `npm run verify` green (350 tests; coverage 49.9/48.3/36.7/50.3).
+  Native-dialog UX still needs the human smoke test (`npm start` → run → report → Export PDF,
+  then repeat and cancel).
 
 ## M20 — remaining work
 
