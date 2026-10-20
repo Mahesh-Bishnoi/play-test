@@ -5,25 +5,28 @@
  * `RecorderDeps` so tests use fakes and prod uses `defaultDeps()`.
  */
 
-import { spawn } from "node:child_process";
-import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { devices } from "playwright";
+import { z } from "zod";
 
 import type { RecorderStartOptions, RecorderUnsupported } from "../../shared/ipc-contract.js";
+import { RecorderUnsupportedSchema } from "../../shared/ipc-contract.js";
+import { TestStepSchema } from "../../shared/step-types.js";
 import type { TestStep } from "../../shared/step-types.js";
 import type { PlaywrightCliChild } from "../playwright-cli.js";
 import { resolvePlaywrightCli, spawnPlaywrightCli } from "../playwright-cli.js";
 import { buildCodegenArgs } from "./codegen-args.js";
 import { parseCodegenOutput } from "./codegen-output.js";
 import {
+  PlaywrightCliMissingError,
   RecorderAlreadyRunningError,
   RecorderNotRunningError,
   RecorderStartError,
+  RecorderValidationError,
 } from "./errors.js";
 
 export interface ParsedRecording {
@@ -82,47 +85,22 @@ function defaultWaitMs(ms: number): Promise<void> {
 }
 
 /**
- * Fallback launcher for when `playwright/cli.js` cannot be resolved (M15
- * item 5): the previous `npx playwright codegen …` spawn wrapped in the
- * `PlaywrightCliChild` shape so callers stay uniform. stderr is piped so the
+ * Launcher used when `playwright/cli.js` cannot be resolved: fail loud rather
+ * than falling back to `npx` (which a desktop-launched app may not find on
+ * PATH, and which on Windows went through cmd.exe). stderr is piped so the
  * start grace period can surface a launch failure.
  */
-function spawnNpxCodegen(args: string[]): CodegenChild {
-  const child: ChildProcess = spawn("npx", ["playwright", "codegen", ...args], {
-    stdio: ["ignore", "ignore", "pipe"],
-    shell: process.platform === "win32",
-  });
-  let exited = child.exitCode !== null || child.signalCode !== null;
-  let stderr = "";
-  child.on("exit", () => {
-    exited = true;
-  });
-  child.on("error", (err) => {
-    stderr = `${stderr}${err.message}`.slice(-CODEGEN_STDERR_TAIL_LIMIT);
-    exited = true;
-  });
-  child.stderr?.on("data", (chunk: Buffer) => {
-    stderr = `${stderr}${String(chunk)}`.slice(-CODEGEN_STDERR_TAIL_LIMIT);
-  });
-  return {
-    pid: child.pid,
-    kill: (signal?: string) => child.kill(signal as NodeJS.Signals | undefined),
-    hasExited: () => exited,
-    stderrTail: () => stderr,
-  };
-}
-
 function defaultDeps(): RecorderDeps {
   return {
     spawnCodegen: (outputPath, baseUrl, options) => {
       const tail = buildCodegenArgs(baseUrl, outputPath, options, new Set(Object.keys(devices)));
       const cli = resolvePlaywrightCli();
-      if (cli !== null) {
-        return spawnPlaywrightCli(cli, ["codegen", ...tail], {
-          stderrTailLimit: CODEGEN_STDERR_TAIL_LIMIT,
-        });
+      if (cli === null) {
+        throw new PlaywrightCliMissingError();
       }
-      return spawnNpxCodegen(tail);
+      return spawnPlaywrightCli(cli, ["codegen", ...tail], {
+        stderrTailLimit: CODEGEN_STDERR_TAIL_LIMIT,
+      });
     },
     readOutput: (outputPath) => {
       try {
@@ -196,6 +174,10 @@ export class CodegenRecorder {
    * `--save-storage` and flushes the output file; SIGTERM bypasses it. Wait
    * for that handler (bounded), then fall back to SIGTERM (Windows has no
    * POSIX SIGINT delivery).
+   *
+   * Read → parse → validate before discarding: a validation failure keeps the
+   * temp file and names it, so a recording is never thrown away before it has
+   * been checked.
    */
   async stop(): Promise<ParsedRecording> {
     const session = this.active;
@@ -217,9 +199,32 @@ export class CodegenRecorder {
       }
     }
     const raw = this.deps.readOutput(session.outputPath) ?? "";
-    this.deps.discardOutput(session.outputPath);
-    const { steps, unsupported } = parseCodegenOutput(raw);
-    return { steps, unsupported, raw };
+    const parsed = parseCodegenOutput(raw);
+    try {
+      const steps = z.array(TestStepSchema).parse(parsed.steps);
+      const unsupported = z.array(RecorderUnsupportedSchema).parse(parsed.unsupported);
+      this.deps.discardOutput(session.outputPath);
+      return { steps, unsupported, raw };
+    } catch (err) {
+      throw new RecorderValidationError(
+        err instanceof Error ? err.message : String(err),
+        session.outputPath,
+      );
+    }
+  }
+
+  /** Kill an active codegen child without parsing output — used on app quit. */
+  dispose(): void {
+    const session = this.active;
+    this.active = null;
+    if (session === null) {
+      return;
+    }
+    try {
+      session.child.kill("SIGTERM");
+    } catch {
+      // Already gone.
+    }
   }
 
   /** Poll `hasExited` until the stop grace period expires. */

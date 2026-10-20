@@ -161,7 +161,7 @@ the query builder only; there is no migration runner.
 - `projects(id, name, baseUrl, createdAt)`
 - `test_suites(id, projectId, name, createdAt)`
 - `test_cases(id, projectId, name, description, url, createdAt)` — `url` is the per-case
-  recording start URL; when empty the recording falls back to the project `baseUrl`
+  recording start URL (literal http(s) only; empty falls back to the project `baseUrl`)
 - `suite_test_cases(suiteId, caseId)` — PK(suiteId, caseId)
 - `test_steps(id, caseId, order, action, selector, value, timeoutMs, editedAt)` —
   `action` is plain text; valid values = `STEP_ACTIONS` (35 — see
@@ -197,6 +197,8 @@ Artifacts: `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/step-<NN>.png, fail
 - Reports: `report:getHtml`, `report:exportPdf`, `report:openTrace({caseRunId} | {tracePath})`.
 - Transfer: `transfer:exportProject/exportSuite/exportCase`, `transfer:importProject/importSuite/importCase`.
 - Sync: `sync:init/commit/push/pull/status/branch/resolve/clone` (local paths only).
+  `sync:resolve` accepts `entity: 'case' | 'suite' | 'project'`; pending conflicts carry
+  `remoteDeleted: true` when the remote deleted the entity (`theirs: null` in the sidecar).
 - System: `system:browserStatus`, `system:installBrowser`.
 - Events (main → renderer): `run:step-update`, `run:log`, `run:finished`.
 
@@ -286,8 +288,9 @@ table appears without touching old rows).
 ## 10. Known Limits
 
 Packaged-app headed path and Win/macOS install behavior unverified; the recorder and trace
-viewer now spawn the resolved Playwright CLI via Electron-as-Node (`ELECTRON_RUN_AS_NODE`) with
-an `npx` fallback — the packaged path for both still needs one smoke test; open case tabs keep
+viewer now spawn the resolved Playwright CLI via Electron-as-Node (`ELECTRON_RUN_AS_NODE`);
+there is no `npx` fallback (the CLI is found through the installed package's exported
+`package.json`, then `<pkg>/cli.js`) — the packaged path for both still needs one smoke test; open case tabs keep
 mounted state after sync pull (refresh on revisit); pending
 sync conflicts surface on pull, not status refresh. Toolchain: `typescript@7.0.2` ↔
 `oxlint-tsgolint@7.0.2004` version-locked, upgrade together. `sessionState` (M17) is run-only —

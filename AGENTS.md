@@ -34,7 +34,7 @@ Read `SPECS.md` first — the source of truth for scope, locked decisions, the d
 - Use latest stable unless SPECS.md or a project convention pins otherwise; if you deliberately pin older, note why in the commit message.
 
 ## 7. Quick commands (see repo README/AGENTS overrides if present)
-- `npm run typecheck`, `npm test`, `npm run package -- --dir`
+- `npm run typecheck`, `npm test`, `npm run package`
 
 ## 8. Commits (agent policy)
 - Never create unsigned commits (`--no-gpg-sign` is forbidden).

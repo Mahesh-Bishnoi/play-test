@@ -19,7 +19,7 @@ import {
   syncStatus,
 } from "../src/main/git-sync/sync.js";
 import type { SyncAuthor } from "../src/main/git-sync/types.js";
-import { createCase, getCase, updateCase } from "../src/main/ipc-cases.js";
+import { createCase, deleteCase, getCase, updateCase } from "../src/main/ipc-cases.js";
 import { getCaseProfile, setCaseProfile } from "../src/main/ipc-profiles.js";
 import { createProject, getProject, updateProject } from "../src/main/ipc-projects.js";
 import { getTestData, listSteps, setTestData, upsertStep } from "../src/main/ipc-steps.js";
@@ -321,5 +321,143 @@ describeE2E("e2e git sync: two machines, one central repo", () => {
         2,
       ),
     );
+  }, 120_000);
+
+  it("records every conflict, refreshes theirs, and applies a remote-delete merge atomically", async () => {
+    const central2 = join(scratch, "central-drift.git");
+    await execFileAsync("git", ["init", "--bare", "-b", "main", central2]);
+    const dirA2 = join(scratch, "drift-a");
+    const dirB2 = join(scratch, "drift-b");
+
+    const project = createProject(dbA, { name: "Drift", baseUrl: "http://127.0.0.1:9/" });
+    const testCase = createCase(dbA, {
+      projectId: project.id,
+      name: "Checkout",
+      url: "http://127.0.0.1:9/",
+    });
+    const suite = createSuite(dbA, { projectId: project.id, name: "Smoke" });
+    setSuiteCases(dbA, suite.id, [testCase.id]);
+
+    await initSyncRepo(dbA, project.id, {
+      dir: dirA2,
+      remoteUrl: central2,
+      author: ADA,
+      branch: "main",
+    });
+    await syncPush({ dir: dirA2 });
+    await cloneSyncRepo(dbB, { remoteUrl: central2, dir: dirB2 });
+
+    // --- Conflict content refreshes on each pull ---
+    updateCase(dbA, { id: testCase.id, description: "remote v1" });
+    await syncCommit(dbA, project.id, { dir: dirA2, author: ADA, message: "v1" });
+    await syncPush({ dir: dirA2 });
+
+    updateCase(dbB, { id: testCase.id, description: "local mine" });
+    await syncCommit(dbB, project.id, { dir: dirB2, author: BEN, message: "mine" });
+    const first = await syncPull(dbB, project.id, { dir: dirB2 });
+    expect(first.conflicts).toMatchObject([{ entity: "case", id: testCase.id }]);
+
+    updateCase(dbA, { id: testCase.id, description: "remote v2" });
+    await syncCommit(dbA, project.id, { dir: dirA2, author: ADA, message: "v2" });
+    await syncPush({ dir: dirA2 });
+    const second = await syncPull(dbB, project.id, { dir: dirB2 });
+    expect(second.conflicts).toMatchObject([{ entity: "case", id: testCase.id }]);
+    await resolveSyncConflict(dbB, project.id, {
+      dir: dirB2,
+      entity: "case",
+      id: testCase.id,
+      winner: "theirs",
+    });
+    // The stored `theirs` was refreshed to v2, not the stale v1.
+    expect(getCase(dbB, testCase.id).description).toBe("remote v2");
+    await syncCommit(dbB, project.id, { dir: dirB2, author: BEN, message: "resolve v2" });
+    await syncPush({ dir: dirB2 });
+    await syncPull(dbA, project.id, { dir: dirA2 });
+
+    // --- Project conflicts are recorded, not silently kept ---
+    updateProject(dbA, { id: project.id, name: "A-name" });
+    await syncCommit(dbA, project.id, { dir: dirA2, author: ADA, message: "A name" });
+    updateProject(dbB, { id: project.id, name: "B-name" });
+    await syncCommit(dbB, project.id, { dir: dirB2, author: BEN, message: "B name" });
+    await syncPush({ dir: dirA2 });
+    const projectPull = await syncPull(dbB, project.id, { dir: dirB2 });
+    expect(projectPull.conflicts).toMatchObject([{ entity: "project", id: project.id }]);
+    await resolveSyncConflict(dbB, project.id, {
+      dir: dirB2,
+      entity: "project",
+      id: project.id,
+      winner: "theirs",
+    });
+    expect(getProject(dbB, project.id).name).toBe("A-name");
+    await syncCommit(dbB, project.id, { dir: dirB2, author: BEN, message: "resolve project" });
+    await syncPush({ dir: dirB2 });
+    await syncPull(dbA, project.id, { dir: dirA2 });
+
+    // --- Remote-delete vs local-edit is recorded (theirs = deletion) ---
+    const tempCase = createCase(dbA, {
+      projectId: project.id,
+      name: "Temp",
+      url: "http://127.0.0.1:9/temp",
+    });
+    setSuiteCases(dbA, suite.id, [testCase.id, tempCase.id]);
+    await syncCommit(dbA, project.id, { dir: dirA2, author: ADA, message: "add temp" });
+    await syncPush({ dir: dirA2 });
+    await syncPull(dbB, project.id, { dir: dirB2 });
+
+    deleteCase(dbB, tempCase.id);
+    // Rename the suite locally on A so it conflicts with the remote membership
+    // change; the merged snapshot still references the deleted case.
+    updateSuite(dbA, { id: suite.id, name: "Smoke v2" });
+    await syncCommit(dbA, project.id, { dir: dirA2, author: ADA, message: "rename + edit" });
+    await syncCommit(dbB, project.id, { dir: dirB2, author: BEN, message: "delete temp" });
+    await syncPush({ dir: dirB2 });
+
+    const deletePull = await syncPull(dbA, project.id, { dir: dirA2 });
+    expect(deletePull.conflicts).toMatchObject([{ entity: "suite", id: suite.id }]);
+    // The pull applied cleanly (no half-merged DB): the remotely deleted case
+    // is gone and the conflicting local suite's membership was filtered before
+    // the apply, so no throw left the database half-changed.
+    expect(() => getCase(dbA, tempCase.id)).toThrow();
+    expect(getSuiteCaseIds(dbA, suite.id)).toEqual([testCase.id]);
+
+    // --- Remote-delete vs local-edit is recorded (theirs = deletion) ---
+    const central3 = join(scratch, "central-delete.git");
+    await execFileAsync("git", ["init", "--bare", "-b", "main", central3]);
+    const dirA3 = join(scratch, "delete-a");
+    const dirB3 = join(scratch, "delete-b");
+    const project3 = createProject(dbA, { name: "Delete", baseUrl: "http://127.0.0.1:9/" });
+    const edited = createCase(dbA, {
+      projectId: project3.id,
+      name: "Edited",
+      url: "http://127.0.0.1:9/edited",
+    });
+    await initSyncRepo(dbA, project3.id, {
+      dir: dirA3,
+      remoteUrl: central3,
+      author: ADA,
+      branch: "main",
+    });
+    await syncPush({ dir: dirA3 });
+    await cloneSyncRepo(dbB, { remoteUrl: central3, dir: dirB3 });
+
+    updateCase(dbA, { id: edited.id, description: "edited on A" });
+    await syncCommit(dbA, project3.id, { dir: dirA3, author: ADA, message: "edit" });
+    deleteCase(dbB, edited.id);
+    await syncCommit(dbB, project3.id, { dir: dirB3, author: BEN, message: "delete" });
+    await syncPush({ dir: dirB3 });
+
+    const editedPull = await syncPull(dbA, project3.id, { dir: dirA3 });
+    expect(editedPull.conflicts).toMatchObject([
+      { entity: "case", id: edited.id, remoteDeleted: true },
+    ]);
+    // Local version is kept until the user resolves.
+    expect(getCase(dbA, edited.id).description).toBe("edited on A");
+    await resolveSyncConflict(dbA, project3.id, {
+      dir: dirA3,
+      entity: "case",
+      id: edited.id,
+      winner: "theirs",
+    });
+    expect(() => getCase(dbA, edited.id)).toThrow();
   }, 120_000);
 });

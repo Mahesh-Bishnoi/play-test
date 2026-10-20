@@ -9,14 +9,14 @@ Built with Electron + TypeScript + React + hand-written CSS, SQLite (`better-sql
 - **Project / Suite / Case hierarchy** — cases are reusable across suites via a join table. Suite detail has checkbox selection, select-all/none, search, and a pre-run confirm dialog.
 - **Record via Playwright codegen** — launches an external `playwright codegen` window against the project's base URL, parses the output into editable `TestStep[]`, with an import-preview modal. Unparseable lines are kept as raw fallback, never dropped.
 - **Workflow step editor** — linear `@xyflow/react` chain + step table; node colors by last run status (green pass / red fail / grey skipped / blue running). Edit action, selector, value (with `{{key}}` hints), timeout; drag/arrow reorder.
-- **25 step actions** — `goto | click | dblclick | fill | type | select | check | uncheck | press | hover | focus | assert-visible | assert-hidden | assert-text | assert-value | assert-checked | assert-unchecked | assert-enabled | assert-disabled | assert-editable | assert-focused | assert-count | assert-url | assert-title | wait`. Recorder `getBy*`/`locator` chains are resolved without `eval`.
+- **35 step actions** — `goto | click | dblclick | fill | type | select | check | uncheck | press | hover | focus | assert-visible | assert-hidden | assert-text | assert-value | assert-checked | assert-unchecked | assert-enabled | assert-disabled | assert-editable | assert-focused | assert-count | assert-url | assert-title | wait | assert-text-exact | assert-attribute | assert-attached | reload | go-back | go-forward | upload | drag | wait-url | scroll-into-view` (canonical list: `src/shared/step-types.ts`). Recorder `getBy*`/`locator` chains are resolved without `eval`.
 - **Supervised single-case runs** — headed, one worker, pauses on failure with context kept open. Resume-from-failed-step (re-runs edited step + followers in the same context) or full re-run. Optional pre-run speed control (Instant / 0.6s / 1.5s / 3s pacing between steps).
 - **Unsupervised runs** — single case or whole suite, headless, suite-parallel from day one (`workers = max(1, min(cpu/2, cases))`).
 - **Artifacts** — screenshot after every step; video + trace retained on failure only. Stored under `~/PlayTestData/<projectId>/<suiteRunId>/<caseId>/` (`step-NN.png`, `failed.webm`, `trace.zip`).
 - **Reports** — self-contained single-file HTML (inline CSS, base64 thumbnails, drill-down suite → case → step with error stacks) + PDF export (headless Chromium print). Per suite run, with Re-run-failed-cases-only.
 - **Test data (KV)** — per-case key/value table, `{{key}}` substitution at run time. Missing key fails the step with `missing test-data key: X`. Schema reserves a `source` column for future CSV.
 - **First-run browser setup** — checks for Playwright Chromium on boot, banner with install progress; `postinstall` also installs it.
-- **Packaging** — Electron Forge + `electron-builder`-style makers; browsers excluded from asar.
+- **Packaging** — Electron Forge + Forge makers (Squirrel, ZIP, deb, rpm); browsers excluded from asar.
 
 ## How to use it
 
@@ -45,7 +45,7 @@ Prerequisites: Node.js (see `.nvmrc` if present, else current LTS) + npm. Chromi
 ```sh
 npm install        # installs deps + playwright chromium
 npm start          # dev: Electron + Vite hot reload
-npm run verify     # typecheck + lint + format check + unit tests
+npm run verify     # typecheck + lint + format check + coverage-gated unit tests
 npm test           # vitest unit suite
 npm run test:e2e   # hermetic e2e (spins up local fixture + dummy-tax servers, ~27s)
 ```

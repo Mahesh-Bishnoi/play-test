@@ -5,6 +5,7 @@
  */
 
 import type { RecorderStartOptions } from "../../shared/ipc-contract.js";
+import { requireHttpUrl } from "../../shared/schema.js";
 import { UnknownRecorderDeviceError } from "./errors.js";
 
 /**
@@ -21,7 +22,13 @@ export function buildCodegenArgs(
   options: RecorderStartOptions,
   knownDevices?: ReadonlySet<string>,
 ): string[] {
-  const args = [baseUrl, "--output", outputPath];
+  // Codegen's first positional is the URL. Validate it as a URL here too:
+  // a value starting with `-` would otherwise be parsed as a CLI option
+  // (e.g. `--save-storage=<path>`), and non-http(s) schemes are not supported.
+  if (baseUrl.trim() === "") {
+    throw new Error("codegen URL is required — set the case URL or project base URL");
+  }
+  const args = [requireHttpUrl(baseUrl, "codegen URL"), "--output", outputPath];
   const viewport = options.viewport;
   if (viewport !== undefined) {
     const { width, height } = viewport;

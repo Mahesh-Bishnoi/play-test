@@ -22,6 +22,7 @@ import {
 import type { StepRow } from "../shared/schema.js";
 import { StepRowSchema } from "../shared/schema.js";
 import type { AppDatabase } from "./db.js";
+import { inTransaction } from "./db.js";
 import { CaseNotFoundError } from "./ipc-cases.js";
 import { testCases, testData, testSteps } from "./schema.js";
 
@@ -119,42 +120,43 @@ export function upsertStep(db: AppDatabase, input: StepUpsertPayload): StepRow {
   requireCase(db, parsed.caseId);
   const step: TestStep = parsed.step;
   const now = Date.now();
-
-  if (step.id !== undefined) {
-    const existing = db.select().from(testSteps).where(eq(testSteps.id, step.id)).all()[0];
-    if (existing !== undefined) {
-      if (existing.caseId !== parsed.caseId) {
-        throw new Error(`step belongs to a different case: ${step.id}`);
-      }
-      if (step.order === existing.order) {
-        db.update(testSteps)
-          .set({
-            action: step.action,
-            selector: step.selector ?? null,
-            value: step.value ?? null,
-            timeoutMs: step.timeoutMs ?? null,
-            editedAt: now,
-          })
-          .where(eq(testSteps.id, existing.id))
-          .run();
-        const updated = db.select().from(testSteps).where(eq(testSteps.id, existing.id)).all()[0];
-        if (updated === undefined) {
-          throw new StepNotFoundError(existing.id);
+  return inTransaction(db, (tx) => {
+    if (step.id !== undefined) {
+      const existing = tx.select().from(testSteps).where(eq(testSteps.id, step.id)).all()[0];
+      if (existing !== undefined) {
+        if (existing.caseId !== parsed.caseId) {
+          throw new Error(`step belongs to a different case: ${step.id}`);
         }
-        return toStepRow(updated);
+        if (step.order === existing.order) {
+          tx.update(testSteps)
+            .set({
+              action: step.action,
+              selector: step.selector ?? null,
+              value: step.value ?? null,
+              timeoutMs: step.timeoutMs ?? null,
+              editedAt: now,
+            })
+            .where(eq(testSteps.id, existing.id))
+            .run();
+          const updated = tx.select().from(testSteps).where(eq(testSteps.id, existing.id)).all()[0];
+          if (updated === undefined) {
+            throw new StepNotFoundError(existing.id);
+          }
+          return toStepRow(updated);
+        }
+        // Order changed: delete then reinsert at the new position (same id).
+        tx.delete(testSteps).where(eq(testSteps.id, existing.id)).run();
+        insertStepAt(tx, parsed.caseId, step.id, step, step.order, now);
+        return readStep(tx, step.id);
       }
-      // Order changed: delete then reinsert at the new position (same id).
-      db.delete(testSteps).where(eq(testSteps.id, existing.id)).run();
-      insertStepAt(db, parsed.caseId, step.id, step, step.order, now);
-      return readStep(db, step.id);
+      insertStepAt(tx, parsed.caseId, step.id, step, step.order, now);
+      return readStep(tx, step.id);
     }
-    insertStepAt(db, parsed.caseId, step.id, step, step.order, now);
-    return readStep(db, step.id);
-  }
 
-  const id = randomUUID();
-  insertStepAt(db, parsed.caseId, id, step, step.order, now);
-  return readStep(db, id);
+    const id = randomUUID();
+    insertStepAt(tx, parsed.caseId, id, step, step.order, now);
+    return readStep(tx, id);
+  });
 }
 
 /** Shift successors down, then insert the row at the clamped target order. */
@@ -201,38 +203,42 @@ function readStep(db: AppDatabase, id: string): StepRow {
 export function moveStep(db: AppDatabase, input: StepMovePayload): StepRow {
   const parsed = StepMoveSchema.parse(input);
   requireCase(db, parsed.caseId);
-  const rows = loadOrdered(db, parsed.caseId);
-  const from = rows.findIndex((r) => r.id === parsed.id);
-  if (from === -1) {
-    throw new StepNotFoundError(parsed.id);
-  }
-  const target = Math.min(Math.max(parsed.toOrder, 0), rows.length - 1);
   const now = Date.now();
-  if (from !== target) {
-    const [moving] = rows.splice(from, 1);
-    if (moving === undefined) {
+  return inTransaction(db, (tx) => {
+    const rows = loadOrdered(tx, parsed.caseId);
+    const from = rows.findIndex((r) => r.id === parsed.id);
+    if (from === -1) {
       throw new StepNotFoundError(parsed.id);
     }
-    rows.splice(target, 0, moving);
-    persistOrder(db, rows, moving.id, now);
-  }
-  const moved = db.select().from(testSteps).where(eq(testSteps.id, parsed.id)).all()[0];
-  if (moved === undefined) {
-    throw new StepNotFoundError(parsed.id);
-  }
-  return toStepRow(moved);
+    const target = Math.min(Math.max(parsed.toOrder, 0), rows.length - 1);
+    if (from !== target) {
+      const [moving] = rows.splice(from, 1);
+      if (moving === undefined) {
+        throw new StepNotFoundError(parsed.id);
+      }
+      rows.splice(target, 0, moving);
+      persistOrder(tx, rows, moving.id, now);
+    }
+    const moved = tx.select().from(testSteps).where(eq(testSteps.id, parsed.id)).all()[0];
+    if (moved === undefined) {
+      throw new StepNotFoundError(parsed.id);
+    }
+    return toStepRow(moved);
+  });
 }
 
 /** Delete a step and compact the remaining orders to 0..n-1. */
 export function deleteStep(db: AppDatabase, input: StepDeletePayload): void {
   const parsed = StepDeleteSchema.parse(input);
   requireCase(db, parsed.caseId);
-  const existing = db.select().from(testSteps).where(eq(testSteps.id, parsed.id)).all()[0];
-  if (existing === undefined || existing.caseId !== parsed.caseId) {
-    throw new StepNotFoundError(parsed.id);
-  }
-  db.delete(testSteps).where(eq(testSteps.id, parsed.id)).run();
-  persistOrder(db, loadOrdered(db, parsed.caseId));
+  inTransaction(db, (tx) => {
+    const existing = tx.select().from(testSteps).where(eq(testSteps.id, parsed.id)).all()[0];
+    if (existing === undefined || existing.caseId !== parsed.caseId) {
+      throw new StepNotFoundError(parsed.id);
+    }
+    tx.delete(testSteps).where(eq(testSteps.id, parsed.id)).run();
+    persistOrder(tx, loadOrdered(tx, parsed.caseId));
+  });
 }
 
 /**
@@ -242,21 +248,26 @@ export function deleteStep(db: AppDatabase, input: StepDeletePayload): void {
 export function reorderSteps(db: AppDatabase, input: StepReorderPayload): StepRow[] {
   const parsed = StepReorderSchema.parse(input);
   requireCase(db, parsed.caseId);
-  const rows = loadOrdered(db, parsed.caseId);
-  const known = new Set(rows.map((r) => r.id));
-  if (parsed.orderedIds.length !== rows.length || !parsed.orderedIds.every((id) => known.has(id))) {
-    throw new Error("orderedIds must match the case's step ids exactly");
-  }
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  const next = parsed.orderedIds.map((id) => {
-    const row = byId.get(id);
-    if (row === undefined) {
+  return inTransaction(db, (tx) => {
+    const rows = loadOrdered(tx, parsed.caseId);
+    const known = new Set(rows.map((r) => r.id));
+    if (
+      parsed.orderedIds.length !== rows.length ||
+      !parsed.orderedIds.every((id) => known.has(id))
+    ) {
       throw new Error("orderedIds must match the case's step ids exactly");
     }
-    return row;
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const next = parsed.orderedIds.map((id) => {
+      const row = byId.get(id);
+      if (row === undefined) {
+        throw new Error("orderedIds must match the case's step ids exactly");
+      }
+      return row;
+    });
+    persistOrder(tx, next);
+    return loadOrdered(tx, parsed.caseId).map(toStepRow);
   });
-  persistOrder(db, next);
-  return loadOrdered(db, parsed.caseId).map(toStepRow);
 }
 
 /** KV test data for a case as a plain record (PLAN §10). */
@@ -275,11 +286,13 @@ export function getTestData(db: AppDatabase, input: TestDataGetPayload): Record<
 export function setTestData(db: AppDatabase, input: TestDataSetPayload): Record<string, string> {
   const parsed = TestDataSetSchema.parse(input);
   requireCase(db, parsed.caseId);
-  db.delete(testData).where(eq(testData.caseId, parsed.caseId)).run();
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(parsed.data)) {
-    db.insert(testData).values({ caseId: parsed.caseId, key, value, source: "kv" }).run();
-    out[key] = value;
-  }
-  return out;
+  return inTransaction(db, (tx) => {
+    tx.delete(testData).where(eq(testData.caseId, parsed.caseId)).run();
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed.data)) {
+      tx.insert(testData).values({ caseId: parsed.caseId, key, value, source: "kv" }).run();
+      out[key] = value;
+    }
+    return out;
+  });
 }

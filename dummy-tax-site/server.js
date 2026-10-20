@@ -76,7 +76,13 @@ function parseCookies(header) {
   for (const part of header.split(";")) {
     const idx = part.indexOf("=");
     if (idx === -1) continue;
-    out[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+    const value = part.slice(idx + 1).trim();
+    // A malformed percent-encoding must not crash the fixture (review counted #8).
+    try {
+      out[part.slice(0, idx).trim()] = decodeURIComponent(value);
+    } catch {
+      out[part.slice(0, idx).trim()] = value;
+    }
   }
   return out;
 }
@@ -516,7 +522,15 @@ export function createDummyTaxServer() {
   };
 
   return createServer((req, res) => {
-    void handleRequest(req, res);
+    // Never leave the request promise unhandled: one bad input must not exit
+    // the fixture process (review counted #8).
+    void handleRequest(req, res).catch(() => {
+      if (!res.headersSent) {
+        send(res, 500, shell("Error", "<h1>Something went wrong</h1>", true));
+      } else {
+        res.end();
+      }
+    });
   });
 }
 

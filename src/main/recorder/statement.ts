@@ -177,8 +177,12 @@ export type ClickEventMarker = "popup" | "download";
  * `parseClickValue`). An `event` marker (M16) merges into the same object, e.g.
  * `{"button":"right","popup":true}`.
  */
-export function clickValueFrom(stmt: string, event?: ClickEventMarker): string | undefined {
-  const args = terminalArgs(stmt, "click") ?? "";
+export function clickValueFrom(
+  stmt: string,
+  event?: ClickEventMarker,
+  terminal = "click",
+): string | undefined {
+  const args = terminalArgs(stmt, terminal) ?? "";
   if (event === undefined && !/button:|modifiers:|force:|clickCount:|position:/.test(args)) {
     return undefined;
   }

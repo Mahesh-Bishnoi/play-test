@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 
 /**
  * Shared Playwright CLI launcher (M15 item 5). One place that resolves the
- * installed `playwright/cli.js` and spawns it through Electron's Node
+ * installed Playwright package's `cli.js` and spawns it through Electron's Node
  * (`ELECTRON_RUN_AS_NODE=1`) so no `npx` on PATH is required — used by the
  * trace viewer (detached) and the recorder (piped stderr tail).
  *
@@ -41,14 +43,18 @@ export interface PlaywrightCliSpawn {
 
 /**
  * Resolve the absolute `playwright/cli.js` path from the same `node_modules`
- * the externalized `playwright` import resolves from. Returns null when the
- * CLI cannot be located (caller falls back to `npx playwright …`).
+ * the externalized `playwright` import resolves from. Playwright's `exports`
+ * map deliberately does not expose `./cli.js`, so resolve the package root
+ * (`playwright/package.json` is exported) and join the CLI next to it.
+ * Returns null when the package or file is missing.
  */
 export function resolvePlaywrightCli(): string | null {
   try {
     // `__filename` exists in the bundled CJS main; fall back to CWD for dev.
     const anchor = typeof __filename === "string" ? __filename : process.cwd();
-    return createRequire(anchor).resolve("playwright/cli.js");
+    const packageJson = createRequire(anchor).resolve("playwright/package.json");
+    const cliPath = join(dirname(packageJson), "cli.js");
+    return existsSync(cliPath) ? cliPath : null;
   } catch {
     return null;
   }

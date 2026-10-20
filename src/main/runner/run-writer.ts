@@ -7,7 +7,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import type { StepStatus } from "../../shared/step-types.js";
 import { RunFinishedEvent, RunLogEvent, RunStepUpdateEvent } from "../../shared/ipc-contract.js";
@@ -147,6 +147,33 @@ export class RunWriter {
       .update(caseRuns)
       .set({ status, durationMs: this.now() - startedAt })
       .where(eq(caseRuns.id, caseRunId))
+      .run();
+  }
+
+  /**
+   * Settle a case only if it is still "running". A crashed worker and the
+   * suite's final reconciliation must never overwrite a row that already
+   * settled (passed/failed/cancelled).
+   */
+  settleCaseIfRunning(
+    caseRunId: string,
+    status: "failed" | "cancelled",
+    startedAt: number,
+  ): boolean {
+    const row = this.db.select().from(caseRuns).where(eq(caseRuns.id, caseRunId)).all()[0];
+    if (row === undefined || row.status !== "running") {
+      return false;
+    }
+    this.finishCaseRun(caseRunId, status, startedAt);
+    return true;
+  }
+
+  /** Any step left "running" by a crashed worker becomes skipped, never pass. */
+  skipRunningSteps(caseRunId: string): void {
+    this.db
+      .update(stepRuns)
+      .set({ status: "skipped" })
+      .where(and(eq(stepRuns.caseRunId, caseRunId), eq(stepRuns.status, "running")))
       .run();
   }
 

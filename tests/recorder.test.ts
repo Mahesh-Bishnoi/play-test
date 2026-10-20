@@ -419,16 +419,50 @@ describe("parseCodegenOutput (PLAN §7, M15)", () => {
     expect(unsupported).toEqual([]);
   });
 
-  it("ignores a page-variable statement when no popup was booked (unchanged behaviour, M16)", () => {
+  it("reports page-variable statements without a popup booking (review F5)", () => {
     const { steps, unsupported } = parseCodegenOutput(
       [
         "await page1.getByRole('button', { name: 'Sign in' }).click();",
         "await page1.getByLabel('Email').fill('a@b.c');",
       ].join("\n"),
     );
-    // No alias adoption without a popup booking: `page1.` is not `page.`, so the
-    // gate in `parseLine` drops the lines silently (not reported as unsupported).
+    // No alias adoption without a popup booking: report, never drop.
     expect(steps).toEqual([]);
+    expect(unsupported.map((u) => u.line)).toEqual([
+      "await page1.getByRole('button', { name: 'Sign in' }).click();",
+      "await page1.getByLabel('Email').fill('a@b.c');",
+    ]);
+    expect(unsupported[0]?.reason).toMatch(/another tab\/page/);
+  });
+
+  it("reports a popup opened by a non-click action instead of dropping its steps (review F5)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "const page1Promise = page.waitForEvent('popup');",
+        "await page.getByRole('link', { name: 'Sign in' }).press('Enter');",
+        "const page1 = await page1Promise;",
+        "await page1.getByRole('textbox', { name: 'Password' }).fill('pw');",
+      ].join("\n"),
+    );
+    // The press itself is recorded; the popup's own step is reported as
+    // unsupported because press cannot carry the popup marker.
+    expect(steps.map((s) => s.action)).toEqual(["press"]);
+    expect(unsupported).toHaveLength(1);
+    expect(unsupported[0]?.line).toContain("page1.getByRole('textbox'");
+  });
+
+  it("adopts a popup opened by a double click (review F5)", () => {
+    const { steps, unsupported } = parseCodegenOutput(
+      [
+        "const page1Promise = page.waitForEvent('popup');",
+        "await page.getByRole('link', { name: 'Open' }).dblclick();",
+        "const page1 = await page1Promise;",
+        "await page1.getByRole('button', { name: 'Done' }).click();",
+      ].join("\n"),
+    );
+    expect(steps.map((s) => s.action)).toEqual(["dblclick", "click"]);
+    expect(steps[0]?.value).toBe('{"popup":true}');
+    expect(steps[1]?.selector).toBe("getByRole('button', { name: 'Done' })");
     expect(unsupported).toEqual([]);
   });
 

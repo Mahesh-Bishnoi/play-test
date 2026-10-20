@@ -7,7 +7,7 @@
 import { z } from "zod";
 
 import { ExportStepSchema } from "../../shared/export-format.js";
-import { CaseProfileInputSchema } from "../../shared/schema.js";
+import { CaseProfileInputSchema, HttpUrlSchema } from "../../shared/schema.js";
 
 // --- Snapshot types ----------------------------------------------------------
 
@@ -20,7 +20,7 @@ export const SnapshotCaseSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/, "unsafe case id"),
   name: z.string().trim().min(1).max(200),
   description: z.string().max(5000).optional(),
-  url: z.string().trim().max(2000).optional(),
+  url: HttpUrlSchema.optional(),
   steps: z.array(SnapshotStepSchema).max(5000),
   testData: z
     .record(z.string().regex(/^\w+$/, "key must match \\w+"), z.string().max(10000))
@@ -45,7 +45,7 @@ export type SnapshotSuite = z.infer<typeof SnapshotSuiteSchema>;
 export const SnapshotProjectSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/, "unsafe project id"),
   name: z.string().trim().min(1).max(200),
-  baseUrl: z.string().trim().max(2000).optional(),
+  baseUrl: HttpUrlSchema.optional(),
 });
 export type SnapshotProject = z.infer<typeof SnapshotProjectSchema>;
 

@@ -30,7 +30,12 @@ import { getCase } from "../ipc-cases.js";
 import { getCaseProfile } from "../ipc-profiles.js";
 import { getProject } from "../ipc-projects.js";
 import { getTestData, listSteps } from "../ipc-steps.js";
-import { ContextClosedError, RunAlreadyActiveError, formatStepError } from "./errors.js";
+import {
+  ContextClosedError,
+  PausedStepDeletedError,
+  RunAlreadyActiveError,
+  formatStepError,
+} from "./errors.js";
 import { executeStep } from "./execute-step.js";
 import { flakeHints } from "./flake-hints.js";
 import { contextLaunchOptionsFromProfile } from "./launcher.js";
@@ -56,6 +61,8 @@ interface LiveSession {
   /** Pause snapshot: remaining steps are marked skipped if cancelled while paused. */
   pausedSteps?: StepRow[];
   pausedFromIndex?: number;
+  /** Identity of the step the run paused on — resume re-finds it by id. */
+  pausedStepId?: string;
 }
 
 export interface StartedRun {
@@ -243,21 +250,40 @@ export class SingleCaseRunner {
       throw new RunAlreadyActiveError();
     }
     const steps = listSteps(this.db, session.caseId);
-    if (parsed.fromOrder < 0 || parsed.fromOrder >= steps.length) {
+    // Resume by identity, not by position: deleting an earlier step shifts the
+    // array, and an old order number would skip the failed step (false pass).
+    let fromIndex: number;
+    if (session.pausedStepId !== undefined) {
+      fromIndex = steps.findIndex((step) => step.id === session.pausedStepId);
+      if (fromIndex === -1) {
+        throw new PausedStepDeletedError();
+      }
+    } else {
+      if (parsed.fromOrder < 0 || parsed.fromOrder >= steps.length) {
+        throw new ContextClosedError();
+      }
+      fromIndex = parsed.fromOrder;
+    }
+    const fromStep = steps[fromIndex];
+    if (fromStep === undefined) {
       throw new ContextClosedError();
     }
     const data = getTestData(this.db, { caseId: session.caseId });
-    this.runs.clearStepRunsFrom(session.caseRunId, parsed.fromOrder);
+    this.runs.clearStepRunsFrom(session.caseRunId, fromStep.order);
     session.busy = true;
     session.cancelled = false;
     session.pausedSteps = undefined;
     session.pausedFromIndex = undefined;
+    session.pausedStepId = undefined;
     const startedAt = this.now();
     session.startedAt = startedAt;
     const done = (async (): Promise<void> => {
       try {
-        await this.executeFrom(session, steps, data, parsed.fromOrder, startedAt);
+        await this.executeFrom(session, steps, data, fromIndex, startedAt);
       } catch (err) {
+        // Close the leaked context/browser before settling the run from the
+        // outside; otherwise a resume failure leaves a headed browser alive.
+        await this.closeSessionResources(session);
         this.abortSession(session, steps, err instanceof Error ? err.message : String(err));
       }
     })();
@@ -352,6 +378,7 @@ export class SingleCaseRunner {
           session.busy = false;
           session.pausedSteps = steps;
           session.pausedFromIndex = index + 1;
+          session.pausedStepId = step.id;
           // Persist the failure evidence now: an edit-and-resume must not lose
           // the trace. Restarting the chunk keeps the resumed run traced too.
           try {

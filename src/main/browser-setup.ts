@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
 
 import { chromium } from "playwright";
+
+import { buildPlaywrightCliSpawn, resolvePlaywrightCli } from "./playwright-cli.js";
 
 /**
  * First-run Chromium presence check + install (WS6 / M7, PLAN §11).
@@ -105,19 +106,20 @@ function errorMessage(err: unknown): string {
  * `process.execPath` (Electron's Node) runs it — no `npx` on PATH required.
  */
 function installViaPlaywrightCli(): Promise<{ code: number | null; stderr: string }> {
-  let cliPath: string;
-  try {
-    // `__filename` exists in the bundled CJS main; fall back to CWD for dev.
-    const anchor = typeof __filename === "string" ? __filename : process.cwd();
-    cliPath = createRequire(anchor).resolve("playwright/cli.js");
-  } catch {
+  const cliPath = resolvePlaywrightCli();
+  if (cliPath === null) {
     throw new BrowserSetupError(
       "Cannot locate the Playwright CLI from the packaged app. " +
         "Run `npx playwright install chromium` manually, then retry.",
     );
   }
+  // `buildPlaywrightCliSpawn` runs the CLI through Electron's Node
+  // (`ELECTRON_RUN_AS_NODE=1`) — spawning `process.execPath` without it would
+  // open a second app window.
+  const { command, args, env } = buildPlaywrightCliSpawn(cliPath, ["install", "chromium"]);
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [cliPath, "install", "chromium"], {
+    const child = spawn(command, args, {
+      env,
       stdio: ["ignore", "ignore", "pipe"],
     });
     let stderr = "";

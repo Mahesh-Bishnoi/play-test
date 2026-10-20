@@ -228,8 +228,23 @@ export default function CaseDetailPage({ caseId, onBack }: Props): React.JSX.Ele
     const base = steps.length;
     setBusy(true);
     (async () => {
-      for (const [index, step] of selected.entries()) {
-        await api.upsertStep(caseId, { ...step, order: base + index });
+      const inserted: string[] = [];
+      try {
+        for (const [index, step] of selected.entries()) {
+          const row = await api.upsertStep(caseId, { ...step, order: base + index });
+          inserted.push(row.id);
+        }
+      } catch (err) {
+        // Roll back the steps already inserted so a retry cannot duplicate them
+        // (review counted #6).
+        for (const id of inserted.reverse()) {
+          try {
+            await api.deleteStep(caseId, id);
+          } catch {
+            // Best effort — the error below is the actionable one.
+          }
+        }
+        throw err;
       }
     })()
       .then(() => {

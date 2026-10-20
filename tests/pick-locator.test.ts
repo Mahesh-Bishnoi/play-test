@@ -29,6 +29,13 @@ describe("validatePastedLocator (M10 pick-locator)", () => {
     }
   });
 
+  it("accepts a quoted semicolon but rejects a statement separator (review counted #7)", () => {
+    expect(validatePastedLocator(`getByText("Save; draft")`).ok).toBe(true);
+    expect(validatePastedLocator(`getByRole('button', { name: 'a;b' })`).ok).toBe(true);
+    const multiple = validatePastedLocator("getByText('a'); page.click()");
+    expect(multiple.ok).toBe(false);
+  });
+
   it("strips a pasted statement shell (await / trailing semicolon)", () => {
     const result = validatePastedLocator("await page.getByRole('button', { name: 'File' });");
     expect(result).toEqual({

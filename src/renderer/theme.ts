@@ -2,8 +2,6 @@ export type AppTheme = "intellij-dark" | "syntax-light";
 
 export const THEME_STORAGE_KEY = "playtest.theme";
 
-export const APP_THEMES: readonly AppTheme[] = ["intellij-dark", "syntax-light"] as const;
-
 export function isAppTheme(value: unknown): value is AppTheme {
   return value === "intellij-dark" || value === "syntax-light";
 }

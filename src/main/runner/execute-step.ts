@@ -47,19 +47,28 @@ export async function executeStep(
       if (step.selector === undefined || step.selector === "") {
         throw new StepExecutionError(`${label} needs a selector`);
       }
-      const { double, options } = parseClickValue(step.value);
-      if (double) {
-        await page.dblclick(step.selector, timeoutMs);
-      } else {
-        await page.click(step.selector, timeoutMs, options);
+      const parsed = parseClickValue(step.value);
+      if (parsed.error !== undefined) {
+        throw new StepExecutionError(`${label}: ${parsed.error}`);
       }
+      const options = parsed.double ? { ...parsed.options, clickCount: 2 } : parsed.options;
+      await page.click(step.selector, timeoutMs, options);
       return;
     }
     case "dblclick": {
       if (step.selector === undefined || step.selector === "") {
         throw new StepExecutionError(`${label} needs a selector`);
       }
-      await page.dblclick(step.selector, timeoutMs);
+      // A double click is a click with clickCount 2, so modifiers/button/popup
+      // options are not silently dropped.
+      const parsed = parseClickValue(step.value);
+      if (parsed.error !== undefined) {
+        throw new StepExecutionError(`${label}: ${parsed.error}`);
+      }
+      await page.click(step.selector, timeoutMs, {
+        ...parsed.options,
+        clickCount: 2,
+      });
       return;
     }
     case "fill": {

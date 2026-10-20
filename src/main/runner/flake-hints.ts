@@ -33,7 +33,9 @@ export function flakeHints(steps: StepRow[]): string[] {
     if (step.action !== "click") {
       continue;
     }
-    if (parseClickValue(step.value).options.force === true) {
+    // A malformed value fails the step when it executes; hints stay advisory.
+    const parsed = parseClickValue(step.value);
+    if (parsed.error === undefined && parsed.options.force === true) {
       hints.push(
         `step s${step.order} (click) forces the click, bypassing Playwright actionability checks`,
       );

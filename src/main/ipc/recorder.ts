@@ -9,6 +9,7 @@ import {
   RecorderUnsupportedSchema,
 } from "../../shared/ipc-contract.js";
 import type { RecorderStartOptions } from "../../shared/ipc-contract.js";
+import { requireHttpUrl } from "../../shared/schema.js";
 import { TestStepSchema } from "../../shared/step-types.js";
 import { sharedRecorder } from "../recorder/codegen-shell.js";
 import type { CodegenRecorder } from "../recorder/codegen-shell.js";
@@ -44,10 +45,12 @@ export function resolveRecorderStartOptions(
 ): { baseUrl: string; options: RecorderStartOptions } {
   const testCase = getCase(db, caseId);
   const project = getProject(db, testCase.projectId);
-  const baseUrl = (testCase.url?.trim() ?? "") || (project.baseUrl?.trim() ?? "");
-  if (baseUrl === "") {
+  const rawBaseUrl = (testCase.url?.trim() ?? "") || (project.baseUrl?.trim() ?? "");
+  if (rawBaseUrl === "") {
     throw new Error("case has no URL and the project has no base URL — set one before recording");
   }
+  // Last line of defense: the URL becomes a codegen argv element.
+  const baseUrl = requireHttpUrl(rawBaseUrl, "record URL");
   const profile = getCaseProfile(db, caseId);
   const options: RecorderStartOptions = {};
   if (profile !== null) {

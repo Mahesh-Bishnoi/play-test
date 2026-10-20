@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { StepRow } from "../src/shared/schema.js";
 import {
   nodePosition,
-  statusStyle,
   toWorkflowData,
   toWorkflowEdges,
 } from "../src/renderer/components/workflow-layout.js";
@@ -54,14 +53,6 @@ describe("workflow-layout (WS3)", () => {
       { id: "e1-2", source: "b", target: "c" },
     ]);
     expect(toWorkflowEdges([step("a", 0)])).toEqual([]);
-  });
-
-  it("uses the PLAN §2 palette: green pass, red fail, blue running, grey skipped", () => {
-    expect(statusStyle("pass").border).toBe("#16a34a");
-    expect(statusStyle("fail").border).toBe("#dc2626");
-    expect(statusStyle("running").border).toBe("#2563eb");
-    expect(statusStyle("skipped").border).toBe("#9ca3af");
-    expect(statusStyle(null).background).toBe("#ffffff");
   });
 
   it("lays nodes out in a vertical column with even spacing", () => {

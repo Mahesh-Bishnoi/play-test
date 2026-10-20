@@ -16,6 +16,7 @@ import type {
 } from "../src/main/runner/seams.js";
 import {
   ContextClosedError,
+  PausedStepDeletedError,
   RunAlreadyActiveError,
   StepExecutionError,
   formatStepError,
@@ -41,7 +42,7 @@ import type { IpcHandleFn } from "../src/main/ipc/handle.js";
 import { createCase } from "../src/main/ipc-cases.js";
 import { authStateDir, MissingAuthStateError, setCaseProfile } from "../src/main/ipc-profiles.js";
 import { createProject } from "../src/main/ipc-projects.js";
-import { setTestData, upsertStep } from "../src/main/ipc-steps.js";
+import { deleteStep, listSteps, setTestData, upsertStep } from "../src/main/ipc-steps.js";
 import { caseRuns, stepRuns, suiteRuns } from "../src/main/schema.js";
 import { MissingTestDataKeyError } from "../src/shared/step-types.js";
 
@@ -426,7 +427,9 @@ describe("executeStep mapping", () => {
     const page = new FakePage();
     await executeStep(page, { order: 0, action: "click", selector: "#b", value: "dblclick" });
     await executeStep(page, { order: 1, action: "press", value: "Enter" });
-    expect(page.calls.map((c) => c.method)).toEqual(["dblclick", "press"]);
+    expect(page.calls.map((c) => c.method)).toEqual(["click", "press"]);
+    // A double click is a click with clickCount 2 so its options are not dropped.
+    expect(page.calls[0]?.args).toEqual(["#b", undefined, { clickCount: 2 }]);
     expect(page.calls[1]).toMatchObject({ args: [undefined, "Enter", undefined] });
   });
 
@@ -444,7 +447,7 @@ describe("executeStep mapping", () => {
       value: '["a", "b"]',
     });
     expect(page.calls.map((c) => c.method)).toEqual([
-      "dblclick",
+      "click",
       "uncheck",
       "hover",
       "focus",
@@ -473,6 +476,56 @@ describe("executeStep mapping", () => {
     expect(page.calls.map((c) => c.method)).toEqual(["click", "click"]);
     expect(page.calls[0]?.args).toEqual(["#p", undefined, { popup: true }]);
     expect(page.calls[1]?.args).toEqual(["#d", undefined, { download: true }]);
+  });
+
+  it("keeps click options on a JSON double click (review F4)", async () => {
+    const page = new FakePage();
+    await executeStep(page, {
+      order: 0,
+      action: "click",
+      selector: "#b",
+      value: '{"button":"right","modifiers":["Shift"],"clickCount":2}',
+    });
+    expect(page.calls.map((c) => c.method)).toEqual(["click"]);
+    expect(page.calls[0]?.args).toEqual([
+      "#b",
+      undefined,
+      { button: "right", modifiers: ["Shift"], clickCount: 2 },
+    ]);
+  });
+
+  it("passes click options on the dblclick action (review F4)", async () => {
+    const page = new FakePage();
+    await executeStep(page, {
+      order: 0,
+      action: "dblclick",
+      selector: "#b",
+      value: '{"modifiers":["Shift"]}',
+    });
+    expect(page.calls[0]?.args).toEqual(["#b", undefined, { modifiers: ["Shift"], clickCount: 2 }]);
+  });
+
+  it("fails the click step on malformed JSON or unknown values (review F4)", async () => {
+    const page = new FakePage();
+    await expect(
+      executeStep(page, { order: 3, action: "click", selector: "#b", value: '{"button":"right"' }),
+    ).rejects.toThrow(/s3 \(click\): click value is not valid JSON/);
+    await expect(
+      executeStep(page, { order: 4, action: "click", selector: "#b", value: '{"button":"back"}' }),
+    ).rejects.toThrow(/unknown click button/);
+    await expect(
+      executeStep(page, {
+        order: 5,
+        action: "click",
+        selector: "#b",
+        value: '{"modifiers":["shift"]}',
+      }),
+    ).rejects.toThrow(/unknown click modifier/);
+    await expect(
+      executeStep(page, { order: 6, action: "click", selector: "#b", value: '{"buton":"right"}' }),
+    ).rejects.toThrow(/unknown click option/);
+    // No click reached the page for any of the bad values.
+    expect(page.calls).toHaveLength(0);
   });
 
   it("parses click values and select values", () => {
@@ -517,10 +570,11 @@ describe("executeStep mapping", () => {
       double: false,
       options: { position: { x: 10, y: 20 } },
     });
-    // A non-numeric position is ignored rather than fatal.
+    // A non-numeric position is a configuration error, not a silent no-op.
     expect(parseClickValue('{"position":{"x":"a","y":2}}')).toEqual({
       double: false,
       options: {},
+      error: "click position must be {x, y} numbers",
     });
     expect(parseTypeValue(undefined)).toEqual({ text: "" });
     expect(parseTypeValue("plain text")).toEqual({ text: "plain text" });
@@ -1124,6 +1178,44 @@ describe("supervised pause + resume (M5)", () => {
       .all()[0];
     expect(suiteRow?.status).toBe("passed");
     expect(finishedOf(fx).summary).toEqual({ total: 1, passed: 1, failed: 0, skipped: 0 });
+  });
+
+  it("re-runs the paused step after an earlier step is deleted (review F3)", async () => {
+    const fx = track(failingFixture());
+    fx.launcher.onCreate = (context) => {
+      context.page.failWhen = (method) => method === "fill";
+      context.page.failMessage = "selector unresolved";
+    };
+    const started = fx.runner.runSingle({ caseId: fx.caseId, mode: "supervised" });
+    await started.done;
+    const stepsBefore = listSteps(fx.db, fx.caseId);
+    const paused = stepsBefore[1];
+    expect(paused?.action).toBe("fill");
+
+    // Delete the preceding goto while paused: positions shift, but resume must
+    // still run the failed fill (not skip it and finish green).
+    deleteStep(fx.db, { caseId: fx.caseId, id: stepsBefore[0]?.id ?? "" });
+    const resumed = fx.runner.resumeFromStep({ caseRunId: started.caseRunId, fromOrder: 1 });
+    await resumed.done;
+
+    const rows = stepRows(fx, started.caseRunId);
+    expect(rows.some((r) => r.status === "fail" && r.stepId === paused?.id)).toBe(true);
+    expect(fx.events.filter((e) => e.channel === "run:finished")).toHaveLength(0);
+  });
+
+  it("refuses to resume when the paused step was deleted (review F3)", async () => {
+    const fx = track(failingFixture());
+    fx.launcher.onCreate = (context) => {
+      context.page.failWhen = (method) => method === "fill";
+      context.page.failMessage = "selector unresolved";
+    };
+    const started = fx.runner.runSingle({ caseId: fx.caseId, mode: "supervised" });
+    await started.done;
+    const paused = listSteps(fx.db, fx.caseId)[1];
+    deleteStep(fx.db, { caseId: fx.caseId, id: paused?.id ?? "" });
+    expect(() => fx.runner.resumeFromStep({ caseRunId: started.caseRunId, fromOrder: 1 })).toThrow(
+      PausedStepDeletedError,
+    );
   });
 
   it("saves a trace chunk at the supervised pause so evidence survives a resume", async () => {

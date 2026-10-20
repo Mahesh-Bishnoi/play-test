@@ -120,6 +120,16 @@ const BOOTSTRAP_DDL = [
 ];
 
 /**
+ * Run `fn` inside one SQLite transaction. Synchronous by design (better-sqlite3
+ * and every multi-row service here are sync). Nested calls become savepoints:
+ * Drizzle's better-sqlite3 transaction handle supports them, so a service can
+ * be wrapped on its own and also called from a larger transaction.
+ */
+export function inTransaction<T>(db: AppDatabase, fn: (tx: AppDatabase) => T): T {
+  return db.transaction((tx) => fn(tx as unknown as AppDatabase));
+}
+
+/**
  * Open (creating parent dirs) + bootstrap a SQLite file.
  * Injected path keeps callers testable (tests pass :memory: or tmp files).
  * Caller owns lifecycle via close().

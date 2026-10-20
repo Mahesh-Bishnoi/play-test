@@ -25,6 +25,28 @@ export function isOptions(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Click modifiers Playwright accepts (canonical names only). */
+const CLICK_MODIFIERS = ["Alt", "Control", "ControlOrMeta", "Meta", "Shift"] as const;
+
+/** Click JSON keys the runner understands; anything else is a typo, not a no-op. */
+const CLICK_JSON_KEYS = new Set([
+  "button",
+  "modifiers",
+  "force",
+  "popup",
+  "download",
+  "position",
+  "clickCount",
+  "double",
+]);
+
+/** A parsed click value: `error` is set when the value must fail the step. */
+export interface ParsedClickValue {
+  double: boolean;
+  options: ClickStepOptions;
+  error?: string;
+}
+
 /**
  * Click `value` encoding (no schema change): empty = plain left-click,
  * legacy `"dblclick"` = double-click, `"right"` / `"middle"` = button,
@@ -34,79 +56,116 @@ export function isOptions(value: unknown): value is Record<string, unknown> {
  * `{"button":"right","modifiers":["Shift"],"force":true,"popup":true}` or
  * `{"position":{"x":10,"y":20}}` to click an offset inside the element (M17).
  * Only the JSON form can express `position` — the token form cannot.
+ *
+ * A JSON object that does not validate returns an `error` (never a silent
+ * plain click): a wrong click that still reports "passed" is worse than a
+ * failed step that names the bad value.
  */
-export function parseClickValue(value: string | undefined): {
-  double: boolean;
-  options: ClickStepOptions;
-} {
-  const options: ClickStepOptions = {};
+export function parseClickValue(value: string | undefined): ParsedClickValue {
   if (value === undefined || value.trim() === "") {
-    return { double: false, options };
+    return { double: false, options: {} };
   }
   const trimmed = value.trim();
   if (trimmed.startsWith("{")) {
-    return parseClickJson(trimmed, options);
+    return parseClickJson(trimmed);
   }
-  return parseClickTokens(trimmed, options);
+  return parseClickTokens(trimmed);
 }
 
-/** JSON click form (`{"button":…,"position":…}`); a malformed object is a plain click. */
-function parseClickJson(
-  trimmed: string,
-  options: ClickStepOptions,
-): { double: boolean; options: ClickStepOptions } {
+function clickError(message: string): ParsedClickValue {
+  return { double: false, options: {}, error: message };
+}
+
+function isKnownModifier(value: string): value is (typeof CLICK_MODIFIERS)[number] {
+  return (CLICK_MODIFIERS as readonly string[]).includes(value);
+}
+
+/** JSON click form; returns an `error` instead of falling back to a left click. */
+function parseClickJson(trimmed: string): ParsedClickValue {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-    const out: ClickStepOptions = {};
-    if (parsed["button"] === "right" || parsed["button"] === "middle") {
-      out.button = parsed["button"];
-    }
-    if (Array.isArray(parsed["modifiers"])) {
-      const mods = (parsed["modifiers"] as unknown[]).filter(
-        (m): m is NonNullable<ClickStepOptions["modifiers"]>[number] =>
-          m === "Alt" || m === "Control" || m === "ControlOrMeta" || m === "Meta" || m === "Shift",
-      );
-      if (mods.length > 0) {
-        out.modifiers = mods;
-      }
-    }
-    if (parsed["force"] === true) {
-      out.force = true;
-    }
-    if (parsed["popup"] === true) {
-      out.popup = true;
-    }
-    if (parsed["download"] === true) {
-      out.download = true;
-    }
-    const position = parsed["position"];
-    if (
-      typeof position === "object" &&
-      position !== null &&
-      typeof (position as Record<string, unknown>)["x"] === "number" &&
-      typeof (position as Record<string, unknown>)["y"] === "number"
-    ) {
-      const { x, y } = position as { x: number; y: number };
-      out.position = { x, y };
-    }
-    const count = parsed["clickCount"];
-    if (typeof count === "number" && Number.isInteger(count) && count >= 1) {
-      out.clickCount = count;
-    }
-    if (parsed["double"] === true || parsed["clickCount"] === 2) {
-      return { double: true, options: out };
-    }
-    return { double: false, options: out };
+    parsed = JSON.parse(trimmed);
   } catch {
-    return { double: false, options };
+    return clickError("click value is not valid JSON");
   }
+  if (!isOptions(parsed)) {
+    return clickError("click value must be a JSON object");
+  }
+  const unknownKeys = Object.keys(parsed).filter((key) => !CLICK_JSON_KEYS.has(key));
+  if (unknownKeys.length > 0) {
+    return clickError(`unknown click option(s): ${unknownKeys.join(", ")}`);
+  }
+  const out: ClickStepOptions = {};
+
+  const button = parsed["button"];
+  if (button !== undefined) {
+    if (button !== "left" && button !== "right" && button !== "middle") {
+      return clickError(`unknown click button ${JSON.stringify(button)}`);
+    }
+    out.button = button;
+  }
+
+  const modifiers = parsed["modifiers"];
+  if (modifiers !== undefined) {
+    if (!Array.isArray(modifiers)) {
+      return clickError("click modifiers must be an array");
+    }
+    const invalid = modifiers.filter(
+      (modifier): boolean => typeof modifier !== "string" || !isKnownModifier(modifier),
+    );
+    if (invalid.length > 0) {
+      return clickError(`unknown click modifier(s): ${invalid.map(String).join(", ")}`);
+    }
+    out.modifiers = modifiers as NonNullable<ClickStepOptions["modifiers"]>;
+  }
+
+  for (const key of ["force", "popup", "download", "double"] as const) {
+    const flag = parsed[key];
+    if (flag !== undefined && typeof flag !== "boolean") {
+      return clickError(`click option "${key}" must be true or false`);
+    }
+  }
+  if (parsed["force"] === true) {
+    out.force = true;
+  }
+  if (parsed["popup"] === true) {
+    out.popup = true;
+  }
+  if (parsed["download"] === true) {
+    out.download = true;
+  }
+
+  const position = parsed["position"];
+  if (position !== undefined) {
+    const point = isOptions(position) ? position : null;
+    const x = point?.["x"];
+    const y = point?.["y"];
+    if (
+      typeof x !== "number" ||
+      typeof y !== "number" ||
+      !Number.isFinite(x) ||
+      !Number.isFinite(y)
+    ) {
+      return clickError("click position must be {x, y} numbers");
+    }
+    out.position = { x, y };
+  }
+
+  const count = parsed["clickCount"];
+  if (count !== undefined) {
+    if (typeof count !== "number" || !Number.isInteger(count) || count < 1) {
+      return clickError("clickCount must be a positive integer");
+    }
+    out.clickCount = count;
+  }
+
+  const double = parsed["double"] === true || count === 2;
+  return { double, options: out };
 }
 
 /** Token click form (`"shift+right"`, `"dblclick"`, `"popup"`, …). */
-function parseClickTokens(
-  trimmed: string,
-  options: ClickStepOptions,
-): { double: boolean; options: ClickStepOptions } {
+function parseClickTokens(trimmed: string): ParsedClickValue {
+  const options: ClickStepOptions = {};
   const tokens = trimmed
     .toLowerCase()
     .split(/[\s+,]+/)
@@ -151,8 +210,11 @@ function parseClickTokens(
  * already follows or saves the event needs no hint.
  */
 export function clickFollowsPageEvent(value: string | undefined): boolean {
-  const { options } = parseClickValue(value);
-  return options.popup === true || options.download === true;
+  const parsed = parseClickValue(value);
+  if (parsed.error !== undefined) {
+    return false;
+  }
+  return parsed.options.popup === true || parsed.options.download === true;
 }
 
 /**

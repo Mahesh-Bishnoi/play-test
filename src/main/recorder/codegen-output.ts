@@ -43,8 +43,9 @@ export function parseCodegenOutput(code: string): {
   const unsupported: RecorderUnsupported[] = [];
   let pending: { promiseVar: string | null; marker: ClickEventMarker } | null = null;
   // A popup booking survives the click it marks, until its own settlement line
-  // names the adopted page variable.
-  let popupAwait: { promiseVar: string } | null = null;
+  // names the adopted page variable. `adoptable` turns true only when the step
+  // that opened it can actually follow the popup at runtime (click/dblclick).
+  let popupAwait: { promiseVar: string; adoptable: boolean } | null = null;
   const adoptedPages = new Set<string>();
   // Destructured bindings of a multi-line `Promise.all` opener, consumed by the
   // first `waitForEvent` booking that follows it.
@@ -91,7 +92,7 @@ export function parseCodegenOutput(code: string): {
       }
       popupAwait =
         booking.marker === "popup" && booking.promiseVar !== null
-          ? { promiseVar: booking.promiseVar }
+          ? { promiseVar: booking.promiseVar, adoptable: false }
           : null;
       promiseAllBindings = null;
       continue;
@@ -99,7 +100,11 @@ export function parseCodegenOutput(code: string): {
     const settled = settledPromise(line);
     if (settled !== undefined) {
       if (popupAwait !== null && popupAwait.promiseVar === settled.promiseVar) {
-        adoptedPages.add(settled.target);
+        // Only adopt a page whose opener the runner can follow; otherwise the
+        // `pageN` statements below are reported as unsupported.
+        if (popupAwait.adoptable) {
+          adoptedPages.add(settled.target);
+        }
         popupAwait = null;
       }
       if (pending !== null && pending.promiseVar === settled.promiseVar) {
@@ -107,7 +112,22 @@ export function parseCodegenOutput(code: string): {
       }
       continue;
     }
-    const parsed = parseLine(rewriteAdoptedPage(line, adoptedPages), pending?.marker);
+    const rewritten = rewriteAdoptedPage(line, adoptedPages);
+    // A statement against an unadopted page (`page1.getByRole(…)`) used to be
+    // dropped as boilerplate by parse-line's early guard. Report it instead.
+    const unadopted = /\bpage\d+\./.exec(rewritten);
+    if (unadopted !== null) {
+      unsupported.push({
+        line: line.trim(),
+        reason:
+          "recorded against another tab/page — this recorder can only replay the main page " +
+          "(a popup is followed only when a click or double-click opened it); add a manual step",
+      });
+      pending = null;
+      promiseAllBindings = null;
+      continue;
+    }
+    const parsed = parseLine(rewritten, pending?.marker);
     if (parsed === null) {
       continue;
     }
@@ -119,12 +139,20 @@ export function parseCodegenOutput(code: string): {
       continue;
     }
     steps.push({ ...parsed.step, order: steps.length });
-    // The marker rides the click it was armed for; any other step ends the pattern.
+    // A click/dblclick that carries the popup marker can adopt the opened page;
+    // any other opener leaves `adoptable` false so its pageN steps are reported.
+    if (pending?.marker === "popup" && popupAwait !== null) {
+      const canAdopt = parsed.step.action === "click" || parsed.step.action === "dblclick";
+      const carriesPopup =
+        parsed.step.value !== undefined && parsed.step.value.includes('"popup":true');
+      if (canAdopt && carriesPopup) {
+        popupAwait.adoptable = true;
+      }
+    }
+    // The marker rides the step it was armed for; the popup booking itself
+    // stays until its own settlement line.
     pending = null;
     promiseAllBindings = null;
-    if (parsed.step.action !== "click") {
-      popupAwait = null;
-    }
   }
   return { steps, unsupported };
 }

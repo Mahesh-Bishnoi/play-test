@@ -1,8 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+import type {
+  RunFinishedEvent,
+  RunLogEvent,
+  RunStepUpdateEvent,
+} from "../../../shared/ipc-contract.js";
 import type { RunMode } from "../../../shared/schema.js";
 import type { StepStatus } from "../../../shared/step-types.js";
 import { api, formatApiError } from "../../api.js";
+import { RunEventBuffer } from "./run-event-buffer.js";
 
 export interface ActiveRun {
   suiteRunId: string;
@@ -49,9 +55,37 @@ export function useCaseRun(
   const [runFinished, setRunFinished] = useState<string | null>(null);
   const [runBusy, setRunBusy] = useState(false);
   const [runSpeedMs, setRunSpeedMs] = useState<number>(0);
+  // Listener state lives in refs so the `run:*` subscriptions can be mounted
+  // once (before the first start call) while still filtering by the run ids.
+  const activeRunRef = useRef<ActiveRun | null>(null);
+  const startingRef = useRef(false);
+  const bufferRef = useRef(new RunEventBuffer());
+
+  const applyStepEvent = useCallback((event: RunStepUpdateEvent): void => {
+    setStatusByOrder((prev) => ({ ...prev, [event.order]: event.status }));
+    if (event.status === "fail") {
+      setFailedOrder(event.order);
+    }
+  }, []);
+
+  const applyLogEvent = useCallback((event: RunLogEvent): void => {
+    setRunLogs((prev) => [...prev.slice(-29), `[${event.level}] ${event.msg}`]);
+  }, []);
+
+  const applyFinishedEvent = useCallback((event: RunFinishedEvent): void => {
+    const s = event.summary;
+    setRunFinished(
+      `Finished: ${s.passed} passed, ${s.failed} failed, ${s.skipped} skipped (of ${s.total}).`,
+    );
+    activeRunRef.current = null;
+    setActiveRun(null);
+  }, []);
 
   // A case switch drops the previous case's run view (M14).
   useEffect(() => {
+    activeRunRef.current = null;
+    startingRef.current = false;
+    bufferRef.current.clear();
     setActiveRun(null);
     setStatusByOrder({});
     setRunLogs([]);
@@ -59,53 +93,77 @@ export function useCaseRun(
     setRunFinished(null);
   }, [caseId]);
 
+  // Subscribe once, at mount: the missing-key fast path emits step/log/finish
+  // events before `runner:runSingle` returns its ids, so they are buffered and
+  // replayed when the ids arrive (review F7).
   useEffect(() => {
-    if (activeRun === null) {
-      return;
-    }
-    const { caseRunId, suiteRunId } = activeRun;
     const offStep = api.onRunStepUpdate((event) => {
-      if (event.caseRunId !== caseRunId) {
+      const active = activeRunRef.current;
+      if (active === null) {
+        if (startingRef.current) {
+          bufferRef.current.push({ kind: "step", event });
+        }
         return;
       }
-      setStatusByOrder((prev) => ({ ...prev, [event.order]: event.status }));
-      if (event.status === "fail") {
-        setFailedOrder(event.order);
+      if (event.caseRunId === active.caseRunId) {
+        applyStepEvent(event);
       }
     });
     const offLog = api.onRunLog((event) => {
-      setRunLogs((prev) => [...prev.slice(-29), `[${event.level}] ${event.msg}`]);
+      if (activeRunRef.current !== null) {
+        applyLogEvent(event);
+      } else if (startingRef.current) {
+        bufferRef.current.push({ kind: "log", event });
+      }
     });
     const offDone = api.onRunFinished((event) => {
-      if (event.suiteRunId !== suiteRunId) {
+      const active = activeRunRef.current;
+      if (active === null) {
+        if (startingRef.current) {
+          bufferRef.current.push({ kind: "finished", event });
+        }
         return;
       }
-      const s = event.summary;
-      setRunFinished(
-        `Finished: ${s.passed} passed, ${s.failed} failed, ${s.skipped} skipped (of ${s.total}).`,
-      );
-      setActiveRun(null);
+      if (event.suiteRunId === active.suiteRunId) {
+        applyFinishedEvent(event);
+      }
     });
     return () => {
       offStep();
       offLog();
       offDone();
     };
-  }, [activeRun]);
+  }, [applyStepEvent, applyLogEvent, applyFinishedEvent]);
 
   const startRun = useCallback(
     (mode: RunMode): void => {
       setRunBusy(true);
       onError(null);
+      bufferRef.current.clear();
+      startingRef.current = true;
       const actionDelayMs = mode === "supervised" ? runSpeedMs : undefined;
       api
         .runSingleCase(caseId, mode, actionDelayMs)
         .then((ids) => {
-          setActiveRun({ ...ids, mode });
+          const active = { ...ids, mode };
           setStatusByOrder({});
           setFailedOrder(null);
           setRunFinished(null);
           setRunLogs([]);
+          activeRunRef.current = active;
+          setActiveRun(active);
+          startingRef.current = false;
+          // Replay events emitted before the ids arrived — including a finish,
+          // which clears the active run and leaves the page finished.
+          for (const entry of bufferRef.current.drain(ids)) {
+            if (entry.kind === "step") {
+              applyStepEvent(entry.event);
+            } else if (entry.kind === "log") {
+              applyLogEvent(entry.event);
+            } else {
+              applyFinishedEvent(entry.event);
+            }
+          }
           const speedNote =
             mode === "supervised" && runSpeedMs > 0
               ? ` at ${(runSpeedMs / 1000).toFixed(1)}s/step`
@@ -113,13 +171,15 @@ export function useCaseRun(
           onNotice(`Run started (${mode}${speedNote}).`);
         })
         .catch((err: unknown) => {
+          startingRef.current = false;
+          bufferRef.current.clear();
           onError(formatApiError(err));
         })
         .finally(() => {
           setRunBusy(false);
         });
     },
-    [caseId, runSpeedMs, onError, onNotice],
+    [caseId, runSpeedMs, onError, onNotice, applyStepEvent, applyLogEvent, applyFinishedEvent],
   );
 
   const resumeRun = useCallback((): void => {

@@ -16,6 +16,7 @@
 | M16 — Runtime parity: popups and downloads | done 2026-10-17 | 4 items; 3 parallel workstreams; verify + e2e green |
 | M17 — Flakiness gaps: wait-url, scroll, input/nav parity, sessionStorage | done 2026-10-17 | P1–P4 landed; `step-types.ts` 33 → 35 actions; verify + unit green |
 | M18 — Playwright-native hardening (second docs audit) | done 2026-10-18 | no schema/action changes; recorder correctness, native locators, flake hints, auth-state flush, video fixes |
+| M19 — Whole-repo review fixes (third audit) | done 2026-10-20 | blocking F1–F2, important F3–F10, nits N1–N5, plus counted #1/#2/#5–#10/#13; verify + e2e green |
 
 Completed: M1–M10, M12–M13; file transfer (import/export) and Phase-2 git-sync core;
 input/assertion parity (9 → 25 actions). M11 closed as wont-do (`SPECS.md` §2).
@@ -416,3 +417,46 @@ anything durable to `SPECS.md`.
   delegate to it. Zero behavior change (all 6 suite run-log strings verified byte-identical,
   no stale imports). Checks: `npm run verify` + `npm run test:e2e` (8 files / 31 tests) green,
   283 unit tests passed.
+
+## M19 — Whole-repo review fixes (third audit)
+
+Status: done 2026-10-20. Source: external whole-repo review (10 findings + 5 nits + counted
+items), validated against the code before fixing. No schema/action-vocabulary changes; the
+only contract extension is the sync conflict entity (`case | suite | project`) and
+`remoteDeleted` on `sync:pull` conflicts.
+
+- **F1** Playwright CLI is resolved via the exported `playwright/package.json` then
+  `<pkg>/cli.js` (the old `playwright/cli.js` lookup throws `ERR_PACKAGE_PATH_NOT_EXPORTED`);
+  the installer and recorder share `ELECTRON_RUN_AS_NODE`; the `npx` fallback is deleted.
+- **F2** `HttpUrlSchema` gates project/case URLs at create/update/export/sync plus
+  `resolveRecorderStartOptions`/`buildCodegenArgs`; flag-shaped/relative URLs are rejected.
+- **F3** Resume re-finds the paused step by id (a deleted earlier step can no longer skip it);
+  a deleted paused step refuses resume. Resume failures also close the leaked browser.
+- **F4** Click JSON is strict (`error` instead of a silent plain click); double clicks run as
+  `page.click` with `clickCount: 2` so button/modifier/popup options survive.
+- **F5** Popup pages are adopted only for click/dblclick openers; other `pageN` statements are
+  reported as unsupported instead of dropped.
+- **F6** Pool failures are per-case (`onCaseError`, browser cache dropped, `allSettled`); the
+  suite never settles early/pass on unfinished rows; case/suite/project deletes refuse while a
+  run is active.
+- **F7** `run:*` listeners mount before the start call and buffer events until the ids arrive.
+- **F8** Pull rebuilds the conflict list each time (refreshed `theirs`, project conflicts,
+  remote-delete vs local-edit), validates/filters memberships before mutating, and applies the
+  merge in one transaction; multi-row services use `inTransaction` (savepoint-safe).
+- **F9** `will-navigate`/`will-redirect` are allowlisted to the app URL, popups are denied, and
+  document-level drag/drop `preventDefault` stops navigation.
+- **F10** `verify` runs coverage thresholds; `trace-viewer.test.ts` is in `test:e2e`; worker
+  count takes an injectable CPU count and the toolchain test uses `expectTypeOf`.
+- Nits N1–N5 and counted #1 (resume leak), #2 (startup run reconciliation + recorder dispose),
+  #5 (case/suite artifact cleanup), #6 (recorder import rollback), #7 (quoted `;`), #8 (dummy
+  site malformed cookie), #9 (recorder validate-before-discard), #10 (push guard reads
+  `<gitdir>/HEAD`, checks bare), #13 (seed removes `case_profiles` + old artifact tree).
+
+### M20 — follow-ups deliberately not in M19
+
+- Recorder-tab recovery (#3): needs a `recorder:status`/lifted-state design.
+- Unsaved suite membership ticks (#4): prompt-vs-autosave is a user-facing UX choice.
+- Export membership by name (#12): needs export v2 with stable case keys.
+- CSP (#14): needs dev-HMR vs packaged verification.
+- Merge the duplicated single/suite runner step loops and split `use-suite-detail.ts` after the
+  correctness diff lands.

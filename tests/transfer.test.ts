@@ -75,7 +75,7 @@ function seedShop(db: DatabaseHandle["db"]): {
     projectId: project.id,
     name: "Login",
     description: "Sign in flow",
-    url: "/login",
+    url: "https://shop.test/login",
   });
   upsertStep(db, {
     caseId: login.id,
@@ -131,7 +131,7 @@ describe("transfer: project round-trip", () => {
     }
     const login = listCases(handle.db, summary.projectId).find((c) => c.name === "Login");
     expect(login?.description).toBe("Sign in flow");
-    expect(login?.url).toBe("/login");
+    expect(login?.url).toBe("https://shop.test/login");
     expect(listSteps(handle.db, login?.id ?? "").map((s) => s.action)).toEqual(["goto", "fill"]);
     expect(getTestData(handle.db, { caseId: login?.id ?? "" })).toEqual({ user: "ada" });
 

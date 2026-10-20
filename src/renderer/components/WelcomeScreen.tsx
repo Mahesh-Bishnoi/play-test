@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { api, formatApiError } from "../api.js";
 import type { Project } from "../../shared/schema.js";
+import { sortByName } from "../../shared/sort.js";
 import ConfirmDialog from "./ConfirmDialog.js";
 
 interface Props {
@@ -33,7 +34,7 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
     api
       .listProjects()
       .then((rows) => {
-        const sorted = [...rows].sort((a, b) => a.name.localeCompare(b.name));
+        const sorted = sortByName(rows);
         setProjects(sorted);
         setSelectedId(sorted[0]?.id ?? null);
       })
@@ -59,7 +60,7 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
     api
       .createProject(trimmed, url === "" ? undefined : url)
       .then((created) => {
-        setProjects((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+        setProjects((prev) => sortByName([...prev, created]));
         setSelectedId(created.id);
         setName("");
         setBaseUrl("");
@@ -74,7 +75,7 @@ export default function WelcomeScreen({ onOpen }: Props): React.JSX.Element {
     api
       .listProjects()
       .then((rows) => {
-        const sorted = [...rows].sort((a, b) => a.name.localeCompare(b.name));
+        const sorted = sortByName(rows);
         setProjects(sorted);
         setSelectedId(selectId ?? sorted[0]?.id ?? null);
       })

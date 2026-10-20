@@ -111,10 +111,6 @@ export class PlaywrightRunPage implements RunPage {
     return this.context.pages().length;
   }
 
-  async dblclick(selector: string, timeoutMs?: number): Promise<void> {
-    await this.loc(selector).dblclick({ timeout: timeoutMs });
-  }
-
   async fill(selector: string, value: string, timeoutMs?: number): Promise<void> {
     await this.loc(selector).fill(value, { timeout: timeoutMs });
   }

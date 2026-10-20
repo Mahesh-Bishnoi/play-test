@@ -188,6 +188,9 @@ export class SuiteRunner {
           launchBrowser: () => this.launchBrowser.launchBrowser(true),
           runCase: (getBrowser, caseId, caseRunId) =>
             runOneCase(caseDeps, getBrowser, suiteRunId, caseId, caseRunId),
+          onCaseError: (caseId, caseRunId, err) => {
+            this.settleCrashedCase(caseId, caseRunId, err);
+          },
         });
       } catch (err) {
         this.runs.log(
@@ -205,16 +208,34 @@ export class SuiteRunner {
     return { suiteRunId, done };
   }
 
+  /**
+   * A case threw outside its own failure paths (e.g. its row was deleted
+   * mid-run). Settle only that case: siblings keep running, and the suite is
+   * not marked passed from an unfinished row.
+   */
+  private settleCrashedCase(caseId: string, caseRunId: string, err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err);
+    this.runs.log("error", `case ${caseId} failed to execute: ${message}`);
+    this.runs.skipRunningSteps(caseRunId);
+    this.runs.settleCaseIfRunning(caseRunId, "failed", this.now());
+  }
+
   /** Derive suite status + summary from the settled case rows, then report. */
   private settleSuite(suiteRunId: string): void {
-    if (this.cancelled.has(suiteRunId)) {
-      // Cancel makes workers return early, so cases still queued (never
-      // started) keep their initial "running" rows. Settle them here — the
-      // queue is drained and every in-flight case already settled itself.
-      const pending = this.runs.listCaseRuns(suiteRunId).filter((r) => r.status === "running");
-      for (const row of pending) {
-        this.runs.finishCaseRun(row.id, "cancelled", this.now());
-      }
+    const cancelledRun = this.cancelled.has(suiteRunId);
+    // Defensive: every worker has stopped by the time we settle, so any case
+    // still "running" was crashed/never started. Cancelled runs settle as
+    // cancelled; otherwise failed — never "passed".
+    const pending = this.runs.listCaseRuns(suiteRunId).filter((r) => r.status === "running");
+    for (const row of pending) {
+      this.runs.skipRunningSteps(row.id);
+      this.runs.finishCaseRun(row.id, cancelledRun ? "cancelled" : "failed", this.now());
+    }
+    if (pending.length > 0 && !cancelledRun) {
+      this.runs.log(
+        "error",
+        `${pending.length} case(s) did not settle — marked failed instead of passed`,
+      );
     }
     const rows = this.runs.listCaseRuns(suiteRunId);
     const passed = rows.filter((r) => r.status === "passed").length;

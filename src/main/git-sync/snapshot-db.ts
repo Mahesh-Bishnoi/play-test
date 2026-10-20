@@ -11,6 +11,7 @@ import { eq } from "drizzle-orm";
 
 import { CaseProfileInputSchema } from "../../shared/schema.js";
 import type { AppDatabase } from "../db.js";
+import { inTransaction } from "../db.js";
 import { getCase, listCases } from "../ipc-cases.js";
 import { getCaseProfile, setCaseProfile } from "../ipc-profiles.js";
 import { getProject, updateProject } from "../ipc-projects.js";
@@ -101,20 +102,22 @@ export function insertSnapshotContent(db: AppDatabase, snapshot: Snapshot): void
   const now = Date.now();
   const projectId = snapshot.project.id;
   getProject(db, projectId);
-  for (const c of Object.values(snapshot.cases)) {
-    insertCaseContent(db, projectId, c, now);
-  }
-  for (const suite of Object.values(snapshot.suites)) {
-    insertSuiteContent(db, projectId, suite, now);
-  }
-  updateProject(db, {
-    id: projectId,
-    name: snapshot.project.name,
-    baseUrl: snapshot.project.baseUrl ?? null,
+  inTransaction(db, (tx) => {
+    for (const c of Object.values(snapshot.cases)) {
+      insertCaseContent(tx, projectId, c, now);
+    }
+    for (const suite of Object.values(snapshot.suites)) {
+      insertSuiteContent(tx, projectId, suite, now);
+    }
+    updateProject(tx, {
+      id: projectId,
+      name: snapshot.project.name,
+      baseUrl: snapshot.project.baseUrl ?? null,
+    });
+    for (const suite of Object.values(snapshot.suites)) {
+      setMembership(tx, suite);
+    }
   });
-  for (const suite of Object.values(snapshot.suites)) {
-    setMembership(db, suite);
-  }
 }
 
 export function insertCaseContent(
@@ -131,39 +134,41 @@ export function insertCaseContent(
       throw err;
     }
   }
-  db.insert(testCases)
-    .values({
-      id: c.id,
-      projectId,
-      name: c.name,
-      description: c.description ?? null,
-      url: c.url ?? null,
-      createdAt: now,
-    })
-    .run();
-  c.steps
-    .slice()
-    .sort((a, b) => a.order - b.order)
-    .forEach((step, index) => {
-      db.insert(testSteps)
-        .values({
-          id: step.id,
-          caseId: c.id,
-          order: index,
-          action: step.action,
-          selector: step.selector ?? null,
-          value: step.value ?? null,
-          timeoutMs: step.timeoutMs ?? null,
-          editedAt: now,
-        })
-        .run();
-    });
-  for (const [key, value] of Object.entries(c.testData)) {
-    db.insert(testData).values({ caseId: c.id, key, value }).run();
-  }
-  // The profile is part of the case entity — set it authoritatively so a case
-  // re-inserted after a direct delete never keeps a stale profile row.
-  setCaseProfile(db, c.id, c.profile ?? {});
+  inTransaction(db, (tx) => {
+    tx.insert(testCases)
+      .values({
+        id: c.id,
+        projectId,
+        name: c.name,
+        description: c.description ?? null,
+        url: c.url ?? null,
+        createdAt: now,
+      })
+      .run();
+    c.steps
+      .slice()
+      .sort((a, b) => a.order - b.order)
+      .forEach((step, index) => {
+        tx.insert(testSteps)
+          .values({
+            id: step.id,
+            caseId: c.id,
+            order: index,
+            action: step.action,
+            selector: step.selector ?? null,
+            value: step.value ?? null,
+            timeoutMs: step.timeoutMs ?? null,
+            editedAt: now,
+          })
+          .run();
+      });
+    for (const [key, value] of Object.entries(c.testData)) {
+      tx.insert(testData).values({ caseId: c.id, key, value }).run();
+    }
+    // The profile is part of the case entity — set it authoritatively so a case
+    // re-inserted after a direct delete never keeps a stale profile row.
+    setCaseProfile(tx, c.id, c.profile ?? {});
+  });
 }
 
 export function insertSuiteContent(
@@ -188,8 +193,10 @@ export function setMembership(db: AppDatabase, suite: SnapshotSuite): void {
   for (const caseId of members) {
     getCase(db, caseId);
   }
-  db.delete(suiteTestCases).where(eq(suiteTestCases.suiteId, suite.id)).run();
-  for (const caseId of members) {
-    db.insert(suiteTestCases).values({ suiteId: suite.id, caseId }).run();
-  }
+  inTransaction(db, (tx) => {
+    tx.delete(suiteTestCases).where(eq(suiteTestCases.suiteId, suite.id)).run();
+    for (const caseId of members) {
+      tx.insert(suiteTestCases).values({ suiteId: suite.id, caseId }).run();
+    }
+  });
 }

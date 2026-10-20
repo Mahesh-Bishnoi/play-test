@@ -224,6 +224,16 @@ describeE2E("e2e against dummy income-tax site", () => {
     await stopSite();
   });
 
+  it("survives a malformed cookie header (review counted #8)", async () => {
+    const bad = await fetch(`${baseUrl}/login`, {
+      headers: { cookie: "tax_session=%E0%A4%A" },
+    });
+    expect(bad.status).toBe(200);
+    // The process is still serving after the malformed decode.
+    const after = await fetch(`${baseUrl}/login`);
+    expect(after.status).toBe(200);
+  });
+
   it("login happy path: goto + fill + click + assert-text with KV data", async () => {
     await resetSite();
     const caseId = defineCase("Tax login", kv, [

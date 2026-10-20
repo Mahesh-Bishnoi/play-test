@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   CaseProfileInputSchema,
   DeviceNameSchema,
+  HttpUrlSchema,
   LocaleSchema,
   RunModeSchema,
   TimezoneSchema,
@@ -82,7 +83,7 @@ const idPayload = z.object({ id: z.string().min(1).max(100) });
 
 export const ProjectCreatePayload = z.object({
   name: z.string().trim().min(1).max(200),
-  baseUrl: z.string().trim().max(2000).optional(),
+  baseUrl: HttpUrlSchema.optional(),
 });
 
 export const ProjectListPayload = z.object({});
@@ -90,7 +91,7 @@ export const ProjectListPayload = z.object({});
 export const ProjectUpdatePayload = z.object({
   id: z.string().min(1).max(100),
   name: z.string().trim().min(1).max(200).optional(),
-  baseUrl: z.string().trim().max(2000).nullable().optional(),
+  baseUrl: HttpUrlSchema.nullable().optional(),
 });
 
 export const SuiteCreatePayload = z.object({
@@ -116,7 +117,7 @@ export const CaseCreatePayload = z.object({
   projectId: z.string().min(1).max(100),
   name: z.string().trim().min(1).max(200),
   description: z.string().max(5000).optional(),
-  url: z.string().trim().max(2000).optional(),
+  url: HttpUrlSchema.optional(),
 });
 
 export const CaseListPayload = z.object({
@@ -127,7 +128,7 @@ export const CaseUpdatePayload = z.object({
   id: z.string().min(1).max(100),
   name: z.string().trim().min(1).max(200).optional(),
   description: z.string().max(5000).nullable().optional(),
-  url: z.string().trim().max(2000).nullable().optional(),
+  url: HttpUrlSchema.nullable().optional(),
 });
 
 // --- Steps / test data -----------------------------------------------------
@@ -380,7 +381,7 @@ export const SyncBranchPayload = z.object({
 export const SyncResolvePayload = z.object({
   projectId: z.string().min(1).max(100),
   dir: syncDir,
-  entity: z.enum(["case", "suite"]),
+  entity: z.enum(["case", "suite", "project"]),
   id: z.string().min(1).max(100),
   winner: z.enum(["mine", "theirs"]),
 });

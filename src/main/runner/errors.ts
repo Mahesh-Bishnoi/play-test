@@ -20,6 +20,18 @@ export class ContextClosedError extends Error {
   }
 }
 
+/**
+ * Thrown by resume when the step the run paused on was deleted while paused.
+ * Resuming from its old position number would skip whatever moved into that
+ * slot and could finish green, so the run must be re-started instead.
+ */
+export class PausedStepDeletedError extends Error {
+  constructor() {
+    super("the step the run paused on was deleted — cancel this run and start a full re-run");
+    this.name = "PausedStepDeletedError";
+  }
+}
+
 /** A single step that cannot execute (missing selector/value, bad wait, …). */
 export class StepExecutionError extends Error {
   constructor(message: string) {

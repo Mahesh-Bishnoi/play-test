@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { api } from "../api.js";
+import { api, formatApiError } from "../api.js";
 
 type State = "checking" | "ready" | "missing" | "installing" | "error";
 
@@ -20,7 +20,7 @@ export default function BrowserBanner(): React.JSX.Element | null {
       },
       (err: unknown) => {
         setState("error");
-        setMessage(err instanceof Error ? err.message : String(err));
+        setMessage(formatApiError(err));
       },
     );
   }, []);
@@ -38,7 +38,7 @@ export default function BrowserBanner(): React.JSX.Element | null {
       },
       (err: unknown) => {
         setState("error");
-        setMessage(err instanceof Error ? err.message : String(err));
+        setMessage(formatApiError(err));
       },
     );
   };

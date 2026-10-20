@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { Suite, TestCase } from "../../../shared/schema.js";
+import { sortByName } from "../../../shared/sort.js";
 import { api, formatApiError } from "../../api.js";
 import { filterCasesByKeyword } from "../../components/suite-run-filter.js";
 
@@ -104,7 +105,7 @@ export function useSuiteDetail(input: {
     api
       .listSuites(projectId)
       .then((rows) => {
-        setSuites([...rows].sort((a, b) => a.name.localeCompare(b.name)));
+        setSuites(sortByName(rows));
       })
       .catch((err: unknown) => {
         setError(formatApiError(err));
@@ -112,7 +113,7 @@ export function useSuiteDetail(input: {
     api
       .listCases(projectId)
       .then((rows) => {
-        setCases([...rows].sort((a, b) => a.name.localeCompare(b.name)));
+        setCases(sortByName(rows));
       })
       .catch((err: unknown) => {
         setError(formatApiError(err));
@@ -156,7 +157,7 @@ export function useSuiteDetail(input: {
       api
         .listSuites(projectId)
         .then((rows) => {
-          const sorted = [...rows].sort((a, b) => a.name.localeCompare(b.name));
+          const sorted = sortByName(rows);
           setSuites(sorted);
           if (suiteId !== null && !sorted.some((s) => s.id === suiteId)) {
             selectSuite(null);
@@ -168,7 +169,7 @@ export function useSuiteDetail(input: {
       api
         .listCases(projectId)
         .then((rows) => {
-          setCases([...rows].sort((a, b) => a.name.localeCompare(b.name)));
+          setCases(sortByName(rows));
         })
         .catch((err: unknown) => {
           setError(formatApiError(err));
@@ -303,7 +304,7 @@ export function useSuiteDetail(input: {
     api
       .listSuites(projectId)
       .then((rows) => {
-        const sorted = [...rows].sort((a, b) => a.name.localeCompare(b.name));
+        const sorted = sortByName(rows);
         setSuites(sorted);
         if (keepSuiteId !== null && sorted.some((s) => s.id === keepSuiteId)) {
           loadMembership(keepSuiteId);
@@ -315,7 +316,7 @@ export function useSuiteDetail(input: {
     api
       .listCases(projectId)
       .then((rows) => {
-        setCases([...rows].sort((a, b) => a.name.localeCompare(b.name)));
+        setCases(sortByName(rows));
       })
       .catch((err: unknown) => {
         setError(formatApiError(err));

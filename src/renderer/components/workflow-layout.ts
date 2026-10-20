@@ -9,31 +9,6 @@ import type { StepStatus } from "../../shared/step-types.js";
 /** Null = no run recorded yet (WS5 fills `statusByStepId` from step_runs). */
 export type NodeRunStatus = StepStatus | null;
 
-export interface StatusStyle {
-  border: string;
-  background: string;
-  text: string;
-}
-
-/**
- * Node colors (PLAN §2): green=pass, red=fail, grey=skipped, blue=running.
- * `null` (never run) renders as a neutral card.
- */
-export function statusStyle(status: NodeRunStatus): StatusStyle {
-  switch (status) {
-    case "pass":
-      return { border: "#16a34a", background: "#f0fdf4", text: "#166534" };
-    case "fail":
-      return { border: "#dc2626", background: "#fef2f2", text: "#991b1b" };
-    case "running":
-      return { border: "#2563eb", background: "#eff6ff", text: "#1d4ed8" };
-    case "skipped":
-      return { border: "#9ca3af", background: "#f9fafb", text: "#4b5563" };
-    default:
-      return { border: "#d1d5db", background: "#ffffff", text: "#111827" };
-  }
-}
-
 export interface WorkflowNodeDatum {
   id: string;
   order: number;

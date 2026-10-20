@@ -24,22 +24,20 @@ export function reportHasFailures(html: string): boolean {
 
 /**
  * Trace targets embedded by `renderSuiteHtml` (M8, PLAN §18.1): each failed
- * case's `<p class="muted" data-caserun="…" data-trace="…">` line. Pure
- * string parse (no DOM) so it works on the raw HTML string before iframe
- * render. Returns only cases whose trace file existed at report-write time.
+ * case's `<p class="muted" data-caserun="…" data-trace="…">` line. Only the
+ * case-run id is needed — `report:openTrace` resolves the file server-side.
  */
-export function extractTraceTargets(html: string): { caseRunId: string; traceHref: string }[] {
-  const targets: { caseRunId: string; traceHref: string }[] = [];
+export function extractTraceCaseRunIds(html: string): string[] {
+  const ids: string[] = [];
   const re = /data-caserun="([^"]+)"[^>]*data-trace="([^"]+)"/g;
   let match: RegExpExecArray | null;
   while ((match = re.exec(html)) !== null) {
     const caseRunId = match[1];
-    const traceHref = match[2];
-    if (caseRunId !== undefined && traceHref !== undefined) {
-      targets.push({ caseRunId, traceHref });
+    if (caseRunId !== undefined) {
+      ids.push(caseRunId);
     }
   }
-  return targets;
+  return ids;
 }
 
 /**
@@ -49,7 +47,7 @@ export function extractTraceTargets(html: string): { caseRunId: string; traceHre
 export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): React.JSX.Element {
   const [html, setHtml] = useState<string | null>(null);
   const [hasFailed, setHasFailed] = useState<boolean | null>(null);
-  const [traces, setTraces] = useState<{ caseRunId: string; traceHref: string }[]>([]);
+  const [traces, setTraces] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,7 +59,7 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
       .then((loaded) => {
         setHtml(loaded);
         setHasFailed(reportHasFailures(loaded));
-        setTraces(extractTraceTargets(loaded));
+        setTraces(extractTraceCaseRunIds(loaded));
       })
       .catch((err: unknown) => {
         setError(formatApiError(err));
@@ -170,7 +168,7 @@ export default function RunReportPage({ suiteRunId, onBack, onRerun }: Props): R
             Re-run failed
           </button>
         )}
-        {traces.map(({ caseRunId }) => (
+        {traces.map((caseRunId) => (
           <button
             key={caseRunId}
             type="button"

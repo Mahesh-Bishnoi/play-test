@@ -31,7 +31,7 @@ import { authStateDir, setCaseProfile } from "../src/main/ipc-profiles.js";
 import { createProject } from "../src/main/ipc-projects.js";
 import { setTestData, upsertStep } from "../src/main/ipc-steps.js";
 import { createSuite, setSuiteCases } from "../src/main/ipc-suites.js";
-import { caseRuns, stepRuns, suiteRuns } from "../src/main/schema.js";
+import { caseRuns, stepRuns, suiteRuns, testCases } from "../src/main/schema.js";
 
 // --- Fakes (mirror tests/runner.test.ts; suite-local so files stay independent) --
 
@@ -790,6 +790,65 @@ describe("runSuite (M6)", () => {
       release();
     }
   });
+
+  it("settles a case whose row vanished mid-run without ending the suite early (review F6)", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    try {
+      const fx = track(
+        makeFixture(
+          [
+            { steps: [{ action: "goto", value: "https://a.test" }] },
+            { steps: [{ action: "goto", value: "https://b.test" }] },
+            { steps: [{ action: "goto", value: "https://c.test" }] },
+          ],
+          { workerCount: () => 1 },
+        ),
+      );
+      fx.launcher.gateFirst = gate;
+      const started = fx.suite.runSuite({
+        suiteId: fx.suiteId,
+        caseIds: fx.caseIds,
+        mode: "unsupervised",
+      });
+      await waitFor(() => fx.launcher.contexts.length === 1, "first case to start");
+      // Simulate the deleted-case race at the service layer (the IPC guard
+      // refuses this path); keep the case_run row so the failure is visible.
+      fx.db
+        .delete(testCases)
+        .where(eq(testCases.id, fx.caseIds[1] ?? ""))
+        .run();
+      release();
+      await started.done;
+
+      const rows = fx.caseRunIdsOf(started.suiteRunId);
+      expect(rows).toHaveLength(3);
+      expect(rows.find((r) => r.caseId === fx.caseIds[1])?.status).toBe("failed");
+      expect(rows.find((r) => r.caseId === fx.caseIds[2])?.status).toBe("passed");
+      expect(rows.every((r) => r.status !== "running")).toBe(true);
+      const suiteRow = fx.db
+        .select()
+        .from(suiteRuns)
+        .where(eq(suiteRuns.id, started.suiteRunId))
+        .all()[0];
+      expect(suiteRow?.status).toBe("failed");
+      expect(finishedSummary(fx, started.suiteRunId)).toEqual({
+        total: 3,
+        passed: 2,
+        failed: 1,
+        skipped: 0,
+      });
+      expect(
+        fx.events.some(
+          (e) => e.channel === "run:log" && JSON.stringify(e.payload).includes("could not be read"),
+        ),
+      ).toBe(true);
+    } finally {
+      release();
+    }
+  });
 });
 
 // --- Cancel ---------------------------------------------------------------------
@@ -1121,10 +1180,12 @@ describe("runner + report IPC (M6)", () => {
 // --- Worker count -------------------------------------------------------------------
 
 describe("defaultWorkerCount (PLAN §2)", () => {
-  it("stays within [1, cases]", () => {
-    expect(defaultWorkerCount(1)).toBeGreaterThanOrEqual(1);
-    expect(defaultWorkerCount(1)).toBeLessThanOrEqual(1);
-    expect(defaultWorkerCount(64)).toBeGreaterThanOrEqual(1);
-    expect(defaultWorkerCount(64)).toBeLessThanOrEqual(64);
+  it("is min(cpu/2, cases) at least 1", () => {
+    expect(defaultWorkerCount(20, 8)).toBe(4);
+    expect(defaultWorkerCount(2, 8)).toBe(2);
+    expect(defaultWorkerCount(20, 1)).toBe(1);
+    expect(defaultWorkerCount(1, 8)).toBe(1);
+    expect(defaultWorkerCount(0, 8)).toBe(1);
+    expect(defaultWorkerCount(64, 4)).toBe(2);
   });
 });

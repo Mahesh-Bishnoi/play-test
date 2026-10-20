@@ -1,7 +1,8 @@
 /**
  * Generic worker pool for suite execution (M6): N workers drain a shared case
- * queue, each owning one lazily created browser. No error handling here — a
- * worker throw propagates to the caller's `Promise.all`.
+ * queue, each owning one lazily created browser. Failures are contained per
+ * case — one broken case/browser must not reject the pool while sibling
+ * workers still run (review F6).
  */
 
 import { cpus } from "node:os";
@@ -9,8 +10,8 @@ import { cpus } from "node:os";
 import type { BrowserHandle } from "../runner/seams.js";
 
 /** Default pool size: `min(cpu/2, cases)`, at least 1 (PLAN §2). */
-export function defaultWorkerCount(caseCount: number): number {
-  const half = Math.floor(cpus().length / 2);
+export function defaultWorkerCount(caseCount: number, cpuCount: number = cpus().length): number {
+  const half = Math.floor(cpuCount / 2);
   return Math.max(1, Math.min(half <= 0 ? 1 : half, Math.max(1, caseCount)));
 }
 
@@ -25,6 +26,8 @@ export interface CasePoolOptions {
     caseId: string,
     caseRunId: string,
   ) => Promise<void>;
+  /** Called once per case whose run threw outside its own failure paths. */
+  onCaseError?: (caseId: string, caseRunId: string, error: unknown) => void;
 }
 
 export async function runCasePool(o: CasePoolOptions): Promise<void> {
@@ -53,8 +56,23 @@ export async function runCasePool(o: CasePoolOptions): Promise<void> {
           return;
         }
         const caseRunId = o.caseRunIds.get(caseId);
-        if (caseRunId !== undefined) {
+        if (caseRunId === undefined) {
+          continue;
+        }
+        try {
           await o.runCase(getBrowser, caseId, caseRunId);
+        } catch (err) {
+          // Settle just this case and drop the worker's cached browser: a
+          // crashed handle must not poison every later case on this worker.
+          o.onCaseError?.(caseId, caseRunId, err);
+          for (const owned of browsers) {
+            try {
+              await owned.close();
+            } catch {
+              // Already closing — continue with a fresh browser next case.
+            }
+          }
+          browsers.length = 0;
         }
       }
     } finally {
@@ -67,5 +85,7 @@ export async function runCasePool(o: CasePoolOptions): Promise<void> {
       }
     }
   });
-  await Promise.all(workers);
+  // Wait for every worker: `allSettled` cannot end the suite while a sibling
+  // is still writing run rows.
+  await Promise.allSettled(workers);
 }

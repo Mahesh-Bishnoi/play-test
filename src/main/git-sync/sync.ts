@@ -24,6 +24,7 @@ import { eq } from "drizzle-orm";
 import * as git from "isomorphic-git";
 
 import type { AppDatabase } from "../db.js";
+import { inTransaction } from "../db.js";
 import { deleteCase, getCase } from "../ipc-cases.js";
 import { deleteCaseProfile } from "../ipc-profiles.js";
 import { getProject, updateProject } from "../ipc-projects.js";
@@ -48,6 +49,7 @@ import {
   canonical,
   type Snapshot,
   SnapshotCaseSchema,
+  SnapshotProjectSchema,
   snapshotHash,
   SnapshotSuiteSchema,
 } from "./snapshot.js";
@@ -192,6 +194,16 @@ export async function syncCommit(
   return { hash, changed };
 }
 
+/** A bare gitdir has `bare = true` in its config (non-bare is the unsafe case). */
+function isBareGitdir(gitdir: string): boolean {
+  try {
+    const config = fs.readFileSync(path.join(gitdir, "config"), "utf8");
+    return /^\s*bare\s*=\s*true\s*$/im.test(config);
+  } catch {
+    return false;
+  }
+}
+
 export async function syncPush(opts: {
   dir: string;
   remote?: string;
@@ -227,9 +239,12 @@ export async function syncPush(opts: {
     }
   }
   copyGitObjects(gitdirOf(opts.dir), remoteGitdir);
-  const workTreeHead = path.join(remotePath, ".git", "HEAD");
-  if (fs.existsSync(workTreeHead)) {
-    const target = fs.readFileSync(workTreeHead, "utf8").trim();
+  // `remotePath` is the remote gitdir (resolveRemotePath checks `<path>/HEAD`).
+  // A non-bare repo with this branch checked out would have its worktree
+  // silently diverged by the force-ref update below.
+  const remoteHeadFile = path.join(remotePath, "HEAD");
+  if (!isBareGitdir(remotePath) && fs.existsSync(remoteHeadFile)) {
+    const target = fs.readFileSync(remoteHeadFile, "utf8").trim();
     if (target === `ref: refs/heads/${branch}`) {
       throw new SyncRemoteError(
         `refusing to push to the checked-out branch of a non-bare repo: ${branch}`,
@@ -264,7 +279,12 @@ export async function syncPull(
   const remotePath = await resolveRemotePath(opts.dir, opts.remote);
   const remoteGitdir = remotePath;
   const remoteHead = await resolveRemoteRef(remoteGitdir, branch);
-  const pending = readConflicts(opts.dir).map(({ entity, id, name }) => ({ entity, id, name }));
+  const pending = readConflicts(opts.dir).map(({ entity, id, name, remoteDeleted }) => ({
+    entity,
+    id,
+    name,
+    ...(remoteDeleted === true ? { remoteDeleted: true } : {}),
+  }));
   if (remoteHead === undefined) {
     return { applied: [], conflicts: pending };
   }
@@ -300,8 +320,12 @@ export async function syncPull(
     throw new Error("local database has uncommitted changes — commit before pulling");
   }
   const applied: string[] = [];
-  const conflicts: StoredConflict[] = readConflicts(opts.dir);
-  const conflictIds = new Set(conflicts.map((c) => `${c.entity}:${c.id}`));
+  // Rebuild the pending list from this pull's outcomes: a stale row must not
+  // keep an old `theirs` (review F8), and a resolved conflict disappears.
+  const conflicts = new Map<string, StoredConflict>();
+  const recordConflict = (conflict: StoredConflict): void => {
+    conflicts.set(`${conflict.entity}:${conflict.id}`, conflict);
+  };
   const merged: Snapshot = {
     project: localSnap.project,
     suites: { ...localSnap.suites },
@@ -315,6 +339,13 @@ export async function syncPull(
   if (projectOutcome.kind === "take-remote") {
     merged.project = remoteSnap.project;
     applied.push(remoteSnap.project.id);
+  } else if (projectOutcome.kind === "conflict") {
+    recordConflict({
+      entity: "project",
+      id: projectId,
+      name: localSnap.project.name,
+      theirs: remoteSnap.project,
+    });
   }
   const caseIds = new Set([
     ...Object.keys(baseSnap.cases),
@@ -336,16 +367,13 @@ export async function syncPull(
       delete merged.cases[id];
       casesToDelete.push(id);
       applied.push(id);
-    } else if (outcome.kind === "conflict" && remote !== undefined) {
-      if (!conflictIds.has(`case:${id}`)) {
-        conflicts.push({
-          entity: "case",
-          id,
-          name: (localSnap.cases[id] ?? remote).name,
-          theirs: remote,
-        });
-        conflictIds.add(`case:${id}`);
-      }
+    } else if (outcome.kind === "conflict") {
+      recordConflict({
+        entity: "case",
+        id,
+        name: (localSnap.cases[id] ?? remote)?.name ?? id,
+        ...(remote === undefined ? { remoteDeleted: true, theirs: null } : { theirs: remote }),
+      });
     }
   }
   const suiteIds = new Set([
@@ -371,20 +399,23 @@ export async function syncPull(
       delete merged.suites[id];
       suitesToDelete.push(id);
       applied.push(id);
-    } else if (outcome.kind === "conflict" && remote !== undefined) {
-      if (!conflictIds.has(`suite:${id}`)) {
-        conflicts.push({
-          entity: "suite",
-          id,
-          name: (localSnap.suites[id] ?? remote).name,
-          theirs: remote,
-        });
-        conflictIds.add(`suite:${id}`);
-      }
+    } else if (outcome.kind === "conflict") {
+      recordConflict({
+        entity: "suite",
+        id,
+        name: (localSnap.suites[id] ?? remote)?.name ?? id,
+        ...(remote === undefined ? { remoteDeleted: true, theirs: null } : { theirs: remote }),
+      });
     }
   }
+  // A local/kept suite can still reference a remotely deleted case. Filter
+  // before any mutation: the old code deleted cases first and threw here,
+  // leaving the DB half-merged (review F8).
+  for (const suite of Object.values(merged.suites)) {
+    suite.memberCaseIds = suite.memberCaseIds.filter((id) => id in merged.cases);
+  }
   applyMergedToDb(db, projectId, merged, casesToDelete, suitesToDelete);
-  writeConflicts(opts.dir, conflicts);
+  writeConflicts(opts.dir, [...conflicts.values()]);
   writeSnapshotFiles(opts.dir, merged);
   const fastForward = snapshotHash(merged) === snapshotHash(remoteSnap);
   if (fastForward) {
@@ -425,7 +456,12 @@ export async function syncPull(
   }
   return {
     applied,
-    conflicts: conflicts.map(({ entity, id, name }) => ({ entity, id, name })),
+    conflicts: [...conflicts.values()].map(({ entity, id, name, remoteDeleted }) => ({
+      entity,
+      id,
+      name,
+      ...(remoteDeleted === true ? { remoteDeleted: true } : {}),
+    })),
   };
 }
 
@@ -437,34 +473,10 @@ function applyMergedToDb(
   casesToDelete: string[],
   suitesToDelete: string[],
 ): void {
-  const now = Date.now();
-  for (const id of casesToDelete) {
-    try {
-      deleteCase(db, id);
-    } catch {
-      // Already gone locally — merged state already holds.
-    }
-    // No FKs by convention: delete the profile row with its case (M14).
-    deleteCaseProfile(db, id);
-  }
-  for (const id of suitesToDelete) {
-    try {
-      deleteSuite(db, id);
-    } catch {
-      // Already gone locally — merged state already holds.
-    }
-  }
+  // Validate everything before touching a row: a schema/membership error must
+  // abort the pull with the DB unchanged.
   for (const c of Object.values(merged.cases)) {
     SnapshotCaseSchema.parse(c);
-    try {
-      getCase(db, c.id);
-      db.delete(testSteps).where(eq(testSteps.caseId, c.id)).run();
-      db.delete(testData).where(eq(testData.caseId, c.id)).run();
-      db.delete(testCases).where(eq(testCases.id, c.id)).run();
-    } catch {
-      // New locally — insert below.
-    }
-    insertCaseContent(db, projectId, c, now);
   }
   for (const suite of Object.values(merged.suites)) {
     SnapshotSuiteSchema.parse(suite);
@@ -473,25 +485,62 @@ function applyMergedToDb(
         throw new SyncRemoteError(`suite ${suite.id} references unknown case ${memberId}`);
       }
     }
-    try {
-      getSuite(db, suite.id);
-      updateSuite(db, { id: suite.id, name: suite.name });
-    } catch {
-      insertSuiteContent(db, projectId, suite, now);
-    }
-    setMembership(db, suite);
   }
-  updateProject(db, {
-    id: projectId,
-    name: merged.project.name,
-    baseUrl: merged.project.baseUrl ?? null,
+  const now = Date.now();
+  inTransaction(db, (tx) => {
+    for (const id of casesToDelete) {
+      try {
+        deleteCase(tx, id);
+      } catch {
+        // Already gone locally — merged state already holds.
+      }
+      // No FKs by convention: delete the profile row with its case (M14).
+      deleteCaseProfile(tx, id);
+    }
+    for (const id of suitesToDelete) {
+      try {
+        deleteSuite(tx, id);
+      } catch {
+        // Already gone locally — merged state already holds.
+      }
+    }
+    for (const c of Object.values(merged.cases)) {
+      try {
+        getCase(tx, c.id);
+        tx.delete(testSteps).where(eq(testSteps.caseId, c.id)).run();
+        tx.delete(testData).where(eq(testData.caseId, c.id)).run();
+        tx.delete(testCases).where(eq(testCases.id, c.id)).run();
+      } catch {
+        // New locally — insert below.
+      }
+      insertCaseContent(tx, projectId, c, now);
+    }
+    for (const suite of Object.values(merged.suites)) {
+      try {
+        getSuite(tx, suite.id);
+        updateSuite(tx, { id: suite.id, name: suite.name });
+      } catch {
+        insertSuiteContent(tx, projectId, suite, now);
+      }
+      setMembership(tx, suite);
+    }
+    updateProject(tx, {
+      id: projectId,
+      name: merged.project.name,
+      baseUrl: merged.project.baseUrl ?? null,
+    });
   });
 }
 
 export async function resolveSyncConflict(
   db: AppDatabase,
   projectId: string,
-  opts: { dir: string; entity: "case" | "suite"; id: string; winner: "mine" | "theirs" },
+  opts: {
+    dir: string;
+    entity: "case" | "suite" | "project";
+    id: string;
+    winner: "mine" | "theirs";
+  },
 ): Promise<{ resolved: boolean }> {
   assertSyncDir(opts.dir);
   getProject(db, projectId);
@@ -507,26 +556,56 @@ export async function resolveSyncConflict(
   conflicts.splice(index, 1);
   if (opts.winner === "theirs") {
     const now = Date.now();
-    if (conflict.entity === "case") {
+    if (conflict.remoteDeleted === true || conflict.theirs === null) {
+      // The remote deleted this entity; "take theirs" makes that local.
+      inTransaction(db, (tx) => {
+        if (conflict.entity === "case") {
+          try {
+            deleteCase(tx, conflict.id);
+          } catch {
+            // Already gone locally.
+          }
+        } else if (conflict.entity === "suite") {
+          try {
+            deleteSuite(tx, conflict.id);
+          } catch {
+            // Already gone locally.
+          }
+        }
+      });
+    } else if (conflict.entity === "project") {
+      const project = SnapshotProjectSchema.parse(conflict.theirs);
+      inTransaction(db, (tx) => {
+        updateProject(tx, {
+          id: projectId,
+          name: project.name,
+          baseUrl: project.baseUrl ?? null,
+        });
+      });
+    } else if (conflict.entity === "case") {
       const c = SnapshotCaseSchema.parse(conflict.theirs);
-      try {
-        getCase(db, c.id);
-        db.delete(testSteps).where(eq(testSteps.caseId, c.id)).run();
-        db.delete(testData).where(eq(testData.caseId, c.id)).run();
-        db.delete(testCases).where(eq(testCases.id, c.id)).run();
-      } catch {
-        // Deleted locally — reinsert below.
-      }
-      insertCaseContent(db, projectId, c, now);
+      inTransaction(db, (tx) => {
+        try {
+          getCase(tx, c.id);
+          tx.delete(testSteps).where(eq(testSteps.caseId, c.id)).run();
+          tx.delete(testData).where(eq(testData.caseId, c.id)).run();
+          tx.delete(testCases).where(eq(testCases.id, c.id)).run();
+        } catch {
+          // Deleted locally — reinsert below.
+        }
+        insertCaseContent(tx, projectId, c, now);
+      });
     } else {
       const suite = SnapshotSuiteSchema.parse(conflict.theirs);
-      try {
-        getSuite(db, suite.id);
-        updateSuite(db, { id: suite.id, name: suite.name });
-      } catch {
-        insertSuiteContent(db, projectId, suite, now);
-      }
-      setMembership(db, suite);
+      inTransaction(db, (tx) => {
+        try {
+          getSuite(tx, suite.id);
+          updateSuite(tx, { id: suite.id, name: suite.name });
+        } catch {
+          insertSuiteContent(tx, projectId, suite, now);
+        }
+        setMembership(tx, suite);
+      });
     }
   }
   writeConflicts(opts.dir, conflicts);
@@ -602,15 +681,17 @@ export async function cloneSyncRepo(
     }
   }
   const now = Date.now();
-  db.insert(projects)
-    .values({
-      id: snapshot.project.id,
-      name: snapshot.project.name,
-      baseUrl: snapshot.project.baseUrl ?? null,
-      createdAt: now,
-    })
-    .run();
-  insertSnapshotContent(db, snapshot);
+  inTransaction(db, (tx) => {
+    tx.insert(projects)
+      .values({
+        id: snapshot.project.id,
+        name: snapshot.project.name,
+        baseUrl: snapshot.project.baseUrl ?? null,
+        createdAt: now,
+      })
+      .run();
+    insertSnapshotContent(tx, snapshot);
+  });
   return { projectId: snapshot.project.id };
 }
 

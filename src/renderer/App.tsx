@@ -44,6 +44,21 @@ export default function App(): React.JSX.Element {
     applyTheme(theme);
   }, [theme]);
 
+  // A dropped file/link anywhere outside an explicit drop zone must not
+  // navigate the window away from the app (review F9). Zone handlers already
+  // call preventDefault; this catches the rest of the shell.
+  useEffect(() => {
+    const prevent = (event: DragEvent): void => {
+      event.preventDefault();
+    };
+    document.addEventListener("dragover", prevent);
+    document.addEventListener("drop", prevent);
+    return () => {
+      document.removeEventListener("dragover", prevent);
+      document.removeEventListener("drop", prevent);
+    };
+  }, []);
+
   const toggleTheme = (): void => {
     setTheme((t) => (t === "intellij-dark" ? "syntax-light" : "intellij-dark"));
   };

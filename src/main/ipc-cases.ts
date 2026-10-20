@@ -9,7 +9,10 @@ import {
 } from "../shared/ipc-contract.js";
 import type { TestCase } from "../shared/schema.js";
 import { TestCaseSchema } from "../shared/schema.js";
+import { sortByName } from "../shared/sort.js";
 import type { AppDatabase } from "./db.js";
+import { inTransaction } from "./db.js";
+import { removeCaseArtifacts } from "./artifacts.js";
 import { deleteCaseProfile } from "./ipc-profiles.js";
 import { caseRuns, projects, stepRuns, suiteTestCases, testData, testSteps } from "./schema.js";
 import { testCases } from "./schema.js";
@@ -126,19 +129,31 @@ export function updateCase(db: AppDatabase, input: CaseUpdatePayload): TestCase 
  * its case profile, plus its case_runs and their step_runs). Suites that
  * referenced it keep their remaining members.
  */
-export function deleteCase(db: AppDatabase, id: string): void {
-  getCase(db, id);
-  const runs = db.select({ id: caseRuns.id }).from(caseRuns).where(eq(caseRuns.caseId, id)).all();
-  const runIds = runs.map((r) => r.id);
-  if (runIds.length > 0) {
-    db.delete(stepRuns).where(inArray(stepRuns.caseRunId, runIds)).run();
-    db.delete(caseRuns).where(inArray(caseRuns.id, runIds)).run();
+export function deleteCase(db: AppDatabase, id: string, opts?: { artifactsRoot?: string }): void {
+  const testCase = getCase(db, id);
+  const suiteRunIds = inTransaction(db, (tx) => {
+    const runs = tx
+      .select({ id: caseRuns.id, suiteRunId: caseRuns.suiteRunId })
+      .from(caseRuns)
+      .where(eq(caseRuns.caseId, id))
+      .all();
+    const runIds = runs.map((r) => r.id);
+    if (runIds.length > 0) {
+      tx.delete(stepRuns).where(inArray(stepRuns.caseRunId, runIds)).run();
+      tx.delete(caseRuns).where(inArray(caseRuns.id, runIds)).run();
+    }
+    tx.delete(suiteTestCases).where(eq(suiteTestCases.caseId, id)).run();
+    tx.delete(testSteps).where(eq(testSteps.caseId, id)).run();
+    tx.delete(testData).where(eq(testData.caseId, id)).run();
+    deleteCaseProfile(tx, id);
+    tx.delete(testCases).where(eq(testCases.id, id)).run();
+    return [...new Set(runs.map((r) => r.suiteRunId))];
+  });
+  // Filesystem cleanup after the commit; optional so sync/test callers that
+  // have no artifacts root keep working.
+  if (opts?.artifactsRoot !== undefined) {
+    removeCaseArtifacts(opts.artifactsRoot, testCase.projectId, suiteRunIds, id);
   }
-  db.delete(suiteTestCases).where(eq(suiteTestCases.caseId, id)).run();
-  db.delete(testSteps).where(eq(testSteps.caseId, id)).run();
-  db.delete(testData).where(eq(testData.caseId, id)).run();
-  deleteCaseProfile(db, id);
-  db.delete(testCases).where(eq(testCases.id, id)).run();
 }
 
 /** Cases for an explicit id list in name order — backs the suite-detail table. */
@@ -147,8 +162,8 @@ export function listCasesByIds(db: AppDatabase, memberIds: string[]): TestCase[]
     return [];
   }
   const rows = db.select().from(testCases).where(inArray(testCases.id, memberIds)).all();
-  return rows
-    .map((r) =>
+  return sortByName(
+    rows.map((r) =>
       toTestCase({
         id: r.id,
         projectId: r.projectId,
@@ -157,6 +172,6 @@ export function listCasesByIds(db: AppDatabase, memberIds: string[]): TestCase[]
         url: r.url,
         createdAt: r.createdAt,
       }),
-    )
-    .sort((a, b) => a.name.localeCompare(b.name));
+    ),
+  );
 }

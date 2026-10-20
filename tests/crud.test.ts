@@ -166,6 +166,28 @@ describe("step service (WS2)", () => {
 });
 
 describe("crud IPC wiring (WS2)", () => {
+  it("refuses case/suite/project deletes while a run is active (review F6)", () => {
+    const dbHandle = createDatabase(":memory:");
+    try {
+      const ipc = fakeIpc();
+      registerCrudHandlers(ipc.handle, dbHandle.db, { isRunActive: () => true });
+      const project = ipc.call("project:create", { name: "P" }) as { id: string };
+      const suite = ipc.call("suite:create", { projectId: project.id, name: "S" }) as {
+        id: string;
+      };
+      const testCase = ipc.call("case:create", { projectId: project.id, name: "C" }) as {
+        id: string;
+      };
+      expect(() => ipc.call("case:delete", { id: testCase.id })).toThrow(/a run is active/);
+      expect(() => ipc.call("suite:delete", { id: suite.id })).toThrow(/a run is active/);
+      expect(() => ipc.call("project:delete", { id: project.id })).toThrow(/a run is active/);
+      // Nothing was deleted.
+      expect(ipc.call("case:get", { id: testCase.id })).toBeTruthy();
+    } finally {
+      dbHandle.close();
+    }
+  });
+
   it("round-trips suites, cases, steps, and test-data through the fake IPC surface", () => {
     const dbHandle = createDatabase(":memory:");
     try {

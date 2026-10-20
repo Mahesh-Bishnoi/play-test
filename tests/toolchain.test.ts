@@ -1,12 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 // Smoke test for the toolchain itself: proves vitest runs and that the
-// strict flags in tsconfig.json are active (this file only compiles with
-// `strict` + `noUncheckedIndexedAccess` — indexed access narrows to
-// `T | undefined`, forcing the explicit undefined checks below).
+// strict flags in tsconfig.json are active. The type assertion is what makes
+// the test fail when the flag is removed — `string` is not assignable to
+// `string | undefined`, so `tsc` rejects this file without the flag.
 describe("toolchain smoke", () => {
   it("honors noUncheckedIndexedAccess on out-of-bounds access", () => {
     const steps: string[] = ["goto", "click", "fill"];
+    expectTypeOf(steps[99]).toEqualTypeOf<string | undefined>();
     const missing: string | undefined = steps[99];
     expect(missing).toBeUndefined();
   });

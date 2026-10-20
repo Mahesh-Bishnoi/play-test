@@ -43,7 +43,6 @@ export type SelectOptionInput = string | string[] | SelectOptionValue | SelectOp
 export interface RunPage {
   goto(url: string, timeoutMs?: number): Promise<void>;
   click(selector: string, timeoutMs?: number, options?: ClickStepOptions): Promise<void>;
-  dblclick(selector: string, timeoutMs?: number): Promise<void>;
   fill(selector: string, value: string, timeoutMs?: number): Promise<void>;
   /** `delayMs` slows the keystrokes (M17); `undefined` uses Playwright's default. */
   type(selector: string, text: string, timeoutMs?: number, delayMs?: number): Promise<void>;

@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 
 /**
  * Artifact path builders (WS5, PLAN §4). Layout:
@@ -78,6 +78,42 @@ export function ensureCaseDir(
 export function removeProjectArtifacts(root: string, projectId: string): void {
   try {
     rmSync(join(root, projectId), { recursive: true, force: true });
+  } catch {
+    // Best-effort — orphaned media is wasteful, not corrupt.
+  }
+}
+
+/** Remove one case's run folders under each suite run (review counted #5). */
+export function removeCaseArtifacts(
+  root: string,
+  projectId: string,
+  suiteRunIds: readonly string[],
+  caseId: string,
+): void {
+  for (const suiteRunId of suiteRunIds) {
+    removeContained(root, join(root, projectId, suiteRunId, caseId));
+  }
+}
+
+/** Remove every run folder of a suite (review counted #5). */
+export function removeSuiteArtifacts(
+  root: string,
+  projectId: string,
+  suiteRunIds: readonly string[],
+): void {
+  for (const suiteRunId of suiteRunIds) {
+    removeContained(root, join(root, projectId, suiteRunId));
+  }
+}
+
+/** Refuse to delete outside the artifacts root, even with a bad id. */
+function removeContained(root: string, target: string): void {
+  const rel = relative(root, target);
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
+    return;
+  }
+  try {
+    rmSync(target, { recursive: true, force: true });
   } catch {
     // Best-effort — orphaned media is wasteful, not corrupt.
   }

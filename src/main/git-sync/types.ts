@@ -3,7 +3,7 @@
  * error, and the conflict row written to `.git` between a pull and a resolve.
  */
 
-import type { SnapshotCase, SnapshotSuite } from "./snapshot.js";
+import type { SnapshotCase, SnapshotProject, SnapshotSuite } from "./snapshot.js";
 
 export interface SyncAuthor {
   name: string;
@@ -15,10 +15,14 @@ export interface SyncCommitResult {
   changed: string[];
 }
 
+export type ConflictEntity = "case" | "suite" | "project";
+
 export interface SyncConflict {
-  entity: "case" | "suite";
+  entity: ConflictEntity;
   id: string;
   name: string;
+  /** True when the remote side deleted the entity (resolve "theirs" deletes). */
+  remoteDeleted?: boolean;
 }
 
 export interface SyncPullResult {
@@ -49,5 +53,6 @@ export class SyncRemoteError extends Error {
 
 /** Pending conflict rows carry the remote ("theirs") content for resolve. */
 export interface StoredConflict extends SyncConflict {
-  theirs: SnapshotCase | SnapshotSuite;
+  /** `null` = the remote deleted this entity; "take theirs" deletes locally. */
+  theirs: SnapshotCase | SnapshotSuite | SnapshotProject | null;
 }

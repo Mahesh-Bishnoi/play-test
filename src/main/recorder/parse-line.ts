@@ -304,7 +304,13 @@ export function parseLine(line: string, event?: ClickEventMarker): ParsedLine | 
     if (/trial:\s*true/.test(stmt)) {
       return unsupportedTrial(stmt, "dblclick");
     }
-    return asStep({ action: "dblclick", selector: locatorSource(stmt, "dblclick") });
+    return asStep({
+      action: "dblclick",
+      selector: locatorSource(stmt, "dblclick"),
+      // Carry modifiers/button/position and a popup marker: the runner routes
+      // double clicks through page.click with clickCount 2, so these apply.
+      value: clickValueFrom(stmt, event, "dblclick"),
+    });
   }
 
   // Unrecognised page/expect statement — report it instead of dropping data.

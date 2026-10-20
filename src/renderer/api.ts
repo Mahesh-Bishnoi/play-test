@@ -83,14 +83,16 @@ export interface SyncCommitResult {
 }
 
 const SyncConflictSchema = z.object({
-  entity: z.enum(["case", "suite"]),
+  entity: z.enum(["case", "suite", "project"]),
   id: z.string(),
   name: z.string(),
+  remoteDeleted: z.boolean().optional(),
 });
 export interface SyncConflict {
-  entity: "case" | "suite";
+  entity: "case" | "suite" | "project";
   id: string;
   name: string;
+  remoteDeleted?: boolean;
 }
 
 const SyncPullResultSchema = z.object({
@@ -353,7 +355,7 @@ export const api = {
   syncResolve(
     projectId: string,
     dir: string,
-    entity: "case" | "suite",
+    entity: "case" | "suite" | "project",
     id: string,
     winner: "mine" | "theirs",
   ): Promise<{ resolved: boolean }> {

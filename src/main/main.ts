@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import started from "electron-squirrel-startup";
@@ -16,6 +17,9 @@ import { SingleCaseRunner } from "./runner/single-runner.js";
 import { playwrightLauncher } from "./runner/launcher.js";
 import { SuiteRunner } from "./suite-runner/suite-runner.js";
 import { defaultArtifactsRoot } from "./artifacts.js";
+import { isAllowedAppUrl } from "./window-guards.js";
+import { reconcileInterruptedRuns } from "./run-reconcile.js";
+import { sharedRecorder } from "./recorder/codegen-shell.js";
 
 // Forge's vite plugin injects these globals at build/dev time.
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
@@ -38,23 +42,38 @@ function createWindow(): void {
       sandbox: true,
     },
   });
+  const appFile = join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`);
+  const allowed = {
+    devServerUrl: MAIN_WINDOW_VITE_DEV_SERVER_URL,
+    appFileUrl: pathToFileURL(appFile).href,
+  };
+  // The preload bridge (`window.playtest`) is attached to whatever this window
+  // loads, so navigation away from the app and popup windows are both denied.
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  const blockOutside = (event: { preventDefault(): void }, url: string): void => {
+    if (!isAllowedAppUrl(url, allowed)) {
+      event.preventDefault();
+    }
+  };
+  win.webContents.on("will-navigate", blockOutside);
+  win.webContents.on("will-redirect", blockOutside);
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL !== undefined && MAIN_WINDOW_VITE_DEV_SERVER_URL !== "") {
     void win.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   } else {
-    void win.loadFile(join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
+    void win.loadFile(appFile);
   }
 }
 
 void app.whenReady().then(() => {
   const handle = createDatabase(defaultDbPath());
+  // A quit/crash mid-run leaves rows "running" forever; settle them before the
+  // UI can read the history (review counted #2).
+  reconcileInterruptedRuns(handle.db);
   closeDb = () => {
     handle.close();
   };
   const artifactsRoot = defaultArtifactsRoot();
-  registerCrudHandlers((channel, listener) => {
-    ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
-  }, handle.db);
   registerRecorderHandlers(
     (channel, listener) => {
       ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
@@ -86,6 +105,18 @@ void app.whenReady().then(() => {
     artifactsRoot,
     isSingleActive: () => runner.hasActiveSession(),
   });
+  // Destructive CRUD is registered after both runners exist so a live run can
+  // refuse deletes (review F6).
+  registerCrudHandlers(
+    (channel, listener) => {
+      ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
+    },
+    handle.db,
+    {
+      isRunActive: () => runner.hasActiveSession() || suiteRunner.hasActiveRun(),
+      artifactsRoot,
+    },
+  );
   registerRunnerHandlers(
     (channel, listener) => {
       ipcMain.handle(channel, (_event, payload: unknown) => listener(payload));
@@ -158,6 +189,12 @@ app.on("window-all-closed", () => {
 app.on("quit", () => {
   closeDb?.();
   closeDb = null;
+});
+
+// A codegen child outlives the window unless killed explicitly; app shutdown
+// must not leave an orphaned browser window (review counted #2).
+app.on("before-quit", () => {
+  sharedRecorder.dispose();
 });
 
 /**

@@ -5,6 +5,7 @@
  */
 
 import { caseTracePath, caseVideoPath, ensureCaseDir, stepScreenshotPath } from "../artifacts.js";
+import type { StepRow, TestCase } from "../../shared/schema.js";
 import type { AppDatabase } from "../db.js";
 import { getCase } from "../ipc-cases.js";
 import { getCaseProfile } from "../ipc-profiles.js";
@@ -35,10 +36,23 @@ export async function runOneCase(
   caseId: string,
   caseRunId: string,
 ): Promise<void> {
-  const testCase = getCase(deps.db, caseId);
-  const steps = listSteps(deps.db, caseId);
-  const data = getTestData(deps.db, { caseId });
   const startedAt = deps.now();
+  // Preflight is inside the per-case failure path: a case deleted mid-run must
+  // settle this row, not reject the worker (which would end the suite early).
+  let preflight: { testCase: TestCase; steps: StepRow[]; data: Record<string, string> };
+  try {
+    preflight = {
+      testCase: getCase(deps.db, caseId),
+      steps: listSteps(deps.db, caseId),
+      data: getTestData(deps.db, { caseId }),
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    deps.runs.log("error", `case ${caseId} could not be read: ${message}`);
+    deps.runs.settleCaseIfRunning(caseRunId, "failed", startedAt);
+    return;
+  }
+  const { testCase, steps, data } = preflight;
   const prefix = `[${testCase.name}]`;
 
   if (steps.length === 0) {
@@ -72,9 +86,9 @@ export async function runOneCase(
     deps.runs.log("warn", `${prefix} ${hint}`);
   }
 
-  const caseDir = ensureCaseDir(deps.artifactsRoot, testCase.projectId, suiteRunId, caseId);
   let context: RunContext;
   try {
+    const caseDir = ensureCaseDir(deps.artifactsRoot, testCase.projectId, suiteRunId, caseId);
     // Resolve the case profile (M14) before the browser: a missing auth-state
     // file is a config error, caught by the same per-case failure path as a
     // launch failure. The worker's browser is shared; the context is fresh.

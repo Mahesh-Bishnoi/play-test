@@ -490,6 +490,7 @@ export default function SyncPanel({ projectId, projectName, onChanged }: Props):
                 <span className="pt-tree-label">
                   <span className="pt-item-name">
                     {c.entity}: {c.name}
+                    {c.remoteDeleted === true ? " (remote deleted)" : ""}
                   </span>
                   <span className="pt-item-meta pt-mono">{c.id}</span>
                 </span>

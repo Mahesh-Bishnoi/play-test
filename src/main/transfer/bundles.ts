@@ -1,4 +1,5 @@
 import type { AppDatabase } from "../db.js";
+import { inTransaction } from "../db.js";
 import {
   EXPORT_FORMAT,
   EXPORT_VERSION,
@@ -8,11 +9,10 @@ import {
 } from "../../shared/export-format.js";
 import { CaseProfileInputSchema } from "../../shared/schema.js";
 import { getCaseProfile, setCaseProfile } from "../ipc-profiles.js";
-import { createProject, deleteProject, getProject } from "../ipc-projects.js";
-import { createCase, deleteCase, getCase, listCases, listCasesByIds } from "../ipc-cases.js";
+import { createProject, getProject } from "../ipc-projects.js";
+import { createCase, getCase, listCases, listCasesByIds } from "../ipc-cases.js";
 import {
   createSuite,
-  deleteSuite,
   getSuite,
   getSuiteCaseIds,
   listSuites,
@@ -146,23 +146,24 @@ function createCaseFromBundle(
 
 /**
  * Import a project-scope file as a brand-new project (name + baseUrl kept,
- * all ids regenerated, membership remapped by case name). Atomic: a failure
- * deletes the half-created project.
+ * all ids regenerated, membership remapped by case name). Atomic: everything
+ * is inserted in one transaction, so a failure leaves no half-made project.
  */
 export function importProjectBundle(db: AppDatabase, file: ExportFile): ImportSummary {
   if (file.scope !== "project" || file.project === undefined) {
     throw new ExportScopeMismatchError("project", file.scope);
   }
-  const created = createProject(db, {
-    name: file.project.name,
-    ...(file.project.baseUrl !== undefined ? { baseUrl: file.project.baseUrl } : {}),
-  });
-  try {
+  const project = file.project;
+  return inTransaction(db, (tx) => {
+    const created = createProject(tx, {
+      name: project.name,
+      ...(project.baseUrl !== undefined ? { baseUrl: project.baseUrl } : {}),
+    });
     const nameQueues = new Map<string, string[]>();
     const caseIds: string[] = [];
     let steps = 0;
     for (const bundle of file.cases) {
-      const r = createCaseFromBundle(db, created.id, bundle);
+      const r = createCaseFromBundle(tx, created.id, bundle);
       caseIds.push(r.caseId);
       steps += r.steps;
       const queue = nameQueues.get(bundle.name) ?? [];
@@ -171,12 +172,12 @@ export function importProjectBundle(db: AppDatabase, file: ExportFile): ImportSu
     }
     const suiteIds: string[] = [];
     for (const bundle of file.suites) {
-      const suite = createSuite(db, { projectId: created.id, name: bundle.name });
+      const suite = createSuite(tx, { projectId: created.id, name: bundle.name });
       suiteIds.push(suite.id);
       const memberIds = bundle.caseNames
         .map((n) => nameQueues.get(n)?.shift())
         .filter((id): id is string => id !== undefined);
-      setSuiteCases(db, suite.id, memberIds);
+      setSuiteCases(tx, suite.id, memberIds);
     }
     return {
       projectId: created.id,
@@ -185,16 +186,13 @@ export function importProjectBundle(db: AppDatabase, file: ExportFile): ImportSu
       caseCount: caseIds.length,
       stepCount: steps,
     };
-  } catch (err) {
-    deleteProject(db, created.id);
-    throw err;
-  }
+  });
 }
 
 /**
  * Import a suite-scope file into an existing project. The target project's
  * baseUrl wins (source baseUrl is not carried — cases hold no baseUrl).
- * Atomic: removes created suites/cases on failure.
+ * Atomic: one transaction, so a failure removes created suites/cases.
  */
 export function importSuiteBundle(
   db: AppDatabase,
@@ -205,13 +203,13 @@ export function importSuiteBundle(
     throw new ExportScopeMismatchError("suite", file.scope);
   }
   getProject(db, projectId);
-  const createdSuites: string[] = [];
-  const createdCases: string[] = [];
-  try {
+  return inTransaction(db, (tx) => {
+    const createdSuites: string[] = [];
+    const createdCases: string[] = [];
     const nameQueues = new Map<string, string[]>();
     let steps = 0;
     for (const bundle of file.cases) {
-      const r = createCaseFromBundle(db, projectId, bundle);
+      const r = createCaseFromBundle(tx, projectId, bundle);
       createdCases.push(r.caseId);
       steps += r.steps;
       const queue = nameQueues.get(bundle.name) ?? [];
@@ -219,12 +217,12 @@ export function importSuiteBundle(
       nameQueues.set(bundle.name, queue);
     }
     for (const bundle of file.suites) {
-      const suite = createSuite(db, { projectId, name: bundle.name });
+      const suite = createSuite(tx, { projectId, name: bundle.name });
       createdSuites.push(suite.id);
       const memberIds = bundle.caseNames
         .map((n) => nameQueues.get(n)?.shift())
         .filter((id): id is string => id !== undefined);
-      setSuiteCases(db, suite.id, memberIds);
+      setSuiteCases(tx, suite.id, memberIds);
     }
     return {
       projectId,
@@ -233,23 +231,7 @@ export function importSuiteBundle(
       caseCount: createdCases.length,
       stepCount: steps,
     };
-  } catch (err) {
-    for (const id of createdSuites) {
-      try {
-        deleteSuite(db, id);
-      } catch {
-        // Rollback is best-effort; the original error carries the failure.
-      }
-    }
-    for (const id of createdCases) {
-      try {
-        deleteCase(db, id);
-      } catch {
-        // Best-effort (see above).
-      }
-    }
-    throw err;
-  }
+  });
 }
 
 /**
@@ -273,16 +255,16 @@ export function importCaseBundle(
       throw new Error(`suite belongs to a different project: ${suiteId}`);
     }
   }
-  const createdCases: string[] = [];
-  try {
+  return inTransaction(db, (tx) => {
+    const createdCases: string[] = [];
     let steps = 0;
     for (const bundle of file.cases) {
-      const r = createCaseFromBundle(db, projectId, bundle);
+      const r = createCaseFromBundle(tx, projectId, bundle);
       createdCases.push(r.caseId);
       steps += r.steps;
     }
     for (const suiteId of suiteIds) {
-      setSuiteCases(db, suiteId, [...getSuiteCaseIds(db, suiteId), ...createdCases]);
+      setSuiteCases(tx, suiteId, [...getSuiteCaseIds(tx, suiteId), ...createdCases]);
     }
     return {
       projectId,
@@ -291,14 +273,5 @@ export function importCaseBundle(
       caseCount: createdCases.length,
       stepCount: steps,
     };
-  } catch (err) {
-    for (const id of createdCases) {
-      try {
-        deleteCase(db, id);
-      } catch {
-        // Rollback is best-effort; the original error carries the failure.
-      }
-    }
-    throw err;
-  }
+  });
 }

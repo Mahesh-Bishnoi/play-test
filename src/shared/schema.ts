@@ -9,6 +9,43 @@ const idField = z.string().min(1).max(100);
 const nameField = z.string().trim().min(1).max(200);
 const millisField = z.number().int().min(0);
 
+/**
+ * A literal http(s) URL, or the empty string ("unset" — lets the UI clear a
+ * field). Rejects protocol-relative, file/relative values and anything that
+ * starts with `-` (a recorder URL is passed as a CLI argument, so a value that
+ * looks like a flag is rejected at every write boundary).
+ */
+export function isHttpUrl(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    return true;
+  }
+  if (trimmed.startsWith("-")) {
+    return false;
+  }
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export const HttpUrlSchema = z
+  .string()
+  .trim()
+  .max(2000)
+  .refine(isHttpUrl, "must be an http(s) URL (not a flag or a relative path)");
+
+/** Validate one URL field eagerly with a human message naming the field. */
+export function requireHttpUrl(value: string, field: string): string {
+  const trimmed = value.trim();
+  if (!isHttpUrl(trimmed)) {
+    throw new Error(`${field} must be an http(s) URL, e.g. https://example.com`);
+  }
+  return trimmed;
+}
+
 export const RunModeSchema = z.enum(["supervised", "unsupervised"]);
 export type RunMode = z.infer<typeof RunModeSchema>;
 

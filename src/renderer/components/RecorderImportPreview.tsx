@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { RecorderUnsupported } from "../../shared/ipc-contract.js";
 import type { TestStep } from "../../shared/step-types.js";
+import ConfirmDialog from "./ConfirmDialog.js";
 
 export interface RecorderImportSelection {
   step: TestStep;
@@ -31,20 +32,28 @@ export default function RecorderImportPreview({
   onCancel,
 }: Props): React.JSX.Element {
   const [accepted, setAccepted] = useState<boolean[]>(() => steps.map(() => true));
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
   const cancelRef = useRef<HTMLButtonElement>(null);
+
+  // Escape/backdrop/Discard throw away a parsed recording; ask first (review N4).
+  const requestCancel = (): void => {
+    if (!busy) {
+      setConfirmingDiscard(true);
+    }
+  };
 
   useEffect(() => {
     cancelRef.current?.focus();
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape" && !busy) {
-        onCancel();
+        setConfirmingDiscard(true);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [busy, onCancel]);
+  }, [busy]);
 
   const toggle = (index: number): void => {
     setAccepted((prev) => prev.map((value, i) => (i === index ? !value : value)));
@@ -63,9 +72,7 @@ export default function RecorderImportPreview({
       aria-label="Recorded steps preview"
       className="pt-modal-backdrop"
       onClick={() => {
-        if (!busy) {
-          onCancel();
-        }
+        requestCancel();
       }}
     >
       <div
@@ -146,7 +153,7 @@ export default function RecorderImportPreview({
             ref={cancelRef}
             type="button"
             className="pt-btn"
-            onClick={onCancel}
+            onClick={requestCancel}
             disabled={busy}
           >
             Discard
@@ -163,6 +170,20 @@ export default function RecorderImportPreview({
           )}
         </div>
       </div>
+      {confirmingDiscard && (
+        <ConfirmDialog
+          title="Discard recorded steps?"
+          body="The parsed recording will be lost. Record again to get it back."
+          confirmLabel="Discard recording"
+          onConfirm={() => {
+            setConfirmingDiscard(false);
+            onCancel();
+          }}
+          onCancel={() => {
+            setConfirmingDiscard(false);
+          }}
+        />
+      )}
     </div>
   );
 }

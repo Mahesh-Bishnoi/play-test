@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, formatApiError } from "../api.js";
 import type { Suite, TestCase } from "../../shared/schema.js";
+import { sortByName } from "../../shared/sort.js";
 
 interface Props {
   projectId: string;
@@ -50,7 +51,7 @@ export default function ProjectExplorer({
     api
       .listSuites(projectId)
       .then((rows) => {
-        const sorted = [...rows].sort((a, b) => a.name.localeCompare(b.name));
+        const sorted = sortByName(rows);
         setSuites(sorted);
         setExpanded((prev) => {
           if (prev.size > 0) {
@@ -80,7 +81,7 @@ export default function ProjectExplorer({
     api
       .listCases(projectId)
       .then((rows) => {
-        setCases([...rows].sort((a, b) => a.name.localeCompare(b.name)));
+        setCases(sortByName(rows));
       })
       .catch((err: unknown) => {
         setError(formatApiError(err));

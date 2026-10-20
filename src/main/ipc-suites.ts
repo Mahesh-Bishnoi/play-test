@@ -10,6 +10,8 @@ import {
 import type { Suite } from "../shared/schema.js";
 import { SuiteSchema } from "../shared/schema.js";
 import type { AppDatabase } from "./db.js";
+import { inTransaction } from "./db.js";
+import { removeSuiteArtifacts } from "./artifacts.js";
 import { caseRuns, projects, stepRuns, suiteRuns, suiteTestCases, testCases } from "./schema.js";
 import { testSuites } from "./schema.js";
 
@@ -101,30 +103,36 @@ export function updateSuite(db: AppDatabase, input: SuiteUpdatePayload): Suite {
   return getSuite(db, existing.id);
 }
 
-/** Delete a suite, its join rows, and its run history (cases kept — reusable). */
-export function deleteSuite(db: AppDatabase, id: string): void {
-  getSuite(db, id);
-  const runs = db
-    .select({ id: suiteRuns.id })
-    .from(suiteRuns)
-    .where(eq(suiteRuns.suiteId, id))
-    .all();
-  const runIds = runs.map((r) => r.id);
-  if (runIds.length > 0) {
-    const cases = db
-      .select({ id: caseRuns.id })
-      .from(caseRuns)
-      .where(inArray(caseRuns.suiteRunId, runIds))
+/** Delete a suite, its join rows, its run history, and its artifact folders. */
+export function deleteSuite(db: AppDatabase, id: string, opts?: { artifactsRoot?: string }): void {
+  const suite = getSuite(db, id);
+  const runIds = inTransaction(db, (tx) => {
+    const runs = tx
+      .select({ id: suiteRuns.id })
+      .from(suiteRuns)
+      .where(eq(suiteRuns.suiteId, id))
       .all();
-    const caseRunIds = cases.map((c) => c.id);
-    if (caseRunIds.length > 0) {
-      db.delete(stepRuns).where(inArray(stepRuns.caseRunId, caseRunIds)).run();
+    const runIds = runs.map((r) => r.id);
+    if (runIds.length > 0) {
+      const cases = tx
+        .select({ id: caseRuns.id })
+        .from(caseRuns)
+        .where(inArray(caseRuns.suiteRunId, runIds))
+        .all();
+      const caseRunIds = cases.map((c) => c.id);
+      if (caseRunIds.length > 0) {
+        tx.delete(stepRuns).where(inArray(stepRuns.caseRunId, caseRunIds)).run();
+      }
+      tx.delete(caseRuns).where(inArray(caseRuns.suiteRunId, runIds)).run();
+      tx.delete(suiteRuns).where(inArray(suiteRuns.id, runIds)).run();
     }
-    db.delete(caseRuns).where(inArray(caseRuns.suiteRunId, runIds)).run();
-    db.delete(suiteRuns).where(inArray(suiteRuns.id, runIds)).run();
+    tx.delete(suiteTestCases).where(eq(suiteTestCases.suiteId, id)).run();
+    tx.delete(testSuites).where(eq(testSuites.id, id)).run();
+    return runIds;
+  });
+  if (opts?.artifactsRoot !== undefined) {
+    removeSuiteArtifacts(opts.artifactsRoot, suite.projectId, runIds);
   }
-  db.delete(suiteTestCases).where(eq(suiteTestCases.suiteId, id)).run();
-  db.delete(testSuites).where(eq(testSuites.id, id)).run();
 }
 
 /** Ordered membership for a suite (insertion order is not tracked — sorted for stability). */
@@ -163,9 +171,11 @@ export function setSuiteCases(db: AppDatabase, suiteId: string, caseIds: string[
       }
     }
   }
-  db.delete(suiteTestCases).where(eq(suiteTestCases.suiteId, suiteId)).run();
-  for (const caseId of unique) {
-    db.insert(suiteTestCases).values({ suiteId, caseId }).run();
-  }
-  return unique;
+  return inTransaction(db, (tx) => {
+    tx.delete(suiteTestCases).where(eq(suiteTestCases.suiteId, suiteId)).run();
+    for (const caseId of unique) {
+      tx.insert(suiteTestCases).values({ suiteId, caseId }).run();
+    }
+    return unique;
+  });
 }

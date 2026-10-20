@@ -23,7 +23,7 @@ import {
 } from "../src/main/trace-viewer.js";
 import type { TraceViewerDeps } from "../src/main/trace-viewer.js";
 import { buildPlaywrightCliSpawn } from "../src/main/playwright-cli.js";
-import { extractTraceTargets } from "../src/renderer/pages/RunReportPage.js";
+import { extractTraceCaseRunIds } from "../src/renderer/pages/RunReportPage.js";
 
 let openHandles: DatabaseHandle[] = [];
 afterEach(() => {
@@ -225,19 +225,17 @@ describe("SuiteReport trace hint", () => {
     const html = renderSuiteHtml(report, undefined, join(root, project.id, "run-1"));
     expect(html).toContain("trace.zip");
     expect(html).toContain('data-caserun="cr-0"');
-    expect(extractTraceTargets(html)).toEqual([
-      { caseRunId: "cr-0", traceHref: expect.any(String) },
-    ]);
+    expect(extractTraceCaseRunIds(html)).toEqual(["cr-0"]);
     // Persisted HTML carries the hint too.
     const htmlPath = writeSuiteHtmlReport(db, root, "run-1");
     expect(htmlPath.endsWith("report.html")).toBe(true);
   });
 
-  it("extractTraceTargets ignores reports without traces", () => {
-    expect(extractTraceTargets("<p>no attrs</p>")).toEqual([]);
-    expect(extractTraceTargets('<p class="muted" data-caserun="cr-1">no trace attr</p>')).toEqual(
-      [],
-    );
+  it("extractTraceCaseRunIds ignores reports without traces", () => {
+    expect(extractTraceCaseRunIds("<p>no attrs</p>")).toEqual([]);
+    expect(
+      extractTraceCaseRunIds('<p class="muted" data-caserun="cr-1">no trace attr</p>'),
+    ).toEqual([]);
   });
 });
 

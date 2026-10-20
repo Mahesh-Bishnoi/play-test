@@ -60,7 +60,33 @@ const TESTDATA_CHANNELS = ["testdata:get", "testdata:set"] as const;
 
 const PROFILE_CHANNELS = ["profile:get", "profile:set"] as const;
 
-export function registerProjectHandlers(handle: IpcHandleFn, db: AppDatabase): void {
+/** Optional wiring the main process supplies to destructive handlers. */
+export interface CrudHandlerDeps {
+  /** True while a single-case or suite run owns the DB/window. */
+  isRunActive?: () => boolean;
+  /** Root used to remove a deleted case/suite's run folders. */
+  artifactsRoot?: string;
+}
+
+/** Thrown when a delete would race a live run writing its own rows. */
+export class RunActiveDeleteError extends Error {
+  constructor() {
+    super("a run is active — cancel it or let it finish before deleting");
+    this.name = "RunActiveDeleteError";
+  }
+}
+
+function assertNoActiveRun(deps: CrudHandlerDeps): void {
+  if (deps.isRunActive?.() === true) {
+    throw new RunActiveDeleteError();
+  }
+}
+
+export function registerProjectHandlers(
+  handle: IpcHandleFn,
+  db: AppDatabase,
+  deps: CrudHandlerDeps = {},
+): void {
   for (const channel of PROJECT_CHANNELS) {
     handle(channel, (rawPayload: unknown) => {
       const payload = payloadSchema(channel).parse(rawPayload) as Record<string, unknown>;
@@ -74,14 +100,23 @@ export function registerProjectHandlers(handle: IpcHandleFn, db: AppDatabase): v
         case "project:update":
           return updateProject(db, payload as Parameters<typeof updateProject>[1]);
         case "project:delete":
-          deleteProject(db, payload["id"] as string);
+          assertNoActiveRun(deps);
+          deleteProject(
+            db,
+            payload["id"] as string,
+            deps.artifactsRoot !== undefined ? { artifactsRoot: deps.artifactsRoot } : undefined,
+          );
           return null;
       }
     });
   }
 }
 
-export function registerSuiteHandlers(handle: IpcHandleFn, db: AppDatabase): void {
+export function registerSuiteHandlers(
+  handle: IpcHandleFn,
+  db: AppDatabase,
+  deps: CrudHandlerDeps = {},
+): void {
   for (const channel of SUITE_CHANNELS) {
     handle(channel, (rawPayload: unknown) => {
       const payload = payloadSchema(channel).parse(rawPayload) as Record<string, unknown>;
@@ -98,7 +133,12 @@ export function registerSuiteHandlers(handle: IpcHandleFn, db: AppDatabase): voi
         case "suite:update":
           return updateSuite(db, payload as Parameters<typeof updateSuite>[1]);
         case "suite:delete":
-          deleteSuite(db, payload["id"] as string);
+          assertNoActiveRun(deps);
+          deleteSuite(
+            db,
+            payload["id"] as string,
+            deps.artifactsRoot !== undefined ? { artifactsRoot: deps.artifactsRoot } : undefined,
+          );
           return null;
         case "suite:setCases":
           return setSuiteCases(db, payload["suiteId"] as string, payload["caseIds"] as string[]);
@@ -107,7 +147,11 @@ export function registerSuiteHandlers(handle: IpcHandleFn, db: AppDatabase): voi
   }
 }
 
-export function registerCaseHandlers(handle: IpcHandleFn, db: AppDatabase): void {
+export function registerCaseHandlers(
+  handle: IpcHandleFn,
+  db: AppDatabase,
+  deps: CrudHandlerDeps = {},
+): void {
   for (const channel of CASE_CHANNELS) {
     handle(channel, (rawPayload: unknown) => {
       const payload = payloadSchema(channel).parse(rawPayload) as Record<string, unknown>;
@@ -125,7 +169,12 @@ export function registerCaseHandlers(handle: IpcHandleFn, db: AppDatabase): void
         case "case:update":
           return updateCase(db, payload as Parameters<typeof updateCase>[1]);
         case "case:delete":
-          deleteCase(db, payload["id"] as string);
+          assertNoActiveRun(deps);
+          deleteCase(
+            db,
+            payload["id"] as string,
+            deps.artifactsRoot !== undefined ? { artifactsRoot: deps.artifactsRoot } : undefined,
+          );
           return null;
       }
     });
@@ -166,10 +215,14 @@ export function registerTestDataHandlers(handle: IpcHandleFn, db: AppDatabase): 
 }
 
 /** All CRUD channels (projects, suites, cases, steps, test-data, case profiles). */
-export function registerCrudHandlers(handle: IpcHandleFn, db: AppDatabase): void {
-  registerProjectHandlers(handle, db);
-  registerSuiteHandlers(handle, db);
-  registerCaseHandlers(handle, db);
+export function registerCrudHandlers(
+  handle: IpcHandleFn,
+  db: AppDatabase,
+  deps: CrudHandlerDeps = {},
+): void {
+  registerProjectHandlers(handle, db, deps);
+  registerSuiteHandlers(handle, db, deps);
+  registerCaseHandlers(handle, db, deps);
   registerStepHandlers(handle, db);
   registerTestDataHandlers(handle, db);
   registerProfileHandlers(handle, db);

@@ -29,14 +29,18 @@ export function readConflicts(dir: string): StoredConflict[] {
     if (!Array.isArray(list)) {
       return [];
     }
-    return list.filter(
-      (c): c is StoredConflict =>
-        typeof c === "object" &&
-        c !== null &&
-        ((c as StoredConflict).entity === "case" || (c as StoredConflict).entity === "suite") &&
-        typeof (c as StoredConflict).id === "string" &&
-        typeof (c as StoredConflict).theirs === "object",
-    );
+    return list.filter((c): c is StoredConflict => {
+      if (typeof c !== "object" || c === null) {
+        return false;
+      }
+      const entry = c as StoredConflict;
+      const knownEntity =
+        entry.entity === "case" || entry.entity === "suite" || entry.entity === "project";
+      const theirs = entry.theirs;
+      // `null` is a recorded remote deletion.
+      const validTheirs = theirs === null || typeof theirs === "object";
+      return knownEntity && typeof entry.id === "string" && validTheirs;
+    });
   } catch {
     return [];
   }

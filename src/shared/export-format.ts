@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { CaseProfileInputSchema } from "./schema.js";
+import { CaseProfileInputSchema, HttpUrlSchema } from "./schema.js";
 import { TestStepSchema } from "./step-types.js";
 
 // Versioned file interchange for project/suite/case import/export.
@@ -30,7 +30,7 @@ const testDataRecord = z.record(
 export const ExportCaseSchema = z.object({
   name: z.string().trim().min(1).max(200),
   description: z.string().max(5000).optional(),
-  url: z.string().trim().max(2000).optional(),
+  url: HttpUrlSchema.optional(),
   steps: z.array(ExportStepSchema).max(5000),
   testData: testDataRecord,
   // Case profile (M14, SPECS §2/§4) — the recorded environment travels with
@@ -59,7 +59,7 @@ export const ExportFileSchema = z.object({
   project: z
     .object({
       name: z.string().trim().min(1).max(200),
-      baseUrl: z.string().trim().max(2000).optional(),
+      baseUrl: HttpUrlSchema.optional(),
     })
     .optional(),
   /** Display hint only ("exported from X") — never used as an import target. */

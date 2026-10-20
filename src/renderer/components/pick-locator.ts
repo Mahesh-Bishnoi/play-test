@@ -38,6 +38,32 @@ function normalize(raw: string): string {
 }
 
 /**
+ * True when `;` appears outside a quoted string. A pasted statement separator
+ * must be rejected, but `getByText("Save; draft")` is a valid locator (review
+ * counted #7) — the old blanket `includes(";")` rejected it.
+ */
+function hasUnquotedSemicolon(text: string): boolean {
+  let quote: '"' | "'" | "`" | null = null;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quote !== null) {
+      if (ch === "\\") {
+        i += 1;
+      } else if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+    } else if (ch === ";") {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Validate pasted Pick-Locator output. Returns the normalized selector to
  * store (`action: click`, empty value — the caller picks the action) or an
  * edit-guidance error; the caller creates no step on error.
@@ -88,7 +114,7 @@ export function validatePastedLocator(raw: string): PickLocatorResult {
     if (segment === "") {
       return unsupported(display, "empty chain segment");
     }
-    if (segment.includes(";")) {
+    if (hasUnquotedSemicolon(segment)) {
       return unsupported(display, `"${segment}" is not a supported locator step`);
     }
     const name = /^([A-Za-z_$][\w$]*)/.exec(segment)?.[1];

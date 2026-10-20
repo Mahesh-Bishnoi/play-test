@@ -18,9 +18,9 @@
  *   2. Open the packaged PlayTest app → project "DummyTax portal" appears.
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 
@@ -194,9 +194,18 @@ function main() {
         sqlite.prepare(`DELETE FROM suite_test_cases WHERE case_id IN (${ph})`).run(...caseIds);
         sqlite.prepare(`DELETE FROM test_steps WHERE case_id IN (${ph})`).run(...caseIds);
         sqlite.prepare(`DELETE FROM test_data WHERE case_id IN (${ph})`).run(...caseIds);
+        sqlite.prepare(`DELETE FROM case_profiles WHERE case_id IN (${ph})`).run(...caseIds);
         sqlite.prepare(`DELETE FROM test_cases WHERE id IN (${ph})`).run(...caseIds);
       }
       sqlite.prepare("DELETE FROM projects WHERE id = ?").run(pid);
+      // Re-seeding mints new ids, so the old artifact tree would be orphaned
+      // (review counted #13). Contained to ~/PlayTestData by the relative check.
+      const artifactsRoot = join(homedir(), "PlayTestData");
+      const projectDir = join(artifactsRoot, pid);
+      const rel = relative(artifactsRoot, projectDir);
+      if (rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)) {
+        rmSync(projectDir, { recursive: true, force: true });
+      }
     }
     if (existing.length > 0) {
       console.log(`Removed ${existing.length} existing "${PROJECT_NAME}" project(s).`);
